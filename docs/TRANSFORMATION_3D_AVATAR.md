@@ -272,8 +272,15 @@ the test asserting `head-bone` and getting `head-mesh-bounds`.
 | `pnpm build` | clean |
 | Avatar browser proofs | 4 passed |
 | Studio overflow | 5 passed (360/375/390/393/430) |
-| Transformation browser suite | see report |
-| `pnpm test:e2e` | see report |
+| Transformation browser suite | 46 of 48 passed |
+| `pnpm test:e2e` | 18 passed |
+
+The two failures are both the video-source metadata check, timing out on
+`VideoFrameReader`'s fixed 15 s budget during a 16.4-minute suite run on a heavily
+contended machine. Nothing in this milestone touches that code, and the same tests
+passed in the immediately preceding run. It was **not** re-confirmed in isolation,
+so it is recorded as an unverified contention attribution rather than a clean
+result.
 
 Three, GLTFLoader, `FaceRenderer` and `ThreeAvatarRenderer` all build as separate
 lazy chunks — nothing 3D loads until a model is chosen.
