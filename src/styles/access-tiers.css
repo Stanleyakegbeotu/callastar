@@ -1,0 +1,216 @@
+/*
+ * The three access plans as a ladder, and the screens around them on a desktop.
+ *
+ * Regular, Premium and Gold Access are one product sold three ways, so they are
+ * drawn as one family with increasing weight rather than three unrelated cards:
+ * plain, then tinted and badged, then solid.
+ *
+ * "Gold Access" is a product name. The top tier is deliberately NOT gold — it
+ * is the deepest navy in the palette, which is how it reads as the most
+ * substantial of the three without inventing a colour the brand does not have.
+ */
+
+/* ------------------------------------------------------------- the ladder */
+
+.plan-card {
+  position: relative;
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Entry tier: the quietest card, and the baseline the others are read against. */
+.plan-card.plan-card-regular {
+  background: var(--white);
+}
+
+/* Middle tier: tinted and bordered, carrying the Most Popular badge. */
+.plan-card.plan-card-premium {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+  box-shadow: 0 0.75rem 2rem oklch(0.45 0.16 258 / 0.14);
+}
+
+/* Top tier: solid navy. Everything inside it inverts. */
+.plan-card.plan-card-gold {
+  border-color: transparent;
+  background:
+    radial-gradient(circle at 85% 0%, oklch(0.34 0.09 255 / 0.85) 0%, transparent 60%),
+    linear-gradient(165deg, var(--navy) 0%, oklch(0.15 0.04 258) 100%);
+  box-shadow: 0 0.75rem 2rem oklch(0.12 0.03 258 / 0.3);
+}
+
+.plan-card.plan-card-gold .plan-card-name,
+.plan-card.plan-card-gold .plan-card-price {
+  color: var(--white);
+}
+
+.plan-card.plan-card-gold .plan-card-price small,
+.plan-card.plan-card-gold .plan-features li {
+  color: oklch(1 0 0 / 0.75);
+}
+
+.plan-card.plan-card-gold .plan-check {
+  background: oklch(1 0 0 / 0.16);
+  color: var(--white);
+}
+
+.plan-card.plan-card-gold .plan-choose {
+  border-color: oklch(1 0 0 / 0.3);
+  background: var(--white);
+  color: var(--navy);
+}
+
+.plan-card.plan-card-gold .plan-choose:hover {
+  background: oklch(1 0 0 / 0.88);
+}
+
+/* ------------------------------------------- payment: a short, wide decision */
+
+@media (min-width: 48rem) {
+  /*
+   * Two options and a button. Kept shallow on purpose so the whole decision,
+   * Continue included, is on screen without scrolling for it.
+   */
+  .cs-sheet.access-panel-compact {
+    width: 100%;
+    max-width: 46rem;
+    padding-right: 2.25rem;
+    padding-left: 2.25rem;
+  }
+
+  .cs-sheet.access-panel-compact .pay-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.875rem;
+    align-items: stretch;
+  }
+
+  /* Stacked inside each option, so two fit side by side without crushing. */
+  .cs-sheet.access-panel-compact .pay-options .cs-option {
+    /* The radio below is positioned against this card. Without it the radio
+       escapes to the nearest positioned ancestor and lands on the page. */
+    position: relative;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .cs-sheet.access-panel-compact .pay-options .cs-radio {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+  }
+
+  .cs-sheet.access-panel-compact .sheet-actions {
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1rem;
+  }
+
+  .cs-sheet.access-panel-compact .sheet-actions .primary-button {
+    min-width: 14rem;
+  }
+}
+
+@media (min-width: 62rem) {
+  /* Room to lift the recommended card clear of the other two. */
+  .cs-sheet.access-panel-wide .plan-card-premium {
+    transform: translateY(-0.5rem);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-badge {
+    background: oklch(1 0 0 / 0.16);
+    color: var(--white);
+  }
+}
+
+/* ===================== complete subscription: two direct actions ========== */
+
+/*
+ * One tap per channel.
+ *
+ * These replaced a radiogroup and a Continue button. A payment decision with two
+ * outcomes does not need a selection step, and removing it removed the control
+ * that kept scrolling out of reach on a short phone.
+ */
+.pay-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.25rem 0 1rem;
+}
+
+.pay-action {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.875rem;
+  /* Comfortably past the 44px touch minimum. */
+  min-height: 4.25rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 0.875rem 1rem;
+  background: var(--white);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.pay-action:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.pay-action:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.pay-action:disabled {
+  background: var(--surface);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.pay-action-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.1rem;
+}
+
+.pay-action-text strong {
+  font-size: 1rem;
+  font-weight: 680;
+}
+
+.pay-action-text span {
+  color: var(--slate);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.pay-action:disabled .pay-action-text span {
+  color: var(--muted);
+}
+
+.pay-action-arrow {
+  flex: none;
+  color: var(--muted);
+}
+
+.pay-action:disabled .pay-action-arrow {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pay-action {
+    transition: none;
+  }
+}

@@ -1,0 +1,462 @@
+/*
+ * The subscription, customer care and notification screens.
+ *
+ * An extension of `admin.css` rather than a second design: the cards, tables,
+ * badges, buttons and form controls all come from there. Only the shapes those
+ * screens introduced — an inbox row, a plan card, a notification — are here.
+ */
+
+/* ------------------------------------------------------------ navigation */
+
+.admin-nav-badge {
+  min-width: 1.35rem;
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--blue);
+  color: var(--white);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.admin-nav-link.is-active .admin-nav-badge {
+  background: var(--blue-dark);
+}
+
+/* ------------------------------------------------------------ plans */
+
+.admin-plan-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+}
+
+.admin-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0;
+  color: var(--navy);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.admin-plan-price small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.admin-plan-features {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-plan-features li {
+  position: relative;
+  padding: 0.2rem 0 0.2rem 1.1rem;
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.admin-plan-features li::before {
+  position: absolute;
+  left: 0;
+  color: var(--blue);
+  content: "•";
+  font-weight: 700;
+}
+
+/* A read-only list of plans, on a profile and on a session. */
+.admin-plan-summary {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-plan-summary li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+}
+
+.admin-plan-summary li > span {
+  display: grid;
+}
+
+.admin-plan-summary strong {
+  color: var(--navy);
+  font-size: 0.85rem;
+}
+
+.admin-plan-summary small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.admin-plan-summary-price {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--navy);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.admin-plan-summary-price em {
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.admin-plan-summary-price em.is-muted {
+  background: color-mix(in oklab, var(--navy) 8%, white);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------ checkboxes */
+
+.admin-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--navy);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-checkbox input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--blue);
+}
+
+/* ------------------------------------------------------------ audio media */
+
+.admin-card-label-sub {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.admin-upload-audio {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-audio-preview {
+  width: 100%;
+  min-height: 2.5rem;
+}
+
+.admin-audio-placeholder {
+  display: grid;
+  min-height: 3.5rem;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------ inbox */
+
+.admin-inbox,
+.admin-notifications {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--white);
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-inbox-row:hover {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.admin-inbox-main {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.15rem;
+}
+
+.admin-inbox-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-inbox-head strong {
+  overflow: hidden;
+  color: var(--navy);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-inbox-unread {
+  min-width: 1.3rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--blue);
+  color: var(--white);
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.admin-inbox-subject {
+  overflow: hidden;
+  color: var(--slate);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-inbox-preview {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-inbox-preview em {
+  color: var(--slate);
+  font-style: normal;
+  font-weight: 650;
+}
+
+.admin-inbox-meta {
+  display: grid;
+  flex: none;
+  gap: 0.3rem;
+  justify-items: end;
+}
+
+.admin-inbox-meta small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ notifications */
+
+.admin-notification {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--white);
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-notification:hover {
+  border-color: var(--blue);
+}
+
+/* Unread is carried by the tint AND the dot, never by colour alone. */
+.admin-notification.is-unread {
+  background: var(--blue-tint);
+}
+
+.admin-notification-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.admin-notification-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.1rem;
+}
+
+.admin-notification-body strong {
+  color: var(--navy);
+  font-size: 0.88rem;
+}
+
+.admin-notification-body small {
+  color: var(--slate);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.admin-notification-body time {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.admin-notification-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  margin-top: 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--blue);
+}
+
+/* ------------------------------------------------------------ admin chat */
+
+/*
+ * The customer chat, embedded in the dashboard. It keeps its own height rather
+ * than filling the canvas, so the page header stays where an operator expects
+ * it and the thread scrolls inside the panel.
+ */
+.admin-chat-panel {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--white);
+}
+
+.admin-chat-panel .chat-shell {
+  height: min(32rem, 70vh);
+  border: 0;
+  border-radius: 0;
+}
+
+/* Inside the dashboard the back button duplicates the breadcrumb above it. */
+.admin-chat-panel .chat-back {
+  display: none;
+}
+
+/* ===================================== admin chat: compact and expanded ==== */
+
+/*
+ * The expand control in the chat header.
+ *
+ * Sits beside the header text rather than replacing anything, so the compact
+ * card keeps everything it had.
+ */
+.chat-expand {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  margin-left: auto;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.chat-expand:hover {
+  background: oklch(1 0 0 / 0.12);
+}
+
+/*
+ * Expanded: the conversation takes the device.
+ *
+ * Only the wrapper changes — the chat inside is the same React element, so its
+ * draft, reply target and scroll position come with it. Fixed rather than a
+ * portal for the same reason: moving the node to another parent would unmount
+ * and remount it, losing exactly the state this is meant to preserve.
+ */
+.admin-chat-panel.is-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  overflow: hidden;
+  height: 100dvh;
+  max-height: none;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  background: var(--white);
+}
+
+.admin-chat-panel.is-expanded > * {
+  min-height: 0;
+  flex: 1;
+}
+
+/*
+ * The page behind an expanded chat does not scroll.
+ *
+ * Without this the admin page keeps its own scroll under the overlay, so a
+ * flick that misses the message list moves the wrong thing.
+ */
+body:has(.admin-chat-panel.is-expanded) {
+  overflow: hidden;
+}
+
+/*
+ * Desktop keeps its CRM layout.
+ *
+ * Expanding is a phone and tablet affordance — a workspace with room for a
+ * split view gains nothing from covering it. The control is hidden rather than
+ * removed so the markup stays identical across breakpoints.
+ */
+@media (min-width: 64rem) {
+  .chat-expand {
+    display: none;
+  }
+
+  .admin-chat-panel.is-expanded {
+    position: static;
+    height: auto;
+    inset: auto;
+  }
+
+  body:has(.admin-chat-panel.is-expanded) {
+    overflow: visible;
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "figma-make-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "assets:transformation": "node scripts/copy-transformation-wasm.mjs && node scripts/fetch-transformation-models.mjs",
+    "predev": "pnpm assets:transformation",
+    "prebuild": "pnpm assets:transformation",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "format": "oxfmt",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:transformation:browser": "playwright test --config playwright.transformation.config.ts",
+    "test:transformation:benchmark": "playwright test --config playwright.transformation-hardware.config.ts"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "@supabase/supabase-js": "^2.117.2",
+    "@techstark/opencv-js": "5.0.0-release.1",
+    "comlink": "^4.4.2",
+    "i18next": "^26.4.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-i18next": "^17.0.15",
+    "react-router-dom": "^7.18.4",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.186.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.0.0",
+    "oxfmt": "^0.2.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.0.5",
+    "vitest": "^3.2.7",
+    "ws": "^8.22.0"
+  }
+}

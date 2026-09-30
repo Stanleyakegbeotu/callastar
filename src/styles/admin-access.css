@@ -1,0 +1,395 @@
+/*
+ * Host availability, and issuing access credentials.
+ *
+ * Both live on the operator side and both use the CRM's existing cards, badges
+ * and buttons; only the shapes these screens introduced are here.
+ */
+
+/* ------------------------------------------------------- availability list */
+
+.availability-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.availability-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  background: var(--white);
+}
+
+/* A host who is not taking calls reads back, not broken. */
+.availability-card.is-inactive {
+  background: var(--surface);
+}
+
+.availability-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+
+.availability-avatar {
+  position: relative;
+  flex: none;
+}
+
+.availability-dot {
+  position: absolute;
+  right: -0.1rem;
+  bottom: -0.1rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 0.15rem solid var(--white);
+  border-radius: var(--radius-pill);
+}
+
+.availability-dot-active {
+  background: var(--success);
+}
+
+.availability-dot-inactive {
+  background: var(--muted);
+}
+
+.availability-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.2rem;
+}
+
+.availability-name {
+  color: var(--navy);
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.availability-callid {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--slate);
+  font-size: 0.78rem;
+  /* A Call ID is one token. Wrapping it mid-code makes it unreadable and
+     unquotable, so it stays on one line and truncates if it must. */
+  white-space: nowrap;
+}
+
+.availability-callid code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--navy);
+  font-family: inherit;
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.availability-callid button {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  border-radius: 0.4rem;
+  background: none;
+  color: var(--blue);
+}
+
+.availability-callid button:hover {
+  background: var(--blue-soft);
+}
+
+/* Colour supports the label; the label carries the meaning. */
+.availability-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.availability-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.availability-status-active {
+  color: var(--success);
+}
+
+.availability-status-inactive {
+  color: var(--slate);
+}
+
+.availability-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* --- the switch --- */
+
+.availability-switch {
+  position: relative;
+  width: 3.25rem;
+  height: 1.85rem;
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0;
+  background: var(--line);
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.availability-switch.is-on {
+  background: var(--blue);
+}
+
+.availability-switch:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.availability-switch-knob {
+  position: absolute;
+  top: 0.22rem;
+  left: 0.22rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  box-shadow: 0 0.15rem 0.4rem oklch(0.2 0.03 255 / 0.25);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.availability-switch.is-on .availability-switch-knob {
+  transform: translateX(1.4rem);
+}
+
+.availability-actions {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 0.875rem;
+}
+
+.availability-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.5rem;
+  border-radius: 0.7rem;
+  background: var(--surface);
+  color: var(--blue-dark);
+  font-size: 0.85rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.availability-action:hover {
+  background: var(--blue-soft);
+}
+
+/* A count beside a filter, so the tabs say how many there are. */
+.admin-filter-count {
+  margin-left: 0.4rem;
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------ subscription access */
+
+.access-plan-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.access-plan {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  background: var(--white);
+}
+
+.access-plan.is-popular {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.access-plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.access-plan-text {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 12rem;
+  gap: 0.2rem;
+}
+
+.access-plan-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: var(--navy);
+  font-size: 1.15rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.access-plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--blue) 16%, white);
+  color: var(--blue-dark);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.access-plan-meta {
+  color: var(--slate);
+  font-size: 0.85rem;
+}
+
+/* The one moment the code exists. */
+.access-plan-generated {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--line);
+}
+
+.access-generated-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  color: var(--slate);
+  font-size: 0.8rem;
+}
+
+.access-generated-head small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.access-generated-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--white);
+}
+
+.access-generated-code code {
+  color: var(--navy);
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.access-generated-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.access-generated-actions span {
+  width: 1px;
+  height: 1.1rem;
+  background: var(--line);
+}
+
+.access-generated-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  color: var(--blue);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.admin-access-note {
+  margin-bottom: 0.5rem;
+}
+
+/* --- history --- */
+
+.access-history {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-history li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+
+.access-history-main {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.access-history-main strong {
+  color: var(--navy);
+  font-size: 0.88rem;
+}
+
+.access-history-main code {
+  color: var(--slate);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.access-history-main small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.access-history-side {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (min-width: 48rem) {
+  .availability-actions {
+    max-width: 24rem;
+  }
+}

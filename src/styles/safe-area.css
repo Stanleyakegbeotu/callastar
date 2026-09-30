@@ -1,0 +1,15 @@
+/**
+ * Safe-area insets as tokens.
+ *
+ * Every inset carries a 0px fallback: `env()` with no fallback makes the whole
+ * declaration invalid where it is unsupported, which would take rules like
+ * `max(1.25rem, env(safe-area-inset-top))` down with it. Nothing here hard-codes
+ * a device measurement, so notches, Dynamic Island and the home indicator are
+ * all handled by whatever the browser reports.
+ */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}

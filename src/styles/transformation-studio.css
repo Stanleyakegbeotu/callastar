@@ -1,0 +1,1095 @@
+/*
+ * Transformation Studio.
+ *
+ * Mobile-first: the camera preview owns the screen and everything else stacks
+ * under it, becoming a side panel only when there is genuinely room. The
+ * viewport is 9:16 on a phone, matching the portrait call this feature is
+ * eventually for.
+ *
+ * Nothing here uses a fixed viewport width or a negative margin. The admin
+ * shell already scrolls, and a Studio that introduces horizontal overflow would
+ * reintroduce the iOS shake the mobile corrective pass removed.
+ */
+
+.studio-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* Never wider than its column: the preview below is width-driven. */
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* ---- Step rail ---------------------------------------------------------- */
+
+.studio-steps {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0 0.25rem;
+  list-style: none;
+  /* The six steps do not fit a phone; scrolling them is better than shrinking
+     the labels to illegibility. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.studio-steps::-webkit-scrollbar {
+  display: none;
+}
+
+.studio-step {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  /*
+   * A containing block for the visually-hidden text inside.
+   *
+   * `.admin-visually-hidden` is absolutely positioned. Without a positioned
+   * ancestor here it resolved against a distant one, escaped this rail's
+   * `overflow-x: auto` clipping, and landed hundreds of pixels outside the
+   * viewport — taking `document.documentElement.scrollWidth` to 684px on a 360px
+   * phone. Chromium hid that behind `html { overflow-x: clip }`; older iOS Safari
+   * does not honour `clip`, which is why a real device dragged sideways while
+   * every automated check passed.
+   */
+  position: relative;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 999px;
+  background: var(--admin-surface, #fff);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.studio-step-index {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: rgb(148 163 184 / 0.2);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.studio-step.is-current {
+  border-color: rgb(37 99 235);
+  background: rgb(37 99 235 / 0.08);
+  font-weight: 600;
+}
+
+.studio-step.is-current .studio-step-index {
+  background: rgb(37 99 235);
+  color: #fff;
+}
+
+.studio-step.is-done .studio-step-index {
+  background: rgb(22 163 74);
+  color: #fff;
+}
+
+/* Unbuilt steps are legible, just plainly labelled as absent. Greying them out
+   to near-invisibility would read as a rendering fault rather than a statement. */
+.studio-step.is-unbuilt {
+  border-style: dashed;
+  color: rgb(100 116 139);
+}
+
+.studio-step-note {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+/* ---- Layout ------------------------------------------------------------- */
+
+.studio-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .studio-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+    align-items: start;
+  }
+}
+
+.studio-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* ---- Viewport ----------------------------------------------------------- */
+
+.studio-viewport {
+  position: relative;
+  width: 100%;
+  /* Portrait, because the call this feeds is portrait. Capped so a desktop
+     does not render a two-metre-tall preview. */
+  aspect-ratio: 9 / 16;
+  max-height: min(70vh, 40rem);
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: rgb(15 23 42);
+  isolation: isolate;
+}
+
+@media (min-width: 1024px) {
+  .studio-viewport {
+    aspect-ratio: 3 / 4;
+  }
+}
+
+.studio-video,
+.studio-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.studio-video {
+  object-fit: cover;
+  /* Matches `objectFit: "cover"` in the coordinate mapping. Changing one
+     without the other puts the overlay off the face. */
+}
+
+/* The mirror is applied to the element, and the overlay mapping mirrors its own
+   points in display space. The canvas is deliberately NOT flipped here: doing
+   both would cancel out on one axis and not the other. */
+.studio-viewport.is-mirrored .studio-video {
+  transform: scaleX(-1);
+}
+
+.studio-overlay {
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---- Placeholders ------------------------------------------------------- */
+
+.studio-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: rgb(226 232 240);
+  background: rgb(15 23 42 / 0.92);
+}
+
+.studio-placeholder h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.studio-placeholder p {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: rgb(148 163 184);
+}
+
+.studio-placeholder.is-error {
+  background: rgb(69 10 10 / 0.94);
+}
+
+.studio-placeholder.is-error p {
+  color: rgb(254 202 202);
+}
+
+.studio-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid rgb(148 163 184 / 0.4);
+  border-top-color: rgb(226 232 240);
+  border-radius: 50%;
+  animation: studio-spin 0.8s linear infinite;
+}
+
+@keyframes studio-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.studio-primary {
+  margin-top: 0.25rem;
+  padding: 0.7rem 1.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(37 99 235);
+  color: #fff;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---- Status ------------------------------------------------------------- */
+
+.studio-status {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  background: rgb(15 23 42 / 0.75);
+  backdrop-filter: blur(8px);
+  color: rgb(241 245 249);
+  font-size: 0.8125rem;
+}
+
+.studio-status span:last-child {
+  min-width: 0;
+  color: rgb(203 213 225);
+}
+
+.studio-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: rgb(148 163 184);
+}
+
+.studio-status.is-good .studio-status-dot {
+  background: rgb(34 197 94);
+}
+
+.studio-status.is-fair .studio-status-dot {
+  background: rgb(234 179 8);
+}
+
+.studio-status.is-poor .studio-status-dot {
+  background: rgb(239 68 68);
+}
+
+/* ---- Controls ----------------------------------------------------------- */
+
+.studio-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.studio-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 0.75rem;
+  background: var(--admin-surface, #fff);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.studio-control:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.studio-control.is-danger {
+  border-color: rgb(239 68 68 / 0.4);
+  color: rgb(185 28 28);
+}
+
+/* ---- Panel -------------------------------------------------------------- */
+
+.studio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.studio-card {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 0.9rem;
+  background: var(--admin-surface, #fff);
+}
+
+.studio-card h2 {
+  margin: 0 0 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(100 116 139);
+}
+
+.studio-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.studio-switch input {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+
+.studio-switch em {
+  font-style: normal;
+  color: rgb(100 116 139);
+  font-size: 0.8125rem;
+}
+
+.studio-modes {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.studio-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 0.6rem;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.studio-mode small {
+  color: rgb(100 116 139);
+  font-size: 0.75rem;
+}
+
+.studio-mode.is-active {
+  border-color: rgb(37 99 235);
+  background: rgb(37 99 235 / 0.06);
+}
+
+.studio-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.studio-disclosure h2 {
+  margin: 0;
+}
+
+.studio-disclosure .is-open {
+  transform: rotate(90deg);
+}
+
+.studio-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(100 116 139);
+}
+
+/* ---- Source ------------------------------------------------------------- */
+
+.studio-source-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--admin-border, rgb(226 232 240));
+}
+
+.studio-source-avatar {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: rgb(37 99 235 / 0.12);
+  color: rgb(37 99 235);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.studio-source-profile span span,
+.studio-source-profile > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.studio-source-profile strong {
+  font-size: 0.875rem;
+}
+
+.studio-source-profile small,
+.studio-source-file small {
+  font-size: 0.75rem;
+  color: rgb(100 116 139);
+}
+
+.studio-source-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.studio-source-existing {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.studio-source-existing h3,
+.studio-source-angles h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(100 116 139);
+}
+
+.studio-source-tips {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: rgb(100 116 139);
+}
+
+.studio-source-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0.75rem 0;
+  min-width: 0;
+}
+
+.studio-source-file strong {
+  font-size: 0.875rem;
+  /* A long filename must not widen the column and pan the page. */
+  overflow-wrap: anywhere;
+}
+
+.studio-consent {
+  align-items: flex-start;
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.studio-consent input {
+  margin-top: 0.15rem;
+}
+
+.studio-source-progress {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Used where there is genuinely nothing to count, rather than faking a figure. */
+.studio-progress.is-indeterminate > span {
+  width: 35%;
+  animation: studio-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes studio-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-progress.is-indeterminate > span {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.studio-source-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.studio-source-capabilities {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.studio-source-capabilities > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8125rem;
+}
+
+.studio-source-capabilities dt {
+  color: rgb(100 116 139);
+}
+
+.studio-source-capabilities dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.studio-source-capabilities dd[data-level="ready"] {
+  color: rgb(22 163 74);
+}
+
+.studio-source-capabilities dd[data-level="limited"] {
+  color: rgb(180 83 9);
+}
+
+.studio-source-capabilities dd[data-level="unavailable"] {
+  color: rgb(100 116 139);
+}
+
+.studio-source-angles ul {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  /* Its own contained strip: the angles scroll, the page does not. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.studio-source-angles ul::-webkit-scrollbar {
+  display: none;
+}
+
+.studio-source-angles li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  /* Same reason as `.studio-step`: it carries visually-hidden text and sits in a
+     horizontally scrolling strip. */
+  position: relative;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 999px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  color: rgb(100 116 139);
+}
+
+.studio-source-angles li[data-present="true"] {
+  border-color: rgb(22 163 74 / 0.4);
+  background: rgb(22 163 74 / 0.08);
+  color: rgb(21 128 61);
+}
+
+.studio-quality.is-unusable svg {
+  color: rgb(185 28 28);
+}
+
+/* ---- Source preview ----------------------------------------------------- */
+
+.studio-source-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  background: rgb(15 23 42);
+}
+
+/*
+ * Contained, never stretched.
+ *
+ * A portrait source filled to a wide desktop stage would be a vast centre
+ * crop — the same mistake the call surface avoids for remote video.
+ */
+.studio-source-preview img,
+.studio-source-preview video {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.studio-source-decoder {
+  position: absolute;
+  z-index: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.studio-viewport.is-face-render-preview .studio-overlay {
+  visibility: hidden;
+}
+
+.studio-face-renderer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: none;
+  width: 100%;
+  height: 100%;
+  background: rgb(15 23 42);
+}
+
+.studio-face-renderer.is-visible {
+  display: block;
+}
+
+.studio-render-preview-controls {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.studio-preview-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.studio-render-source-thumb {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.4rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 0.7rem;
+}
+
+.studio-render-source-thumb img,
+.studio-render-video-thumb {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  overflow: hidden;
+  border-radius: 0.45rem;
+  background: rgb(15 23 42);
+  color: #fff;
+  object-fit: cover;
+}
+
+.studio-render-source-thumb > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.studio-render-source-thumb small {
+  color: rgb(100 116 139);
+  font-size: 0.6875rem;
+}
+
+.studio-render-source-thumb strong {
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.studio-preview-modes button {
+  min-height: 2.75rem;
+  border: 1px solid var(--admin-border, rgb(226 232 240));
+  border-radius: 0.7rem;
+  background: transparent;
+}
+
+.studio-preview-modes button[aria-pressed="true"] {
+  border-color: rgb(37 99 235);
+  background: rgb(37 99 235 / 0.08);
+  color: rgb(29 78 216);
+  font-weight: 600;
+}
+
+.studio-preview-modes button:disabled {
+  opacity: 0.5;
+}
+
+.studio-render-options {
+  position: absolute;
+  z-index: 4;
+  top: 0.75rem;
+  left: 0.75rem;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  background: rgb(15 23 42 / 0.78);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.studio-render-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.studio-render-options input {
+  margin: 0;
+}
+
+.studio-render-diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  font-size: 0.75rem;
+  color: rgb(71 85 105);
+}
+
+.studio-render-diagnostics details {
+  flex-basis: 100%;
+}
+
+.studio-render-diagnostics code {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.6875rem;
+}
+
+/* ---- Calibration -------------------------------------------------------- */
+
+/*
+ * The framing guide.
+ *
+ * One soft oval where a head belongs and one line where shoulders do. No
+ * scanning grid, no reticle, no corner brackets: somebody is being asked to sit
+ * still for a second, and a biometric-scanner aesthetic would make that feel
+ * like something else entirely.
+ */
+.studio-calibration-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.studio-guide-face {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: 46%;
+  aspect-ratio: 3 / 4;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid rgb(255 255 255 / 0.35);
+  border-radius: 50%;
+}
+
+.studio-guide-shoulders {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 68%;
+  border-top: 1.5px solid rgb(255 255 255 / 0.22);
+  border-radius: 999px;
+}
+
+.studio-calibration-message {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgb(15 23 42 / 0.72);
+  backdrop-filter: blur(8px);
+  text-align: center;
+  color: rgb(241 245 249);
+}
+
+.studio-calibration-message strong {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.studio-calibration-message span {
+  font-size: 0.75rem;
+  color: rgb(203 213 225);
+}
+
+.studio-primary-inline {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  margin-top: 0.5rem;
+}
+
+.studio-progress {
+  height: 0.35rem;
+  margin: 0.6rem 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(148 163 184 / 0.25);
+}
+
+.studio-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(37 99 235);
+  transition: width 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-progress > span {
+    transition: none;
+  }
+}
+
+.studio-calibration-failed,
+.studio-calibration-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.studio-calibration-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+}
+
+.studio-calibration-reason strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.studio-calibration-reason span {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(100 116 139);
+}
+
+.studio-quality {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.studio-quality span {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: rgb(100 116 139);
+}
+
+.studio-quality.is-excellent svg {
+  color: rgb(22 163 74);
+}
+
+.studio-quality.is-good svg {
+  color: rgb(37 99 235);
+}
+
+/* Limited is stated plainly rather than coloured as a fault: it is a usable
+   baseline that drives head motion and nothing else. */
+.studio-quality.is-limited svg {
+  color: rgb(217 119 6);
+}
+
+.studio-warnings {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(100 116 139);
+}
+
+.studio-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  background: rgb(234 179 8 / 0.12);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(133 77 14);
+}
+
+.studio-alert svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+
+/* ---- Diagnostics -------------------------------------------------------- */
+
+.studio-diagnostics {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.studio-diagnostics h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(100 116 139);
+}
+
+.studio-diagnostics dl {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+.studio-diagnostics dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+}
+
+.studio-diagnostics dt {
+  color: rgb(100 116 139);
+}
+
+.studio-diagnostics dd {
+  margin: 0;
+  /* Figures line up between refreshes instead of jittering. */
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.studio-diag-plain {
+  font-variant-numeric: normal;
+}
+
+.studio-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgb(148 163 184 / 0.12);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(71 85 105);
+}
+
+.studio-privacy svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+.studio-expression-diagnostics {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  font-size: 0.8rem;
+}
+
+.studio-expression-diagnostics h3 { font-size: 0.95rem; font-weight: 700; }
+.studio-expression-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) repeat(3, auto);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+.studio-expression-row span:first-child { overflow-wrap: anywhere; }
+.studio-expression-manual { display: grid; gap: 0.5rem; margin-top: 0.8rem; }
+.studio-expression-manual label { display: grid; gap: 0.2rem; }
+.studio-expression-manual input[type="range"] { width: 100%; }
+
+/* ---- Expression trace --------------------------------------------------- */
+
+/*
+ * Seven columns of small figures, read on a phone during a device test.
+ *
+ * Scrolls inside its own strip rather than widening the page: this table is a
+ * development instrument, and it must not be the thing that reintroduces the
+ * horizontal pan the mobile pass removed.
+ */
+.studio-expression-diagnostics {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.studio-expression-diagnostics::-webkit-scrollbar {
+  display: none;
+}
+
+.studio-expression-row {
+  display: grid;
+  grid-template-columns: 8.5rem repeat(5, 3rem) 3.2rem auto;
+  gap: 0.3rem;
+  align-items: baseline;
+  min-width: max-content;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.studio-expression-row > span:first-child {
+  font-variant-numeric: normal;
+}
+
+.studio-expression-head {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: rgb(100 116 139);
+}

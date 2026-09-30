@@ -1,0 +1,1553 @@
+/**
+ * CallaStar admin — a CRM workspace, not a marketing surface.
+ *
+ * Restrained on purpose: white and a very light cool grey, CallaStar blue for
+ * action, navy for text, and colour used only to carry meaning (green active,
+ * amber needs attention, red destructive). No photography, no gradients, no
+ * glass. Spacing follows an 8 / 12 / 16 / 24 / 32px rhythm.
+ *
+ * It reuses the palette tokens from tokens.css so the two halves of the product
+ * cannot drift apart.
+ */
+
+.admin-app {
+  display: grid;
+  grid-template-columns: 15.5rem minmax(0, 1fr);
+  min-height: 100dvh;
+  background: var(--surface);
+  color: var(--navy);
+}
+
+/* ---------------------------------------------------------------- sidebar */
+
+.admin-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100dvh;
+  flex-direction: column;
+  gap: 1.5rem;
+  border-right: 1px solid var(--line);
+  padding: 1.5rem 1rem max(1rem, var(--safe-bottom));
+  background: var(--white);
+  overflow-y: auto;
+}
+
+.admin-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 730;
+  letter-spacing: -0.02em;
+}
+
+.admin-brand small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-nav {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-nav-link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  color: var(--slate);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.admin-nav-link:hover {
+  background: var(--surface);
+  color: var(--navy);
+}
+
+.admin-nav-link.is-active {
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+}
+
+.admin-sidebar-footer {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: auto;
+}
+
+.admin-nav-secondary {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 550;
+}
+
+.admin-mode-note {
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--surface);
+  color: var(--slate);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.admin-mode-note strong {
+  display: block;
+  color: var(--navy);
+  font-size: 0.72rem;
+}
+
+/* ------------------------------------------------------------ top bar */
+
+.admin-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  min-height: 4.25rem;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: max(0.75rem, var(--safe-top)) 1rem 0.75rem;
+  background: var(--white);
+  font-size: 0.95rem;
+}
+
+.admin-chip {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 0.25rem 0.6rem;
+  background: var(--surface);
+  color: var(--slate);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.admin-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: 0;
+  background: oklch(0.2 0.03 255 / 0.35);
+}
+
+/* ------------------------------------------------------------- canvas */
+
+.admin-canvas {
+  width: 100%;
+  /* A grid item defaults to min-width:auto, which would refuse to shrink below
+     a long Call ID and push the whole page wider than the viewport. */
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.admin-page-content {
+  width: min(100%, 90rem);
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 3vw, 2.5rem) 3rem;
+}
+
+.admin-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.admin-page-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.admin-page-header p {
+  margin: 0.35rem 0 0;
+  color: var(--slate);
+  font-size: 0.875rem;
+}
+
+.admin-page-eyebrow {
+  margin-bottom: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.admin-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* -------------------------------------------------------------- cards */
+
+.admin-card {
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  background: var(--white);
+}
+
+.admin-card-label {
+  margin: 0 0 0.75rem;
+  color: var(--navy);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.admin-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-card-heading .admin-card-label {
+  margin: 0;
+}
+
+.admin-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-hint {
+  margin: 0.35rem 0 0;
+  color: var(--slate);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.admin-note {
+  margin: 1rem 0 0;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 0.78rem;
+}
+
+.admin-warning {
+  margin: 0.75rem 0 0;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 0.78rem;
+}
+
+.admin-error-banner {
+  margin: 0 0 1rem;
+  border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--line));
+  border-radius: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  background: color-mix(in oklab, var(--danger) 8%, var(--white));
+  color: var(--danger-dark);
+  font-size: 0.82rem;
+}
+
+.admin-link {
+  color: var(--blue-dark);
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.admin-link:hover {
+  text-decoration: underline;
+}
+
+/* -------------------------------------------------------------- stats */
+
+.admin-stat-grid {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+.admin-overview-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-stat {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.1rem 1.25rem;
+  background: var(--white);
+}
+
+.admin-stat-warning {
+  border-color: color-mix(in oklab, var(--warning) 45%, var(--line));
+  background: var(--warning-soft);
+}
+
+.admin-stat-label {
+  margin: 0;
+  color: var(--slate);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.admin-stat-value {
+  margin: 0.35rem 0 0;
+  font-size: 1.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+
+.admin-stat-hint {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+/* ------------------------------------------------------------- tables */
+
+.admin-table-wrap {
+  /* Containing block for the visually hidden header labels: absolutely
+     positioned text would otherwise escape this scroller and widen the page. */
+  position: relative;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.admin-table th {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--slate);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--surface);
+}
+
+.admin-profile-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-profile-cell small,
+.admin-stacked small {
+  display: block;
+  max-width: 18rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-callid-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.admin-callid-inline code,
+.admin-recent-name code {
+  color: var(--navy);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.admin-row-actions {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- badges */
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 0.22rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.admin-badge-active,
+.admin-badge-ready {
+  background: color-mix(in oklab, var(--success) 14%, var(--white));
+  color: color-mix(in oklab, var(--success) 70%, var(--navy));
+}
+
+.admin-badge-inactive,
+.admin-badge-cancelled {
+  background: var(--surface);
+  color: var(--slate);
+}
+
+.admin-badge-incomplete,
+.admin-badge-missing,
+.admin-badge-connecting,
+.admin-badge-ringing {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.admin-badge-failed {
+  background: color-mix(in oklab, var(--danger) 10%, var(--white));
+  color: var(--danger-dark);
+}
+
+/* Session badges: one tone per lifecycle state, label always present. */
+.admin-badge-progress {
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+}
+
+.admin-badge-live {
+  background: color-mix(in oklab, var(--success) 14%, var(--white));
+  color: color-mix(in oklab, var(--success) 70%, var(--navy));
+}
+
+.admin-badge-neutral {
+  background: var(--surface);
+  color: var(--slate);
+}
+
+.admin-badge-warning {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.admin-badge-danger {
+  background: color-mix(in oklab, var(--danger) 10%, var(--white));
+  color: var(--danger-dark);
+}
+
+.admin-badge-type {
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--slate);
+}
+
+/* ------------------------------------------------------------ sessions */
+
+.admin-toolbar-secondary {
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+.admin-select-group {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.admin-select-group label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-select {
+  min-width: 9.5rem;
+  padding-right: 0.5rem;
+}
+
+.admin-filter-note {
+  margin: 0 0 1rem;
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.admin-link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.admin-session-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-session-link:hover strong {
+  color: var(--blue-dark);
+}
+
+.admin-session-table.is-compact td,
+.admin-session-table.is-compact th {
+  padding-block: 0.6rem;
+}
+
+/* --------------------------------------------------------- timeline */
+
+.admin-timeline {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-timeline li {
+  display: grid;
+  align-items: start;
+  gap: 0.85rem;
+  grid-template-columns: 5.5rem 1fr;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-timeline li:last-child {
+  border-bottom: 0;
+}
+
+.admin-timeline-time {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.admin-timeline-body {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.admin-timeline-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.admin-timeline-detail {
+  color: var(--slate);
+  font-size: 0.75rem;
+}
+
+.admin-record-head-inline {
+  gap: 0.75rem;
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+
+.admin-record-head-inline strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+/* ------------------------------------------------------------ buttons */
+
+.admin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  padding: 0 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.admin-button-primary {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.admin-button-primary:hover {
+  background: var(--blue-dark);
+}
+
+.admin-button-secondary {
+  border-color: var(--line);
+  background: var(--white);
+  color: var(--navy);
+}
+
+.admin-button-secondary:hover {
+  border-color: color-mix(in oklab, var(--blue) 35%, var(--line));
+  background: var(--surface);
+}
+
+.admin-button-ghost {
+  background: transparent;
+  color: var(--slate);
+}
+
+.admin-button-ghost:hover {
+  background: var(--surface);
+  color: var(--navy);
+}
+
+.admin-button-danger {
+  background: var(--danger);
+  color: var(--white);
+}
+
+.admin-button-danger:hover {
+  background: var(--danger-dark);
+}
+
+.admin-button:disabled,
+.admin-button.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.admin-icon-button {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--white);
+  color: var(--navy);
+  cursor: pointer;
+}
+
+.admin-icon-button-sm {
+  width: auto;
+  height: 1.6rem;
+  padding: 0 0.45rem;
+  color: var(--slate);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.admin-icon-button-sm:hover {
+  color: var(--blue-dark);
+}
+
+/* ------------------------------------------------------------- forms */
+
+.admin-form {
+  display: grid;
+  gap: 0;
+}
+
+.admin-field {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1rem;
+}
+
+.admin-field label,
+.admin-fieldset legend {
+  color: var(--navy);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.admin-input {
+  width: 100%;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  padding: 0 0.85rem;
+  background: var(--white);
+  color: var(--navy);
+  font: inherit;
+  font-size: 0.875rem;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.admin-textarea {
+  min-height: 5.5rem;
+  padding: 0.65rem 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.admin-input:focus {
+  border-color: var(--blue);
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--blue-soft);
+}
+
+.admin-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.admin-field-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.admin-fieldset {
+  border: 0;
+  margin-inline: 0;
+  padding: 0;
+}
+
+.admin-radio-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.admin-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--white);
+  color: var(--navy);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-radio.is-selected {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+}
+
+.admin-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+/* ------------------------------------------------------------ uploads */
+
+.admin-upload {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.admin-upload-video {
+  flex-direction: column;
+}
+
+.admin-upload-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-upload-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Visually hidden, but still the real control the label activates. */
+.admin-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.admin-video-preview {
+  width: 100%;
+  max-height: 22rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--navy);
+}
+
+.admin-video-placeholder {
+  display: grid;
+  width: 100%;
+  min-height: 9rem;
+  box-sizing: border-box;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.admin-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+
+.admin-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.admin-avatar-sm {
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 0.72rem;
+}
+
+.admin-avatar-md {
+  width: 3rem;
+  height: 3rem;
+  font-size: 0.85rem;
+}
+
+.admin-avatar-lg {
+  width: 4.5rem;
+  height: 4.5rem;
+  font-size: 1.2rem;
+}
+
+/* ------------------------------------------------------------ record */
+
+.admin-record-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.admin-record-head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.1rem;
+}
+
+.admin-record-head p {
+  margin: 0 0 0.5rem;
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.admin-record-grid {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+}
+
+.admin-record-main,
+.admin-record-side {
+  min-width: 0;
+}
+
+.admin-danger-zone {
+  border-color: color-mix(in oklab, var(--danger) 25%, var(--line));
+}
+
+.admin-meta-grid {
+  display: grid;
+  gap: 0.75rem 1.25rem;
+  margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+}
+
+.admin-meta-grid dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-meta-grid dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------ call id */
+
+.admin-callid.is-highlight {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 0.2rem var(--blue-soft);
+}
+
+.admin-callid-code {
+  margin: 0;
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.admin-callid-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* --------------------------------------------------------- checklist */
+
+.admin-checklist {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.admin-checklist li.is-done {
+  color: var(--navy);
+}
+
+.admin-check-mark {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.admin-checklist li.is-done .admin-check-mark {
+  background: color-mix(in oklab, var(--success) 16%, var(--white));
+  color: color-mix(in oklab, var(--success) 70%, var(--navy));
+}
+
+.admin-check-empty {
+  width: 0.45rem;
+  height: 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.admin-check-label {
+  display: block;
+  font-weight: 600;
+}
+
+.admin-check-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+/* ------------------------------------------------------------- lists */
+
+.admin-recent-list,
+.admin-health-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-recent-item {
+  display: grid;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.65rem;
+  padding: 0.6rem;
+  color: inherit;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  text-decoration: none;
+}
+
+.admin-recent-item:hover {
+  background: var(--surface);
+}
+
+.admin-recent-name strong {
+  display: block;
+  font-size: 0.875rem;
+}
+
+.admin-recent-badges {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.admin-recent-date {
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.admin-health-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.admin-health-list li:last-child {
+  border-bottom: 0;
+}
+
+.admin-health-list strong {
+  color: var(--navy);
+}
+
+/* ------------------------------------------------------- empty states */
+
+.admin-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+}
+
+.admin-empty h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.admin-empty p {
+  max-width: 28rem;
+  margin: 0.5rem auto 0;
+  color: var(--slate);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.admin-empty-action {
+  margin-top: 1.25rem;
+}
+
+.admin-inline-empty {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  background: var(--surface);
+}
+
+.admin-inline-empty p {
+  margin: 0;
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+/* ------------------------------------------------------------ dialog */
+
+.admin-dialog {
+  width: min(100% - 2rem, 34rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--white);
+  color: var(--navy);
+  box-shadow: var(--shadow);
+}
+
+.admin-dialog::backdrop {
+  background: oklch(0.2 0.03 255 / 0.45);
+}
+
+.admin-dialog-body {
+  padding: 1.25rem;
+}
+
+.admin-dialog-body h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.admin-dialog-content p {
+  margin: 0 0 0.5rem;
+  color: var(--slate);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.admin-dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
+/* ------------------------------------------------------------ toasts */
+
+.admin-toasts {
+  position: fixed;
+  right: max(1rem, var(--safe-right));
+  bottom: max(1rem, var(--safe-bottom));
+  z-index: 60;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+  pointer-events: none;
+}
+
+.admin-toast {
+  border-radius: 0.65rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--navy);
+  color: var(--white);
+  font-size: 0.82rem;
+  font-weight: 600;
+  box-shadow: 0 0.75rem 2rem oklch(0.2 0.03 255 / 0.25);
+}
+
+.admin-toast-error {
+  background: var(--danger-dark);
+}
+
+/* ----------------------------------------------------------- toolbar */
+
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-search {
+  flex: 1 1 16rem;
+  max-width: 24rem;
+}
+
+.admin-filters {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.admin-filter {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 0.4rem 0.75rem;
+  background: var(--white);
+  color: var(--slate);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-filter.is-active {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+}
+
+.admin-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- responsive */
+
+@media (max-width: 64rem) {
+  .admin-record-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 60rem) {
+  /*
+   * The shell names its rows.
+   *
+   * `.admin-app` is a grid with `min-height: 100dvh`, and a grid stretches its
+   * implicit auto rows to fill that height. With the sidebar out of the column
+   * flow the bar and the canvas become two implicit rows sharing the viewport,
+   * which silently inflated the top bar to nearly 240px on any page with little
+   * content — an empty inbox, a short settings form.
+   *
+   * Naming them pins the bar to its own height and gives the rest to the canvas.
+   * This belongs here, on the shell, and not on a page header: a page header
+   * cannot fix how its grandparent distributes height.
+   */
+  .admin-app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .admin-topbar { min-height: auto; }
+
+  /* The sidebar becomes a drawer rather than a squeezed desktop column. */
+  .admin-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: 16rem;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+
+  .admin-sidebar.is-open {
+    transform: translateX(0);
+    box-shadow: 0 0 3rem oklch(0.2 0.03 255 / 0.25);
+  }
+
+  .admin-page-content { padding-top: 1.25rem; }
+
+  /* Stacked on a narrow screen, so the title and its actions each get a row. */
+  .admin-page-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+
+  /* Actions sit on their own row rather than wrapping unpredictably, so the
+     header block has the same rhythm whether a page has them or not. */
+  .admin-page-actions {
+    width: 100%;
+  }
+
+  .admin-page-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+@media (max-width: 48rem) {
+  /* Tables restack as cards: one DOM, each cell labelled by its header. */
+  .admin-table thead {
+    display: none;
+  }
+
+  .admin-table,
+  .admin-table tbody,
+  .admin-table tr,
+  .admin-table td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .admin-table tr {
+    border-bottom: 1px solid var(--line);
+    padding: 0.5rem 0;
+  }
+
+  .admin-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .admin-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    border-bottom: 0;
+    padding: 0.4rem 1rem;
+  }
+
+  /* A Call ID has no spaces to break at, so let it wrap anywhere. */
+  .admin-callid-inline code {
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .admin-table td:empty {
+    display: none;
+  }
+
+  .admin-row-actions {
+    justify-content: flex-end;
+  }
+
+  .admin-recent-item {
+    gap: 0.5rem;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-recent-badges,
+  .admin-recent-date {
+    grid-column: 2;
+  }
+
+  .admin-upload-avatar {
+    flex-direction: column;
+  }
+
+  .admin-toolbar-secondary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .admin-timeline li {
+    gap: 0.25rem;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .admin-form-actions .admin-button {
+    width: 100%;
+  }
+}
+
+@media (min-width: 64rem) {
+  .admin-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+  .admin-overview-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.75fr);
+    align-items: start;
+  }
+
+  .admin-overview-grid > .admin-card { margin-bottom: 0; }
+  .admin-overview-grid > .admin-card:nth-child(3) { grid-column: 1 / -1; }
+}
+
+/* ------------------------------------------------- desktop form columns */
+
+/*
+ * Fields that naturally pair sit side by side on a wide screen.
+ *
+ * A single column of inputs stretched across 1400px is as wrong as a form
+ * squeezed to phone width: a name field a metre long is harder to read, not
+ * easier. So the form gets a sensible maximum, and short fields pair up.
+ *
+ * `.admin-field-wide` opts a field back out — a bio, a description or a media
+ * control wants the full row whatever else is happening around it.
+ */
+@media (min-width: 64rem) {
+  .admin-form {
+    max-width: 62rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1.5rem;
+  }
+
+  .admin-form > .admin-field-wide,
+  .admin-form > .admin-form-actions,
+  .admin-form > .admin-form-note,
+  .admin-form > .admin-upload,
+  .admin-form > fieldset,
+  .admin-form > h2,
+  .admin-form > p {
+    grid-column: 1 / -1;
+  }
+
+  /* A textarea is always a full row: two of them side by side read as a wall. */
+  .admin-form > .admin-field:has(textarea) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The customer-care inbox is a list of rows, so it uses the width directly
+   rather than being centred in it. */
+@media (min-width: 64rem) {
+  .admin-inbox {
+    max-width: none;
+  }
+}
+
+/* Realtime presence on a profile card, beneath the Active status it is
+   deliberately NOT the same as. */
+.availability-presence {
+  display: inline-flex;
+  margin-top: 0.25rem;
+}
+
+/* ------------------------------------------------- iOS form stability */
+
+/*
+ * 16px minimum on every editable control, on touch devices.
+ *
+ * Mobile Safari zooms the page when a control smaller than 16px takes focus,
+ * and the zoomed page is wider than the viewport — which is what produced the
+ * sideways shake and the unreachable fields on the profile form. The public
+ * forms already got this right (see `.cs-input`); the admin ones did not.
+ *
+ * Scoped to a coarse pointer so the desktop CRM keeps its denser 14px. Zoom
+ * itself is never disabled — no `user-scalable=no` — because the fix is to stop
+ * provoking the zoom, not to take it away from people who need it.
+ */
+@media (pointer: coarse) {
+  .admin-input,
+  .admin-textarea,
+  .admin-select,
+  .admin-search input,
+  .admin-form input,
+  .admin-form textarea,
+  .admin-form select {
+    font-size: 1rem;
+  }
+
+  /* A control with a fixed minimum cannot shrink to fit a narrow column, so it
+     pushes its parent wider than the screen. On a phone it takes the row. */
+  .admin-select {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/*
+ * Nothing in the workspace may be wider than its column.
+ *
+ * A flex or grid child defaults to `min-width: auto`, which refuses to shrink
+ * below its content — one long filename or Call ID is then enough to push the
+ * whole page sideways. These are the containers that hold user-supplied text.
+ */
+.admin-card,
+.admin-field,
+.admin-form-actions,
+.admin-upload,
+.admin-upload-body,
+.admin-meta-grid,
+.admin-meta-grid > div {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Filenames and Call IDs wrap rather than extend the layout. */
+.admin-upload-body .admin-hint,
+.admin-meta-grid dd {
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------ mobile form actions stay put */
+
+/*
+ * Save is always within reach on a phone.
+ *
+ * The profile form is long — basic details, live calling, media, access — and
+ * the actions sat at the very bottom of it. Filling in a field near the top and
+ * then having to scroll the whole form to save is the kind of thing that only
+ * shows up on a real device. They are pinned to the bottom of the viewport
+ * instead, above the home indicator, with the form scrolling underneath.
+ */
+@media (max-width: 47.99rem) {
+  .admin-form-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    justify-content: stretch;
+    margin-top: 1rem;
+    /* Full bleed to the canvas edges, so it reads as a bar rather than a card. */
+    margin-inline: calc(-1 * clamp(1rem, 3vw, 2.5rem));
+    padding: 0.75rem clamp(1rem, 3vw, 2.5rem) calc(var(--safe-bottom) + 0.75rem);
+    border-top: 1px solid var(--line);
+    background: var(--white);
+  }
+
+  .admin-form-actions .admin-button {
+    flex: 1 1 0;
+    justify-content: center;
+    /* Comfortably past the 44px touch minimum. */
+    min-height: 2.875rem;
+  }
+
+  /*
+   * Single column, whatever the desktop rules say.
+   *
+   * The two-column grid is a desktop affordance; on a phone a paired row halves
+   * an already narrow field and is the first thing to overflow.
+   */
+  .admin-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 100%;
+  }
+
+  .admin-form > * {
+    grid-column: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
+}

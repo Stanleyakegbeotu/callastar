@@ -1,0 +1,1500 @@
+/*
+ * Real-time calling surfaces.
+ *
+ * Two visual registers live here. The public-facing gates and outcomes are
+ * CallaStar's light surface — white, the cool grey, navy type. The call itself is
+ * dark and edge to edge, because a live call should not look like a web page: it
+ * takes the device, the media is the background, and the controls float on it.
+ *
+ * Every call surface is PORTRAIT. There is no landscape variant to fall back to,
+ * which is why the orientation overlay covers the canvas rather than relayouting
+ * it — see `.call-overlay-rotate`.
+ */
+
+/* ============================================================ light surfaces */
+
+.device-gate-page,
+.permission-page,
+.outcome-page {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: max(1.5rem, var(--safe-top)) 1rem max(1.5rem, var(--safe-bottom));
+  background: var(--white);
+}
+
+.device-gate,
+.permission-pre,
+.call-outcome {
+  display: flex;
+  width: min(100%, 26rem);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.75rem;
+}
+
+.device-gate-brand,
+.permission-brand,
+.call-outcome-brand {
+  margin-bottom: 1.25rem;
+}
+
+.device-gate-art,
+.permission-art {
+  display: grid;
+  width: 5rem;
+  height: 5rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  margin-bottom: 0.5rem;
+  background: var(--blue-tint);
+  color: var(--blue);
+}
+
+.device-gate-title,
+.permission-title,
+.call-outcome-title {
+  margin: 0;
+}
+
+.device-gate-secondary {
+  margin: 0.25rem 0 0;
+  color: var(--slate);
+  font-size: 0.92rem;
+}
+
+.device-gate-actions,
+.permission-actions,
+.call-outcome-actions {
+  display: grid;
+  width: 100%;
+  gap: 0.625rem;
+  margin-top: 1.5rem;
+}
+
+.device-gate-helper {
+  margin: 1rem 0 0;
+  min-height: 1.25rem;
+  color: var(--slate);
+  font-size: 0.85rem;
+}
+
+.device-gate-home {
+  border: 0;
+  margin-top: 0.5rem;
+  background: none;
+  color: var(--slate);
+  font: inherit;
+  font-size: 0.88rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------- call outcome */
+
+.call-outcome-icon {
+  display: grid;
+  width: 4rem;
+  height: 4rem;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  margin-bottom: 0.25rem;
+}
+
+/* Tone carries meaning, never colour alone: each state also has its own icon
+   and its own sentence. */
+.call-outcome-icon.is-neutral {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+.call-outcome-icon.is-warning {
+  background: oklch(0.96 0.06 85);
+  color: oklch(0.52 0.13 70);
+}
+.call-outcome-icon.is-danger {
+  background: oklch(0.95 0.04 27);
+  color: var(--danger-dark);
+}
+
+.call-outcome-host {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  margin-top: 1.25rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface);
+  text-align: left;
+}
+
+.call-outcome-avatar {
+  display: grid;
+  overflow: hidden;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.call-outcome-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.call-outcome-host-text {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.9rem;
+}
+
+.call-outcome-host-text span {
+  color: var(--slate);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================ call type option refinements */
+
+.cs-option-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* States where a call type works, at the moment of choosing — so the
+   restriction is never a surprise after a form has been filled in. */
+.cs-option-badge {
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ================================================== dark call surfaces */
+
+.live-ring,
+.live-call,
+.incoming-call {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  height: 100dvh;
+  flex-direction: column;
+  background: var(--navy);
+  color: var(--white);
+}
+
+/* ------------------------------------------------------------- ringing */
+
+.live-ring-backdrop {
+  position: absolute;
+  inset: -10%;
+  background-position: center;
+  background-size: cover;
+  /* The person being called is present but not legible: this is a waiting
+     screen, not a photograph. */
+  filter: blur(2.5rem) saturate(1.1);
+  opacity: 0.45;
+}
+
+.live-ring-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, oklch(0.16 0.05 260 / 0.7), oklch(0.09 0.04 260 / 0.95));
+}
+
+.live-ring-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: max(2rem, var(--safe-top)) 1.5rem 0;
+  text-align: center;
+}
+
+.live-ring-avatar {
+  display: grid;
+  overflow: hidden;
+  width: 8.5rem;
+  height: 8.5rem;
+  place-items: center;
+  border: 2px solid oklch(1 0 0 / 0.22);
+  border-radius: var(--radius-pill);
+  margin-bottom: 1.25rem;
+  background: oklch(1 0 0 / 0.1);
+}
+
+.live-ring-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.live-ring-initials {
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* A slow pulse while it rings; it stops the moment the call is answered, which
+   is a quieter signal than changing the words alone. */
+.live-ring-avatar.is-pulsing {
+  animation: live-ring-pulse 2s ease-out infinite;
+}
+
+@keyframes live-ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.65 0.2 250 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 1.75rem oklch(0.65 0.2 250 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.65 0.2 250 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-ring-avatar.is-pulsing,
+  .incoming-call-avatar.is-pulsing {
+    animation: none;
+  }
+}
+
+.live-ring-name {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.live-ring-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0;
+  color: oklch(1 0 0 / 0.86);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.live-ring-sub {
+  margin: 0.125rem 0 0;
+  color: oklch(1 0 0 / 0.6);
+  font-size: 0.9rem;
+}
+
+.live-ring-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 0.85rem;
+}
+
+.live-ring-bars i {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  animation: live-ring-bar 1s ease-in-out infinite;
+}
+
+.live-ring-bars i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.live-ring-bars i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes live-ring-bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.live-ring-controls {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  /* Clears the iPhone home indicator by construction. */
+  padding: 1.5rem 1.5rem max(2rem, calc(var(--safe-bottom) + 1rem));
+}
+
+/* -------------------------------------------------- round call buttons */
+
+.call-round-button {
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--white);
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    filter 120ms ease;
+}
+
+.call-round-button:active {
+  transform: scale(0.94);
+}
+
+.call-round-button.is-danger {
+  background: var(--danger);
+  box-shadow: 0 0.75rem 1.5rem oklch(0.58 0.23 27 / 0.35);
+}
+
+.call-round-button.is-accept {
+  background: var(--success);
+  box-shadow: 0 0.75rem 1.5rem oklch(0.62 0.16 153 / 0.35);
+}
+
+.call-round-label {
+  color: oklch(1 0 0 / 0.7);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- incoming call */
+
+/* Above the admin shell entirely. An operator with a sidebar and breadcrumbs
+   over an incoming call would not read it as a phone ringing. */
+.incoming-call {
+  z-index: 90;
+  justify-content: space-between;
+  background: radial-gradient(120% 80% at 50% 0%, #10306b 0%, var(--navy) 55%, #04122b 100%);
+}
+
+.incoming-call-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  width: 28rem;
+  height: 28rem;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, oklch(0.65 0.2 250 / 0.28), transparent 65%);
+  pointer-events: none;
+}
+
+.incoming-call-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: max(2.5rem, var(--safe-top)) 1.5rem 0;
+  text-align: center;
+}
+
+.incoming-call-avatar {
+  display: grid;
+  width: 7.5rem;
+  height: 7.5rem;
+  place-items: center;
+  border: 2px solid oklch(1 0 0 / 0.2);
+  border-radius: var(--radius-pill);
+  margin-bottom: 1.5rem;
+  background: oklch(1 0 0 / 0.1);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.incoming-call-avatar.is-pulsing {
+  animation: live-ring-pulse 2s ease-out infinite;
+}
+
+.incoming-call-kind {
+  margin: 0;
+  color: oklch(1 0 0 / 0.62);
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.incoming-call-name {
+  margin: 0.25rem 0 0;
+  font-size: 2rem;
+  font-weight: 730;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.incoming-call-profile {
+  margin: 0.25rem 0 0;
+  color: oklch(1 0 0 / 0.6);
+  font-size: 0.95rem;
+}
+
+.incoming-call-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  border: 1px solid oklch(1 0 0 / 0.16);
+  border-radius: var(--radius-card);
+  margin-top: 1.75rem;
+  padding: 0.875rem 1rem;
+  background: oklch(1 0 0 / 0.08);
+  text-align: left;
+}
+
+.incoming-call-notice strong,
+.incoming-call-notice em {
+  display: block;
+}
+
+.incoming-call-notice strong {
+  margin-bottom: 0.15rem;
+  font-size: 0.95rem;
+}
+
+.incoming-call-notice span {
+  color: oklch(1 0 0 / 0.78);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.incoming-call-notice em {
+  margin-top: 0.35rem;
+  color: oklch(1 0 0 / 0.6);
+  font-size: 0.82rem;
+  font-style: normal;
+}
+
+.incoming-call-actions {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4rem;
+  padding: 1.5rem 1.5rem max(2.25rem, calc(var(--safe-bottom) + 1rem));
+}
+
+.incoming-call-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* ------------------------------------------------- source selection sheet */
+
+.source-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  background: oklch(0.09 0.04 260 / 0.82);
+  backdrop-filter: blur(0.5rem);
+}
+
+.source-sheet-inner {
+  width: 100%;
+  max-height: 100dvh;
+  overflow-y: auto;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  padding: 1.5rem 1.25rem max(1.5rem, calc(var(--safe-bottom) + 0.75rem));
+  background: var(--white);
+  color: var(--navy);
+}
+
+.source-sheet-head {
+  margin-bottom: 1.25rem;
+  text-align: center;
+}
+
+.source-sheet-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 730;
+  letter-spacing: -0.03em;
+}
+
+.source-sheet-copy {
+  margin: 0.4rem 0 0;
+  color: var(--slate);
+  font-size: 0.92rem;
+}
+
+.source-sheet-caller {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* The caller is waiting on this choice; an operator who cannot see that takes
+   their time. */
+.source-sheet-countdown {
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem;
+  background: var(--surface);
+  color: var(--slate);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.source-sheet-options {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.source-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  background: var(--white);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Thumb-friendly: comfortably past the 44px minimum. */
+  min-height: 5rem;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.source-card:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.source-card:disabled {
+  background: var(--surface);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.source-card-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.source-card:disabled .source-card-icon {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.source-card-text {
+  display: grid;
+  flex: 1;
+  gap: 0.15rem;
+}
+
+.source-card-text strong {
+  font-size: 1rem;
+  font-weight: 680;
+}
+
+.source-card-text span {
+  color: var(--slate);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.source-card:disabled .source-card-text span {
+  color: var(--muted);
+}
+
+/* The reason a card is unavailable, so the disabled state is never a mystery. */
+.source-card-note {
+  margin-top: 0.2rem;
+  color: oklch(0.52 0.13 70) !important;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.source-card-arrow {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+/* ==================================================== the live call canvas */
+
+.live-call {
+  z-index: 70;
+  background: #04122b;
+}
+
+.live-call-stage {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * The main participant fills the portrait frame.
+ *
+ * `cover` rather than `contain`: this is a live camera on a phone held upright,
+ * so its native shape already matches the frame and cropping is minimal. A
+ * letterboxed live camera would read as a fault.
+ */
+.live-call-main {
+  width: 100%;
+  height: 100%;
+  background: #04122b;
+  object-fit: cover;
+  object-position: center;
+}
+
+.live-call-main.is-mirrored {
+  transform: scaleX(-1);
+}
+
+.live-call-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, oklch(0 0 0 / 0.45) 0%, transparent 22%),
+    linear-gradient(0deg, oklch(0 0 0 / 0.55) 0%, transparent 28%);
+  pointer-events: none;
+}
+
+/* Before the first remote frame arrives: the person, not a black rectangle. */
+.live-call-waiting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.live-call-waiting-backdrop {
+  position: absolute;
+  inset: -10%;
+  width: 120%;
+  height: 120%;
+  filter: blur(3rem) saturate(1.1);
+  object-fit: cover;
+  opacity: 0.4;
+}
+
+.live-call-waiting-avatar {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 6.5rem;
+  height: 6.5rem;
+  place-items: center;
+  border: 2px solid oklch(1 0 0 / 0.2);
+  border-radius: var(--radius-pill);
+  margin-bottom: 1rem;
+  background: oklch(1 0 0 / 0.1);
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.live-call-waiting-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.live-call-waiting-name {
+  position: relative;
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.live-call-waiting-status {
+  position: relative;
+  margin: 0;
+  color: oklch(1 0 0 / 0.65);
+  font-size: 0.9rem;
+}
+
+/* ------------------------------------------------------------- top bar */
+
+.live-call-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: max(0.875rem, calc(var(--safe-top) + 0.25rem)) 1rem 0.75rem;
+}
+
+.live-call-identity {
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-call-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+/*
+ * WebRTC encrypts media in transit, and that is all this claims. Deliberately
+ * not "end-to-end": this architecture does not implement it, and saying so would
+ * be a security claim with nothing behind it.
+ */
+.live-call-secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-pill);
+  padding: 0.15rem 0.5rem;
+  background: oklch(1 0 0 / 0.14);
+  color: oklch(1 0 0 / 0.8);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.live-call-timer {
+  border-radius: var(--radius-pill);
+  padding: 0.15rem 0.5rem;
+  background: oklch(0 0 0 / 0.35);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.live-call-unmute {
+  position: absolute;
+  top: calc(var(--safe-top) + 3.5rem);
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0.5rem 1rem;
+  background: var(--blue);
+  color: var(--white);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------------- PiP */
+
+/*
+ * The self-view. Portrait, like everything else on this screen, and parked clear
+ * of the top bar. Tapping it swaps which participant is large — presentation
+ * only: no camera is reopened and nothing is renegotiated.
+ */
+.live-call-pip {
+  position: absolute;
+  top: calc(var(--safe-top) + 3.75rem);
+  right: 0.875rem;
+  z-index: 3;
+  overflow: hidden;
+  width: clamp(6.25rem, 28vw, 7.75rem);
+  aspect-ratio: 9 / 16;
+  border: 1.5px solid oklch(1 0 0 / 0.35);
+  border-radius: 1.125rem;
+  padding: 0;
+  background: #0a1a33;
+  box-shadow: 0 0.5rem 1.5rem oklch(0 0 0 / 0.4);
+  cursor: pointer;
+}
+
+.live-call-pip-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.live-call-pip-video.is-mirrored {
+  transform: scaleX(-1);
+}
+
+.live-call-pip-off {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: oklch(1 0 0 / 0.5);
+}
+
+.live-call-pip-name {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  left: 0.3rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.35rem;
+  background: oklch(0 0 0 / 0.45);
+  color: var(--white);
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ controls */
+
+.live-call-controls {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.875rem;
+  /* Clears the home indicator by construction rather than by guesswork. */
+  padding: 1rem 1rem max(1.5rem, calc(var(--safe-bottom) + 0.75rem));
+}
+
+.call-control {
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: oklch(1 0 0 / 0.16);
+  color: var(--white);
+  cursor: pointer;
+  backdrop-filter: blur(0.75rem);
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.call-control:active {
+  transform: scale(0.93);
+}
+
+/* "On" here means the control is engaged — muted, or camera off — which is why
+   it inverts rather than dims. */
+.call-control.is-on {
+  background: var(--white);
+  color: var(--navy);
+}
+
+.call-control.is-end {
+  width: 4.25rem;
+  height: 4.25rem;
+  background: var(--danger);
+  box-shadow: 0 0.5rem 1.25rem oklch(0.58 0.23 27 / 0.4);
+}
+
+/* ------------------------------------------------------------ overlays */
+
+.call-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+
+/* Opaque enough to be unmistakable, because the phone is sideways and the call
+   underneath cannot be used until it is turned back. */
+.call-overlay-rotate {
+  z-index: 10;
+  background: oklch(0.09 0.04 260 / 0.96);
+}
+
+/* Translucent: the call is still running underneath and the last frame should
+   stay visible. */
+.call-overlay-reconnecting,
+.call-overlay-connecting {
+  background: oklch(0.09 0.04 260 / 0.55);
+  backdrop-filter: blur(0.35rem);
+}
+
+.call-overlay-inner {
+  display: flex;
+  max-width: 20rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--white);
+}
+
+.call-overlay-title {
+  margin: 0.5rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.call-overlay-copy {
+  margin: 0;
+  color: oklch(1 0 0 / 0.7);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.rotate-icon {
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  border: 1px solid oklch(1 0 0 / 0.2);
+  border-radius: var(--radius-lg);
+  background: oklch(1 0 0 / 0.08);
+  color: var(--white);
+  animation: rotate-hint 2.4s ease-in-out infinite;
+}
+
+@keyframes rotate-hint {
+  0%,
+  55%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25%,
+  40% {
+    transform: rotate(-90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-icon {
+    animation: none;
+  }
+}
+
+.call-spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 2.5px solid oklch(1 0 0 / 0.25);
+  border-top-color: var(--blue);
+  border-radius: var(--radius-pill);
+  animation: call-spin 800ms linear infinite;
+}
+
+@keyframes call-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* The operator's between-states screen, shown full width. */
+.host-connecting {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: var(--navy);
+}
+
+.host-connecting .call-overlay {
+  background: transparent;
+}
+
+/* ------------------------------------------------- host outcome notice */
+
+.host-outcome {
+  position: fixed;
+  right: 1rem;
+  bottom: max(1rem, var(--safe-bottom));
+  left: 1rem;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.host-outcome-card {
+  display: flex;
+  width: min(100%, 26rem);
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 0.75rem 0.875rem;
+  background: var(--white);
+  box-shadow: 0 1rem 2rem oklch(0.2 0.03 255 / 0.18);
+  pointer-events: auto;
+}
+
+.host-outcome-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.host-outcome-text {
+  display: grid;
+  flex: 1;
+  gap: 0.1rem;
+  font-size: 0.9rem;
+}
+
+.host-outcome-text span {
+  color: var(--slate);
+  font-size: 0.84rem;
+}
+
+.host-outcome-close {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* ================================================= admin: live calling card */
+
+.live-calling-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.live-calling-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/*
+ * Presence, which is NOT the same as the profile being Active.
+ *
+ * The two are separate badges on purpose. One green dot for both is exactly how
+ * a caller ends up ringing a profile that nobody is sitting behind.
+ */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.live-badge-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.live-badge.is-live {
+  background: oklch(0.94 0.07 153);
+  color: oklch(0.42 0.13 153);
+}
+
+.live-badge.is-busy {
+  background: oklch(0.96 0.06 85);
+  color: oklch(0.5 0.13 70);
+}
+
+.live-badge.is-muted {
+  background: var(--surface);
+  color: var(--slate);
+}
+
+.live-calling-rows {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0 0 1rem;
+}
+
+.live-calling-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+}
+
+.live-calling-row dt {
+  color: var(--slate);
+}
+
+.live-calling-row dd {
+  margin: 0;
+  font-weight: 650;
+}
+
+.live-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.875rem;
+  background: var(--white);
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  /* Comfortably past the 44px touch minimum. */
+  min-height: 3rem;
+}
+
+.live-toggle:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.live-toggle-track {
+  position: relative;
+  width: 2.75rem;
+  height: 1.6rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  transition: background 140ms ease;
+}
+
+.live-toggle.is-on .live-toggle-track {
+  background: var(--blue);
+}
+
+.live-toggle-knob {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
+  transition: transform 140ms ease;
+}
+
+.live-toggle.is-on .live-toggle-knob {
+  transform: translateX(1.15rem);
+}
+
+.live-calling-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0.875rem 0 0;
+  color: var(--slate);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.live-calling-note strong {
+  display: block;
+  color: var(--navy);
+  font-size: 0.88rem;
+}
+
+.live-calling-note.is-warning {
+  border-radius: var(--radius-sm);
+  padding: 0.625rem 0.75rem;
+  background: oklch(0.97 0.04 85);
+  color: oklch(0.45 0.12 70);
+}
+
+/* ------------------------------------------------------------ viewport */
+
+/*
+ * The call surfaces own the viewport.
+ *
+ * Scoped with `:has()` so only the screens that genuinely fill the device opt
+ * out of normal page scrolling — everything else in the app scrolls as usual.
+ */
+body:has(.live-call),
+body:has(.live-ring),
+body:has(.incoming-call) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* ==================================================== the audio call surface */
+
+/*
+ * One composition for every device.
+ *
+ * Only the scale changes between a phone and a monitor — the layout is centred
+ * either way. That is what keeps an audio call feeling like one product rather
+ * than a mobile screen stretched across a desktop.
+ */
+.audio-call {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background: radial-gradient(120% 90% at 50% 0%, #0d2757 0%, var(--navy) 55%, #04122b 100%);
+  color: var(--white);
+}
+
+.audio-call-backdrop {
+  position: absolute;
+  inset: -12%;
+  background-position: center;
+  background-size: cover;
+  /* Blurred far past recognition: depth, not a picture of somebody. */
+  filter: blur(4rem) saturate(1.15);
+  opacity: 0.32;
+}
+
+.audio-call-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, oklch(0.16 0.05 260 / 0.55), oklch(0.09 0.04 260 / 0.92));
+}
+
+/*
+ * Carries the remote audio and nothing else.
+ *
+ * A media element is required for sound to play at all, but there is no video on
+ * an audio call, so it is removed from the layout and from the accessibility
+ * tree. Deliberately not `display: none`, which lets some browsers drop
+ * playback entirely.
+ */
+.audio-call-sink {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audio-call-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: max(2rem, var(--safe-top)) 1.5rem 0;
+  text-align: center;
+}
+
+.audio-call-avatar {
+  display: grid;
+  overflow: hidden;
+  width: 9rem;
+  height: 9rem;
+  place-items: center;
+  border: 2px solid oklch(1 0 0 / 0.2);
+  border-radius: var(--radius-pill);
+  margin-bottom: 1.5rem;
+  background: oklch(1 0 0 / 0.1);
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.audio-call-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A slow breath while the call is up, so a screen with no video still reads as
+   live. It stops while reconnecting, which is a signal of its own. */
+.audio-call-avatar.is-live {
+  animation: audio-call-breathe 3.5s ease-in-out infinite;
+}
+
+@keyframes audio-call-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.65 0.2 250 / 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 1.25rem oklch(0.65 0.2 250 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-call-avatar.is-live {
+    animation: none;
+  }
+}
+
+.audio-call-name {
+  margin: 0;
+  font-size: 1.85rem;
+  font-weight: 730;
+  letter-spacing: -0.035em;
+}
+
+.audio-call-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0;
+  color: oklch(1 0 0 / 0.62);
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.audio-call-timer {
+  margin: 0.875rem 0 0;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: oklch(1 0 0 / 0.9);
+}
+
+.audio-call-secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-pill);
+  margin: 1rem 0 0;
+  padding: 0.2rem 0.6rem;
+  background: oklch(1 0 0 / 0.12);
+  color: oklch(1 0 0 / 0.72);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.audio-call-controls {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1.5rem 1.5rem max(2rem, calc(var(--safe-bottom) + 1rem));
+}
+
+.audio-call-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+/*
+ * Desktop audio.
+ *
+ * A deliberate desktop composition, not a phone screen centred in a monitor:
+ * the card is larger, the controls are further apart, and the whole thing sits
+ * on the same navy surface.
+ */
+@media (min-width: 48rem) {
+  .audio-call-body {
+    padding-top: 3rem;
+  }
+
+  .audio-call-avatar {
+    width: 12rem;
+    height: 12rem;
+    margin-bottom: 2rem;
+    font-size: 3.25rem;
+  }
+
+  .audio-call-name {
+    font-size: 2.5rem;
+  }
+
+  .audio-call-timer {
+    font-size: 1.35rem;
+  }
+
+  .audio-call-controls {
+    gap: 3rem;
+    padding-bottom: 3rem;
+  }
+
+  .audio-call-controls .call-control {
+    width: 4rem;
+    height: 4rem;
+  }
+
+  .audio-call-controls .call-control.is-end {
+    width: 4.75rem;
+    height: 4.75rem;
+  }
+}
+
+/* The ringing screen is shared with video, so it scales up for a desktop audio
+   call rather than sitting small in the middle of a large window. */
+@media (min-width: 48rem) {
+  .live-ring-avatar {
+    width: 11rem;
+    height: 11rem;
+  }
+
+  .live-ring-name {
+    font-size: 2.25rem;
+  }
+}
+
+body:has(.audio-call) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}

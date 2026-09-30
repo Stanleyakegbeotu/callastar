@@ -1,0 +1,2737 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./safe-area.css";
+@import "./admin.css";
+@import "./admin-crm.css";
+@import "./admin-access.css";
+@import "./support.css";
+@import "./access-tiers.css";
+@import "./host-state.css";
+@import "./live-call.css";
+@import "./transformation-studio.css";
+
+/*
+ * Tailwind utility scanning. The stylesheet no longer sits at the src root, so
+ * point automatic source detection back at the app tree; the design uses a few
+ * Tailwind size utilities (size-4, size-5, size-6 ...) inside components.
+ */
+@source "../";
+
+html {
+  background: var(--white);
+  color: var(--navy);
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100dvh;
+  /*
+   * `clip`, not `hidden`.
+   *
+   * `overflow-x: hidden` makes the body a scroll container that simply cannot be
+   * scrolled — and on iOS a scroll container still rubber-bands, which is what
+   * produced the sideways shake even though nothing was visibly overflowing.
+   * `clip` cuts the overflow without creating a scroll container, so there is
+   * nothing left to bounce.
+   *
+   * This is the last guard, not the fix. Anything genuinely wider than the
+   * screen is corrected where it lives; this only stops one mistake from panning
+   * the whole page. Vertically the document scrolls normally, because most of
+   * the app is a document.
+   */
+  overflow-x: clip;
+}
+
+/*
+ * The same guard on the root element.
+ *
+ * Without it iOS Safari can still pan the viewport when a child overflows,
+ * because the body's clipping does not constrain the visual viewport.
+ */
+html {
+  overflow-x: clip;
+}
+
+/*
+ * The immersive screens are the exception.
+ *
+ * A live call, the audio call and the landing hero are each exactly one
+ * viewport and place their own controls against the edges; letting the document
+ * scroll behind them would drag those controls off screen. They opt out here
+ * rather than the whole app opting out for them.
+ */
+body:has(.active-call),
+body:has(.audio-call),
+body:has(.live-call),
+body:has(.live-ring),
+body:has(.incoming-call),
+body:has(.landing) {
+  overflow: hidden;
+}
+
+/*
+ * The access sheet is a phone-only exception.
+ *
+ * On a phone it is a bottom sheet that owns the viewport, so the document behind
+ * it must not scroll as well — two scroll owners for one decision is what made
+ * the plan cards feel like a card inside a card. On a tablet or a desktop it is
+ * a centred dialog on an ordinary page, and the page scrolls as usual.
+ */
+@media (max-width: 47.99rem) {
+  body:has(.access-screen) {
+    overflow: hidden;
+  }
+}
+
+/*
+ * No visible scrollbars, anywhere.
+ *
+ * The product is drawn as a phone app, where the scrollbar is an overlay that
+ * fades out rather than a permanent gutter; a persistent desktop scrollbar sits
+ * wrongly against these full-bleed surfaces. Scrolling itself is untouched —
+ * wheel, trackpad, touch, keyboard and programmatic scrolling all still work,
+ * and every scrollable region keeps its focus and keyboard behaviour.
+ */
+html,
+body,
+.admin-canvas,
+.admin-sidebar,
+.admin-table-wrap,
+.chat-thread,
+.cs-sheet,
+.support-overlay-panel,
+.image-viewer {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.admin-canvas::-webkit-scrollbar,
+.admin-sidebar::-webkit-scrollbar,
+.admin-table-wrap::-webkit-scrollbar,
+.chat-thread::-webkit-scrollbar,
+.cs-sheet::-webkit-scrollbar,
+.support-overlay-panel::-webkit-scrollbar,
+.image-viewer::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 0.2rem solid color-mix(in oklab, var(--blue) 35%, transparent);
+  outline-offset: 0.2rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--navy);
+  font-size: 1.125rem;
+  font-weight: 730;
+  letter-spacing: -0.025em;
+}
+
+.brand-inverse {
+  color: var(--white);
+}
+
+/* On the hero the lockup keeps its navy wordmark, as drawn. */
+.landing-top .brand {
+  color: var(--navy);
+  font-size: 1.4rem;
+  letter-spacing: -0.035em;
+}
+
+.landing-top .brand-mark {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 0.7rem;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.landing {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--navy);
+  color: var(--white);
+  isolation: isolate;
+}
+
+.landing-image {
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 57% center;
+}
+
+.landing-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    linear-gradient(to bottom, oklch(0.15 0.04 255 / 0.12) 0%, transparent 18%),
+    linear-gradient(to top, oklch(0.12 0.04 255 / 0.92) 0%, oklch(0.16 0.04 255 / 0.45) 46%, transparent 68%);
+}
+
+.landing-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(1.25rem, var(--safe-top)) 1.25rem 0;
+}
+
+/*
+ * Confirmation for the hidden development shortcut on the brand mark.
+ *
+ * Deliberately unstyled as a control and never rendered unless the shortcut is
+ * both enabled and activated, so the onboarding screen is byte-for-byte the
+ * approved design until a developer taps five times on purpose.
+ */
+.dev-shortcut-toast {
+  position: absolute;
+  top: max(4.5rem, calc(var(--safe-top) + 3.25rem));
+  left: 50%;
+  z-index: 20;
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-pill);
+  background: oklch(0.18 0.035 255 / 0.82);
+  color: var(--white);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transform: translateX(-50%);
+}
+
+.live-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid oklch(1 0 0 / 0.18);
+  border-radius: 999px;
+  background: oklch(0.15 0.03 255 / 0.35);
+  color: oklch(1 0 0 / 0.9);
+  font-size: 0.75rem;
+  font-weight: 600;
+  backdrop-filter: blur(0.75rem);
+}
+
+.live-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: oklch(0.75 0.17 150);
+  box-shadow: 0 0 0 0.2rem oklch(0.75 0.17 150 / 0.18);
+}
+
+.hero-pip {
+  position: absolute;
+  top: max(5.75rem, calc(var(--safe-top) + 4.5rem));
+  right: 1.25rem;
+  width: 6.75rem;
+  height: 9rem;
+  overflow: hidden;
+  border: 0.15rem solid oklch(1 0 0 / 0.75);
+  border-radius: 1.25rem;
+  box-shadow: 0 1rem 2.5rem oklch(0.1 0.04 255 / 0.25);
+}
+
+.hero-pip img,
+.video-pip img,
+.video-pip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pip-label {
+  position: absolute;
+  left: 0.6rem;
+  bottom: 0.55rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+  background: oklch(0.1 0.02 255 / 0.5);
+  font-size: 0.65rem;
+  font-weight: 650;
+  backdrop-filter: blur(0.5rem);
+}
+
+.landing-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.25rem max(1.25rem, calc(var(--safe-bottom) + 0.75rem));
+}
+
+/*
+ * The welcome sequence.
+ *
+ * Choreographed to the approved motion reference: the scene wakes first, then
+ * the brand, then the headline ONE LINE AT A TIME, then the supporting copy,
+ * then the promises, and the call to action last. Nothing is hidden from
+ * assistive technology and nothing blocks interaction — the button works the
+ * moment it is on screen.
+ *
+ * Only opacity, transform and filter are animated, so the whole thing stays on
+ * the compositor rather than laying the page out sixty times a second.
+ */
+.landing-wake .landing-image {
+  animation: hero-wake 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-wake .landing-brand-reveal {
+  animation: landing-rise 480ms 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-wake .landing-pip-reveal {
+  animation: pip-arrive 560ms 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-wake .landing-eyebrow-reveal {
+  animation: landing-rise 400ms 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Line by line, roughly 140ms apart, as in the reference. */
+.hero-title-line {
+  display: block;
+  animation: headline-reveal 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hero-title-line-1 {
+  animation-delay: 560ms;
+}
+
+.hero-title-line-2 {
+  animation-delay: 700ms;
+}
+
+.hero-title-line-3 {
+  animation-delay: 840ms;
+}
+
+.landing-wake .landing-copy-reveal {
+  animation: landing-rise 480ms 1020ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-wake .landing-promise-reveal {
+  /* The per-item delay is set inline, so the row arrives as a group. */
+  animation: landing-rise 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Last, and deliberately so: the scene is complete before it invites a tap. */
+.landing-wake .landing-cta-reveal,
+.landing-wake .privacy-line {
+  animation: landing-rise 520ms 1440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Seen it already this session: acknowledge quickly rather than perform. */
+.landing-returning .landing-image,
+.landing-returning .landing-brand-reveal,
+.landing-returning .landing-pip-reveal,
+.landing-returning .landing-eyebrow-reveal,
+.landing-returning .hero-title-line,
+.landing-returning .landing-copy-reveal,
+.landing-returning .landing-promise-reveal,
+.landing-returning .landing-cta-reveal,
+.landing-returning .privacy-line {
+  animation-duration: 240ms;
+  animation-delay: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Everything renders immediately, in its final position. */
+  .landing-wake .landing-image,
+  .landing-wake .landing-brand-reveal,
+  .landing-wake .landing-pip-reveal,
+  .landing-wake .landing-eyebrow-reveal,
+  .hero-title-line,
+  .landing-wake .landing-copy-reveal,
+  .landing-wake .landing-promise-reveal,
+  .landing-wake .landing-cta-reveal,
+  .landing-wake .privacy-line,
+  .landing-returning .landing-promise-reveal {
+    animation: none !important;
+  }
+}
+
+@keyframes hero-wake {
+  from { opacity: 0; filter: blur(8px); transform: scale(1.055); }
+  to { opacity: 1; filter: blur(0); transform: scale(1); }
+}
+
+@keyframes landing-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pip-arrive {
+  from { opacity: 0; transform: translateY(-10px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes headline-reveal {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); transform: translateY(0.4em); }
+  to { opacity: 1; clip-path: inset(0); transform: translateY(0); }
+}
+
+.eyebrow {
+  color: var(--blue);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.eyebrow-inverse {
+  color: oklch(0.82 0.1 248);
+}
+
+.hero-title {
+  max-width: 22rem;
+  margin-top: 0.75rem;
+  font-size: clamp(2.25rem, 10vw, 3.5rem);
+  font-weight: 680;
+  line-height: 0.99;
+  letter-spacing: -0.055em;
+}
+
+.hero-copy {
+  max-width: 28rem;
+  margin: 1rem 0 1.5rem;
+  color: oklch(1 0 0 / 0.78);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.primary-button {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-size: 1.0625rem;
+  background: var(--blue);
+  color: var(--white);
+  font-weight: 700;
+  box-shadow: 0 0.75rem 1.75rem oklch(0.42 0.2 258 / 0.18);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.primary-button:hover {
+  background: var(--blue-dark);
+  transform: translateY(-0.08rem);
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.landing-cta {
+  margin-top: 1.5rem;
+  background: var(--blue);
+  color: var(--white);
+  box-shadow: 0 0.9rem 2rem oklch(0.42 0.2 258 / 0.35);
+}
+
+.landing-cta:hover {
+  background: var(--blue-dark);
+}
+
+/* The three promises, separated by hairlines as drawn. */
+.hero-highlights {
+  display: grid;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+}
+
+.hero-highlights li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--white);
+  font-size: 0.85rem;
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.hero-highlights li + li {
+  border-left: 1px solid oklch(1 0 0 / 0.28);
+  padding-left: 0.75rem;
+}
+
+.hero-highlights svg {
+  flex: 0 0 auto;
+  opacity: 0.95;
+}
+
+.privacy-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+  color: oklch(1 0 0 / 0.58);
+  font-size: 0.7rem;
+}
+
+.page-shell {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--white);
+}
+
+.admin-auth, .admin-shell { min-height: 100dvh; box-sizing: border-box; background: var(--surface); color: var(--navy); }
+.admin-auth { display: grid; place-items: center; padding: var(--space-5); }
+.admin-card { display: grid; gap: 1rem; width: min(100%, 30rem); box-sizing: border-box; border: 1px solid var(--line); border-radius: 1.25rem; padding: 1.5rem; background: var(--white); box-shadow: var(--shadow); }
+.admin-card h1, .admin-card p { margin: 0; }
+.admin-card form { display: grid; gap: 1rem; }
+.admin-header { display: flex; align-items: center; justify-content: space-between; padding: max(1rem, var(--safe-top)) max(1.25rem, var(--safe-right)) 1rem max(1.25rem, var(--safe-left)); border-bottom: 1px solid var(--line); background: var(--white); }
+.admin-header .secondary-button { width: auto; min-height: 2.5rem; padding: 0 1rem; }
+.admin-grid { display: grid; width: min(100% - 2.5rem, 70rem); margin: 2rem auto; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); }
+.admin-list { display: grid; gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+.admin-list li { display: grid; gap: 0.25rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+.admin-list span, .admin-error { color: var(--slate); font-size: 0.8rem; }
+
+.app-header {
+  position: relative;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: oklch(1 0 0 / 0.9);
+  padding-top: var(--safe-top);
+  backdrop-filter: blur(1rem);
+}
+
+.app-header-minimal {
+  border-bottom: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.header-inner {
+  display: flex;
+  width: min(100% - 2rem, 70rem);
+  height: 4.5rem;
+  margin: auto;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-button {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--navy);
+}
+
+.choose-content {
+  display: flex;
+  width: min(100% - 2.5rem, 54rem);
+  min-height: calc(100dvh - 4.5rem);
+  margin: auto;
+  flex-direction: column;
+  padding: 3.5rem 0 max(2rem, calc(var(--safe-bottom) + 1rem));
+}
+
+.step-intro {
+  text-align: center;
+}
+
+.page-title {
+  margin-top: 0.75rem;
+  color: var(--navy);
+  font-size: clamp(2rem, 6vw, 2.85rem);
+  font-weight: 680;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.page-copy {
+  max-width: 34rem;
+  margin: 1rem auto 0;
+  color: var(--slate);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.option-grid {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 2.5rem;
+}
+
+.option-card {
+  position: relative;
+  display: flex;
+  min-height: 7.25rem;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.15rem;
+  padding: 1rem;
+  background: var(--white);
+  color: var(--navy);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.option-card:hover {
+  transform: translateY(-0.1rem);
+  border-color: color-mix(in oklab, var(--blue) 30%, var(--line));
+}
+
+.option-card:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.option-selected {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.option-icon {
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 1rem;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.option-selected .option-icon {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.option-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.option-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.option-copy {
+  color: var(--slate);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.selection-mark {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: auto;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--white);
+}
+
+.option-selected .selection-mark {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.choose-action {
+  margin-top: auto;
+  padding-top: 2.5rem;
+}
+
+.helper-center {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.join-page {
+  position: relative;
+  background: linear-gradient(145deg, var(--surface), var(--blue-soft));
+}
+
+.form-wrap {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(100% - 2rem, 34rem);
+  height: 100%;
+  box-sizing: border-box;
+  margin: auto;
+  place-items: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: max(1.25rem, var(--safe-top)) 0 max(1.25rem, var(--safe-bottom));
+  scrollbar-width: none;
+}
+
+.form-wrap::-webkit-scrollbar { display: none; }
+
+.join-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: oklch(0.2 0.05 255 / 0.08);
+}
+
+.join-backdrop::after {
+  position: absolute;
+  inset: 0;
+  background: oklch(0.98 0.01 255 / 0.52);
+  content: "";
+  backdrop-filter: blur(10px);
+}
+
+.join-backdrop-orb {
+  position: absolute;
+  width: 20rem;
+  height: 20rem;
+  border-radius: 50%;
+  filter: blur(2rem);
+}
+
+.join-backdrop-orb-one { top: -7rem; right: -6rem; background: oklch(0.67 0.15 250 / 0.25); }
+.join-backdrop-orb-two { bottom: -9rem; left: -7rem; background: oklch(0.74 0.1 225 / 0.22); }
+
+.join-dialog-shell { width: 100%; }
+
+.join-dialog {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid oklch(1 0 0 / 0.8);
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background: oklch(1 0 0 / 0.9);
+  box-shadow: 0 1.5rem 4rem oklch(0.25 0.04 255 / 0.16);
+  animation: dialog-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  backdrop-filter: blur(1rem);
+}
+
+.join-dialog-status { min-height: 16rem; display: flex; align-items: center; flex-direction: column; justify-content: center; text-align: center; }
+.join-progress { color: var(--slate); font-size: 0.95rem; font-weight: 600; }
+.join-title { margin: 0.65rem 0 0; color: var(--navy); font-size: clamp(1.8rem, 6vw, 2.2rem); font-weight: 700; letter-spacing: -0.045em; }
+.join-copy { margin: 0.65rem 0 0; color: var(--slate); font-size: 0.9rem; line-height: 1.55; }
+.join-fields { margin-top: 1.75rem; }
+.join-actions { display: grid; gap: 0.65rem; margin-top: 1.5rem; }
+.join-disclaimer { margin: 1rem 0 0; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+.join-status-icon { display: grid; width: 3rem; height: 3rem; margin-bottom: 1rem; place-items: center; border-radius: 50%; background: var(--blue-soft); color: var(--blue); }
+.join-profile { margin: 1.5rem 0 0; background: oklch(1 0 0 / 0.7); }
+.permission-list { display: grid; gap: 0.5rem; margin: 1.25rem 0 0; padding: 0; color: var(--slate); font-size: 0.8rem; line-height: 1.45; list-style: none; }
+.permission-list li { display: flex; gap: 0.5rem; align-items: baseline; }
+.permission-list li::before { color: var(--blue); content: "•"; }
+
+@keyframes dialog-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.form-card {
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.form-card .step-intro {
+  text-align: left;
+}
+
+.form-card .page-title {
+  font-size: clamp(1.8rem, 5vw, 2.35rem);
+}
+
+.form-card .page-copy {
+  margin-left: 0;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.field-label {
+  color: var(--navy);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.field-input {
+  width: 100%;
+  min-height: 3.35rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0 1rem;
+  background: var(--white);
+  color: var(--navy);
+  font-size: 0.9rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field-input::placeholder {
+  color: var(--muted);
+}
+
+.field-input:focus {
+  border-color: var(--blue);
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--blue-soft);
+}
+
+.note-block {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  border-radius: 0.85rem;
+  padding: 0.9rem;
+  background: var(--blue-soft);
+  color: var(--slate);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.note-block p {
+  margin: 0.2rem 0 0;
+}
+
+.note-icon {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.note-title {
+  color: var(--navy);
+  font-weight: 700;
+}
+
+/*
+ * The join-confirmation host card these rules styled was replaced by the
+ * `.ready-*` treatment in the reference redesign, so nothing rendered them any
+ * more — but `.host-card img` still won on source order over the real host card
+ * in `host-state.css` and quietly shrank its avatar. Removed rather than left
+ * as a trap for the next person to hit.
+ */
+
+.host-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+  color: var(--slate);
+  font-size: 0.7rem;
+}
+
+.host-status span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.host-type {
+  margin-left: auto;
+  color: var(--blue);
+}
+
+.permission-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  color: var(--slate);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.status-screen {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--white);
+  padding: max(1.25rem, var(--safe-top)) 1.25rem max(1.5rem, var(--safe-bottom));
+}
+
+.status-brand {
+  text-align: center;
+}
+
+.status-content,
+.ring-content {
+  display: flex;
+  margin: auto;
+  align-items: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.avatar-wrap {
+  position: relative;
+  width: 7.5rem;
+  height: 7.5rem;
+  margin-bottom: 2rem;
+}
+
+.avatar {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  border: 0.3rem solid var(--white);
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 1rem 3rem oklch(0.25 0.04 255 / 0.15);
+}
+
+.avatar-pulse::before,
+.avatar-pulse::after {
+  position: absolute;
+  inset: -0.9rem;
+  border: 1px solid color-mix(in oklab, var(--blue) 28%, transparent);
+  border-radius: 50%;
+  content: "";
+  animation: pulse 2s ease-out infinite;
+}
+
+.avatar-pulse::after {
+  animation-delay: 1s;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.8;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+
+.spinner {
+  width: 1.7rem;
+  height: 1.7rem;
+  margin-bottom: 1.5rem;
+  border: 0.18rem solid var(--blue-soft);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-title,
+.ring-title {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.status-copy {
+  margin: 0.65rem 0 1.25rem;
+  color: var(--slate);
+  font-size: 0.85rem;
+}
+
+.secure-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface);
+  color: var(--slate);
+  font-size: 0.68rem;
+}
+
+.ringing-screen {
+  background: linear-gradient(to bottom, var(--white), var(--surface));
+}
+
+.ring-content {
+  transform: translateY(-1rem);
+}
+
+.ring-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+  color: var(--blue);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.wave-bars {
+  display: flex;
+  height: 0.9rem;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.wave-bars i {
+  width: 0.12rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--blue);
+  animation: wave 850ms ease-in-out infinite alternate;
+}
+
+.wave-bars i:nth-child(2) {
+  height: 0.85rem;
+  animation-delay: 180ms;
+}
+
+.wave-bars i:nth-child(3) {
+  animation-delay: 360ms;
+}
+
+@keyframes wave {
+  to {
+    transform: scaleY(0.35);
+  }
+}
+
+.ring-time {
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ring-controls {
+  display: flex;
+  justify-content: center;
+  gap: 3.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.control-item {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.5rem;
+  color: inherit;
+  font-size: 0.65rem;
+  font-weight: 620;
+}
+
+.control-button {
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--navy);
+  box-shadow: 0 0.75rem 2rem oklch(0.25 0.04 255 / 0.08);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.control-button:hover {
+  transform: translateY(-0.1rem);
+}
+
+.control-active {
+  border-color: transparent;
+  background: var(--navy);
+  color: var(--white);
+}
+
+.control-danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: var(--white);
+}
+
+.control-danger:hover {
+  background: var(--danger-dark);
+}
+
+.active-call {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--navy);
+  color: var(--white);
+}
+
+.call-main-slot {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--navy);
+}
+
+.main-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  animation: appear 300ms ease;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0.5;
+    transform: scale(1.02);
+  }
+}
+
+.video-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, oklch(0.1 0.03 255 / 0.58), transparent 25%),
+    linear-gradient(to top, oklch(0.08 0.03 255 / 0.65), transparent 32%);
+}
+
+.call-top {
+  position: absolute;
+  top: max(1.25rem, var(--safe-top));
+  left: 1.5rem;
+  right: 1.5rem;
+  z-index: 20;
+  text-shadow: 0 0.15rem 0.9rem oklch(0.1 0.03 255 / 0.55);
+}
+
+.call-person-name {
+  margin: 0;
+  color: var(--white);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.call-person-detail {
+  margin: 0.15rem 0 0;
+  color: oklch(1 0 0 / 0.78);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Honest labelling: the remote side is prerecorded prototype media, so the
+ * call says so quietly rather than implying a live person.
+ */
+.preview-chip {
+  position: absolute;
+  right: 1.25rem;
+  bottom: calc(max(1.25rem, calc(var(--safe-bottom) + 0.75rem)) + 7.25rem);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: var(--radius-pill);
+  padding: 0.4rem 0.75rem;
+  background: oklch(0.2 0.02 255 / 0.55);
+  color: oklch(1 0 0 / 0.9);
+  font-size: 0.78rem;
+  font-weight: 600;
+  backdrop-filter: blur(0.75rem);
+}
+
+
+/*
+ * The floating self-view tile.
+ *
+ * Parked in one of four corners rather than pinned to one: it is draggable, and
+ * a tile that could be dropped anywhere would end up over the other person's
+ * face. The bottom corners clear the control tray, so it can never be dropped
+ * on top of the End button.
+ */
+.video-pip {
+  position: absolute;
+  z-index: 10;
+  width: 6.5rem;
+  height: 9rem;
+  /* The tile owns its gestures; the page must not pan or scroll under a drag. */
+  touch-action: none;
+  cursor: grab;
+  transition:
+    top 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    right 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    bottom 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    left 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+  border: 0.15rem solid oklch(1 0 0 / 0.68);
+  border-radius: 1.15rem;
+  padding: 0;
+  background: var(--navy);
+  color: var(--white);
+  box-shadow: 0 1rem 3rem oklch(0.1 0.03 255 / 0.3);
+}
+
+.remote-connecting-tile {
+  position: absolute;
+  top: max(5rem, calc(var(--safe-top) + 4rem));
+  right: 1.25rem;
+  width: 6.5rem;
+  height: 9rem;
+  overflow: hidden;
+  border: 0.15rem solid oklch(1 0 0 / 0.5);
+  border-radius: 1.15rem;
+  background: var(--navy);
+  box-shadow: 0 1rem 3rem oklch(0.1 0.03 255 / 0.3);
+}
+
+.remote-connecting-tile > img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px) saturate(0.75); transform: scale(1.06); }
+.remote-connecting-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 0.5rem; background: oklch(0.1 0.03 255 / 0.4); color: var(--white); font-size: 0.62rem; font-weight: 700; }
+.remote-connecting-spinner { width: 1.25rem; height: 1.25rem; border: 0.14rem solid oklch(1 0 0 / 0.3); border-top-color: var(--white); border-radius: 50%; animation: spin 800ms linear infinite; }
+
+.pip-video {
+  display: block;
+}
+
+.pip-camera-off {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: var(--navy);
+  color: oklch(1 0 0 / 0.72);
+}
+
+/*
+ * Where the tile may rest. The bottom offset clears the control tray, so a
+ * bottom corner never lands on top of Mute or End.
+ */
+.active-call {
+  --pip-inset: 1.25rem;
+  --pip-top: max(5rem, calc(var(--safe-top) + 4rem));
+  --pip-bottom: calc(var(--safe-bottom) + 10.25rem);
+}
+
+.video-pip-top-right {
+  top: var(--pip-top);
+  right: var(--pip-inset);
+  bottom: auto;
+  left: auto;
+}
+
+.video-pip-top-left {
+  top: var(--pip-top);
+  left: var(--pip-inset);
+  right: auto;
+  bottom: auto;
+}
+
+.video-pip-bottom-right {
+  right: var(--pip-inset);
+  bottom: var(--pip-bottom);
+  top: auto;
+  left: auto;
+}
+
+.video-pip-bottom-left {
+  left: var(--pip-inset);
+  bottom: var(--pip-bottom);
+  top: auto;
+  right: auto;
+}
+
+/* Follows the finger exactly: no easing between frames while dragging. */
+.video-pip-dragging {
+  z-index: 11;
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 1.5rem 3.5rem oklch(0.1 0.03 255 / 0.45);
+}
+
+.pip-name {
+  position: absolute;
+  left: 0.55rem;
+  bottom: 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-shadow: 0 0.1rem 0.4rem oklch(0.1 0.03 255 / 0.8);
+}
+
+.swap-chip {
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0.4rem;
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  border-radius: 50%;
+  background: oklch(0.1 0.03 255 / 0.45);
+  backdrop-filter: blur(0.5rem);
+}
+
+.call-controls {
+  position: absolute;
+  left: 50%;
+  bottom: max(1.25rem, calc(var(--safe-bottom) + 0.75rem));
+  display: flex;
+  width: calc(100% - 1.5rem);
+  max-width: 28rem;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-around;
+  border: 0;
+  border-radius: 1.75rem;
+  padding: 1rem 0.5rem 0.9rem;
+  background: oklch(0.25 0.01 255 / 0.55);
+  transform: translateX(-50%);
+  backdrop-filter: blur(1.2rem);
+  z-index: 30;
+}
+
+.call-controls .control-button {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-color: transparent;
+  background: oklch(1 0 0 / 0.16);
+  color: var(--white);
+  box-shadow: none;
+}
+
+.call-controls .control-active {
+  background: oklch(0.12 0.02 255 / 0.8);
+}
+
+.call-controls .control-danger {
+  width: 4.25rem;
+  height: 4.25rem;
+  background: #f5333f;
+}
+
+.call-controls .control-item span {
+  font-size: 0.8rem;
+  font-weight: 620;
+}
+
+.call-controls .control-item {
+  color: oklch(1 0 0 / 0.78);
+}
+
+.camera-off-state {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1rem;
+  background: var(--navy);
+  color: oklch(1 0 0 / 0.75);
+  font-size: 0.85rem;
+}
+
+.camera-off-icon {
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  border-radius: 50%;
+  background: oklch(1 0 0 / 0.1);
+}
+
+/* Inline validation, added for the Join Call form. */
+.field-error {
+  color: var(--color-danger);
+  font-size: 0.72rem;
+  font-weight: 620;
+  line-height: 1.4;
+}
+
+.field-input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.field-input[aria-invalid="true"]:focus {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--color-danger) 16%, transparent);
+}
+
+/* Quieter companion to .primary-button, used beside it on the status screens. */
+.secondary-button {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--color-text);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.secondary-button:hover {
+  border-color: color-mix(in oklab, var(--color-primary) 30%, var(--color-border));
+  background: var(--color-surface);
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.status-actions {
+  display: grid;
+  gap: var(--space-3);
+  width: 16rem;
+  max-width: 100%;
+  margin-top: var(--space-6);
+}
+
+.status-hint {
+  max-width: 22rem;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+/* The camera-off mark sits on white here, so it needs its own colouring. */
+.media-error-icon {
+  margin-bottom: var(--space-6);
+  background: color-mix(in oklab, var(--color-danger) 10%, var(--white));
+  color: var(--color-danger);
+}
+
+.control-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.control-button:disabled:hover {
+  transform: none;
+}
+
+/*
+ * Self-view is mirrored so movement matches what the caller expects. The main
+ * surface has an entry animation, which would otherwise override the mirror for
+ * its duration, so it gets a mirrored copy of those keyframes.
+ */
+.video-mirrored {
+  transform: scaleX(-1);
+}
+
+.main-video.video-mirrored {
+  animation-name: appear-mirrored;
+}
+
+@keyframes appear-mirrored {
+  from {
+    opacity: 0.5;
+    transform: scaleX(-1) scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(-1);
+  }
+}
+
+/* Only rendered when VITE_ENABLE_DEMO_VIDEO is on: prerecorded footage is labelled. */
+.demo-badge {
+  position: absolute;
+  top: max(4.5rem, calc(var(--safe-top) + 3.5rem));
+  left: var(--space-5);
+  max-width: 11rem;
+  border: 1px solid oklch(1 0 0 / 0.16);
+  border-radius: var(--radius-pill);
+  padding: 0.4rem 0.65rem;
+  background: oklch(0.1 0.03 255 / 0.5);
+  color: oklch(1 0 0 / 0.86);
+  font-size: 0.62rem;
+  font-weight: 650;
+  backdrop-filter: blur(0.75rem);
+}
+
+/*
+ * Remote participant video. It is layered over the profile avatar so the frame
+ * is never empty: the avatar holds the space and the video fades in once it can
+ * actually play.
+ */
+/*
+ * The remote, once it is the main surface.
+ *
+ * Filling the frame would crop a 16:9 clip to a vast centre zoom on a phone —
+ * the person's face runs off both sides. So it is fitted whole, and the avatar
+ * behind it is blurred up to fill the rest rather than leaving black bars.
+ */
+.main-video-fit {
+  object-fit: contain;
+}
+
+.main-video-backdrop {
+  filter: blur(2.5rem) brightness(0.55);
+  transform: scale(1.18);
+}
+
+.main-video-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.video-pip .pip-video-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.remote-fade-in {
+  animation: remote-fade 320ms ease both;
+}
+
+@keyframes remote-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Only appears when the browser refused to start the remote audio itself. */
+/*
+ * The way back to sound when the browser refused it.
+ *
+ * Mobile Safari will not start audible playback without a gesture it trusts, so
+ * a source that has audio can legitimately begin muted. That is only acceptable
+ * if the way to unmute is obvious — a faint 11px chip was not, and the call
+ * simply sounded broken. It is now a real, thumb-sized control in CallaStar
+ * blue, comfortably past the 44px touch minimum.
+ */
+.remote-audio-chip {
+  position: absolute;
+  top: max(4.5rem, calc(var(--safe-top) + 3.5rem));
+  left: 50%;
+  z-index: 3;
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0.5rem 1.1rem;
+  background: var(--blue);
+  color: var(--white);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 680;
+  box-shadow: 0 0.5rem 1.25rem oklch(0.1 0.03 255 / 0.45);
+  transform: translateX(-50%);
+  cursor: pointer;
+  animation: remote-audio-nudge 2.4s ease-in-out infinite;
+}
+
+@keyframes remote-audio-nudge {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .remote-audio-chip {
+    animation: none;
+  }
+}
+
+.pip-note {
+  position: absolute;
+  right: 0.5rem;
+  top: 0.45rem;
+  z-index: 2;
+  border-radius: var(--radius-pill);
+  padding: 0.15rem 0.4rem;
+  background: oklch(0.1 0.02 255 / 0.55);
+  color: oklch(1 0 0 / 0.85);
+  font-size: 0.58rem;
+  font-weight: 650;
+}
+
+/* Profile bio on the pre-call confirmation card. */
+.host-bio {
+  margin-top: 0.2rem;
+  color: var(--slate);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+/*
+ * Audio call. The same dark call canvas as a video call, because it is the same
+ * kind of moment - only there is nothing to look at but the person being
+ * called, so the avatar carries the screen and the controls keep their styling.
+ */
+.audio-call {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  overflow: hidden;
+  background: radial-gradient(120% 80% at 50% 0%, oklch(0.28 0.06 258) 0%, oklch(0.18 0.04 256) 60%, oklch(0.15 0.03 255) 100%);
+  color: var(--white);
+}
+
+.audio-call-body {
+  display: flex;
+  margin: auto;
+  align-items: center;
+  flex-direction: column;
+  padding: max(2rem, calc(var(--safe-top) + 1rem)) 1.25rem 0;
+  text-align: center;
+}
+
+.audio-call .avatar {
+  border-color: oklch(1 0 0 / 0.16);
+}
+
+.audio-call-name {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.audio-call-status {
+  margin: 0.5rem 0 1rem;
+  color: oklch(1 0 0 / 0.72);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.audio-call .wave-bars i {
+  background: oklch(1 0 0 / 0.65);
+}
+
+.audio-call .secure-pill {
+  margin-top: 1.25rem;
+  border: 1px solid oklch(1 0 0 / 0.14);
+  background: oklch(1 0 0 / 0.08);
+  color: oklch(1 0 0 / 0.78);
+}
+
+.audio-preview-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.85rem 0 0;
+  color: oklch(1 0 0 / 0.6);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.audio-unmute {
+  margin-top: 1rem;
+  border: 1px solid oklch(1 0 0 / 0.2);
+  border-radius: var(--radius-pill);
+  padding: 0.5rem 0.9rem;
+  background: oklch(1 0 0 / 0.12);
+  color: var(--white);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+/*
+ * Host media during an audio call: audible, never visible. It keeps its size so
+ * the browser treats it as a real playing element, and sits transparent behind
+ * the avatar rather than being removed from the layout.
+ */
+.audio-remote-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Natural remote-media end: keep the final frame and explain only that the
+   remote participant is reconnecting. This is not a network-error surface. */
+.remote-reconnect {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: oklch(0.14 0.04 255 / 0.52);
+  color: var(--white);
+  text-align: center;
+  animation: remote-reconnect-in 190ms ease-out both;
+}
+
+.remote-reconnect-spinner {
+  width: 1.625rem;
+  height: 1.625rem;
+  flex: 0 0 auto;
+  border: 0.16rem solid oklch(1 0 0 / 0.3);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+.remote-reconnect-title { font-size: 0.94rem; font-weight: 700; line-height: 1.2; }
+.remote-reconnect-copy { color: oklch(1 0 0 / 0.7); font-size: 0.75rem; line-height: 1.2; }
+
+.remote-reconnect-main .remote-reconnect-spinner { width: 2.5rem; height: 2.5rem; border-width: 0.2rem; }
+.remote-reconnect-main .remote-reconnect-title { font-size: 1.05rem; }
+.remote-reconnect-main .remote-reconnect-copy { font-size: 0.85rem; }
+
+.remote-reconnect-tile { gap: 0.22rem; padding: 0.5rem; }
+.remote-reconnect-tile .remote-reconnect-spinner { width: 1.625rem; height: 1.625rem; }
+.remote-reconnect-tile .remote-reconnect-title { font-size: 0.875rem; white-space: nowrap; }
+.remote-reconnect-tile .remote-reconnect-copy { max-width: 100%; font-size: 0.7rem; white-space: nowrap; }
+
+/* A phone PiP is deliberately compact. Preserve the accessible copy, but
+   remove the secondary visual line before it can crowd the final frame. */
+@media (max-width: 43.75rem) {
+  .remote-reconnect-tile .remote-reconnect-copy { display: none; }
+}
+
+.audio-reconnecting { margin: 1rem 0 0; color: var(--white); font-size: 0.86rem; font-weight: 700; }
+.audio-reconnecting span { display: block; margin-top: 0.2rem; color: oklch(1 0 0 / 0.65); font-size: 0.75rem; font-weight: 500; }
+
+@keyframes remote-reconnect-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .remote-reconnect,
+  .remote-reconnect-spinner { animation: none !important; }
+}
+
+.audio-call-controls {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  margin: auto auto max(1.25rem, calc(var(--safe-bottom) + 0.75rem));
+  transform: none;
+}
+
+/* The one number worth reading on the ended screen. */
+.call-ended-duration {
+  margin: 0.25rem 0 0.75rem;
+  color: var(--navy);
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+/* ------------------------------------------- subscription checkpoint */
+
+/*
+ * The check happens ON a call that is still running.
+ *
+ * Deliberately a thin scrim with no blur: the remote video is playing
+ * underneath and has to be seen to be playing. Anything heavier would look
+ * like the call had been interrupted, which is exactly what is not happening.
+ */
+.access-checking {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 2rem;
+  background: radial-gradient(
+    circle at 50% 45%,
+    oklch(0.18 0.035 255 / 0.28) 0%,
+    oklch(0.18 0.035 255 / 0.52) 100%
+  );
+  color: var(--white);
+  text-align: center;
+  pointer-events: none;
+  animation: cs-fade 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.access-spinner {
+  width: 3.75rem;
+  height: 3.75rem;
+  margin-bottom: 1.75rem;
+  border: 0.3rem solid oklch(1 0 0 / 0.25);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+.access-title {
+  max-width: 18rem;
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.access-copy {
+  max-width: 21rem;
+  margin: 0.85rem 0 0;
+  color: oklch(1 0 0 / 0.8);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+/* ---- sheets ---- */
+
+.sheet-title {
+  margin: 0;
+  color: var(--navy);
+  font-size: clamp(1.8rem, 7vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.sheet-title-centered,
+.sheet-copy-centered {
+  text-align: center;
+}
+
+.sheet-copy {
+  margin: 0.85rem 0 0;
+  color: var(--slate);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.sheet-note {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.sheet-reference {
+  margin: 1rem 0 0;
+  color: var(--slate);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.sheet-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.sheet-security {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.sheet-security svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.cs-sheet .cs-note {
+  margin-top: 1.25rem;
+}
+
+/* ---- plan cards ---- */
+
+.plan-list {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 1.25rem;
+  background: var(--white);
+}
+
+.plan-card-popular {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.plan-card-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: var(--navy);
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: var(--radius-pill);
+  padding: 0.3rem 0.7rem;
+  background: color-mix(in oklab, var(--blue) 14%, var(--white));
+  color: var(--blue-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.plan-card-price {
+  color: var(--navy);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.plan-card-price small {
+  color: var(--slate);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.plan-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.plan-features {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  color: var(--slate);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.plan-check {
+  display: grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--blue) 12%, var(--white));
+  color: var(--blue);
+}
+
+.plan-choose {
+  flex: 0 0 auto;
+  min-height: 3rem;
+  border: 1.5px solid var(--blue);
+  border-radius: var(--radius-pill);
+  padding: 0 1.15rem;
+  white-space: nowrap;
+  background: var(--white);
+  color: var(--blue);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.plan-choose-primary {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.plan-choose:hover {
+  background: var(--blue-dark);
+  border-color: var(--blue-dark);
+  color: var(--white);
+}
+
+/* ---- payment method ---- */
+
+.plan-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+  border-radius: var(--radius-card);
+  padding: 1rem;
+  background: var(--blue-tint);
+}
+
+.plan-summary-icon {
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.9rem;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.plan-summary-text {
+  display: grid;
+  flex: 1;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.plan-summary-text strong {
+  color: var(--navy);
+  font-size: 1.15rem;
+}
+
+.plan-summary-text span {
+  color: var(--slate);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.plan-summary-price {
+  padding-left: 0.9rem;
+  border-left: 1px solid color-mix(in oklab, var(--blue) 20%, var(--line));
+  color: var(--navy);
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.pay-options {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.pay-icon {
+  display: grid;
+  width: 3.1rem;
+  height: 3.1rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.85rem;
+  color: var(--white);
+}
+
+.pay-icon-whatsapp {
+  background: #25d366;
+}
+
+.pay-icon-chat {
+  background: var(--blue);
+}
+
+.plan-badge {
+  white-space: nowrap;
+}
+
+@media (max-width: 20rem) {
+  .plan-card-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .plan-choose {
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------- join dialogs */
+
+.join-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.join-close {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--slate);
+}
+
+.join-dialog-centered {
+  text-align: center;
+}
+
+.join-dialog-centered .join-copy,
+.join-dialog-centered .join-title {
+  margin-inline: auto;
+}
+
+.join-back {
+  margin: -0.25rem 0 0.25rem -0.75rem;
+}
+
+.join-text-action {
+  border: 0;
+  padding: 0.4rem;
+  background: none;
+  color: var(--blue);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.join-fields {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1.75rem;
+}
+
+.join-code-input {
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.join-dialog .cs-note {
+  margin-top: 1rem;
+}
+
+/* ---- Ready to call ---- */
+
+.ready-avatar {
+  position: relative;
+  width: 9.5rem;
+  height: 9.5rem;
+  margin: 1.75rem auto 1.25rem;
+}
+
+.ready-avatar img {
+  width: 100%;
+  height: 100%;
+  border: 0.25rem solid var(--white);
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0.75rem 2rem oklch(0.25 0.04 255 / 0.12);
+}
+
+.ready-verified,
+.ready-online {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 0.2rem solid var(--white);
+  border-radius: 50%;
+}
+
+.ready-verified {
+  top: 0.35rem;
+  right: 0.1rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.ready-online {
+  right: 0.9rem;
+  bottom: 0.6rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  background: var(--success);
+}
+
+.ready-name {
+  margin: 0;
+  color: var(--navy);
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+.ready-role {
+  margin: 0.35rem 0 0;
+  color: var(--slate);
+  font-size: 1rem;
+}
+
+.ready-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  border-radius: var(--radius-pill);
+  padding: 0.5rem 1rem;
+  background: color-mix(in oklab, var(--success) 14%, var(--white));
+  color: color-mix(in oklab, var(--success) 72%, var(--navy));
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.ready-status span {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.ready-divider {
+  margin: 1.5rem 0 1.25rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.ready-footnote {
+  text-align: center;
+}
+
+/* -------------------------------------------------- call type (connect) */
+
+.connect-page {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  background: var(--white);
+}
+
+.connect-header {
+  display: flex;
+  width: min(100% - 2.5rem, 40rem);
+  margin: 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: max(0.75rem, var(--safe-top)) 0 0.5rem;
+}
+
+.icon-back {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-left: -0.6rem;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--navy);
+}
+
+.connect-content {
+  display: flex;
+  width: min(100% - 2.5rem, 40rem);
+  flex: 1;
+  margin: 0 auto;
+  flex-direction: column;
+  padding: 1.75rem 0 max(1.5rem, calc(var(--safe-bottom) + 1rem));
+}
+
+.connect-options {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 2.25rem;
+}
+
+.connect-options .cs-option {
+  min-height: 6.5rem;
+  padding-inline: 1.35rem;
+}
+
+.connect-action {
+  margin-top: auto;
+  padding-top: 2.5rem;
+}
+
+/* ------------------------------------------------------------------------
+ * Prototype primitives: the pieces every approved screen is built from.
+ * ---------------------------------------------------------------------- */
+
+/* Display title: large, tight, left aligned, navy. */
+.cs-display {
+  margin: 0;
+  color: var(--navy);
+  font-size: clamp(2.15rem, 9vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.06;
+  letter-spacing: -0.045em;
+}
+
+.cs-lede {
+  margin: 0.85rem 0 0;
+  color: var(--slate);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+/* Brand lockup used on light screens: blue mark, navy wordmark. */
+.cs-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Input with a leading icon and no separate label, as drawn. */
+.cs-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.cs-field-icon {
+  position: absolute;
+  left: 1.05rem;
+  color: var(--slate);
+  pointer-events: none;
+}
+
+.cs-input {
+  width: 100%;
+  min-height: 3.75rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 0 1.1rem;
+  background: var(--white);
+  color: var(--navy);
+  /* 16px minimum keeps iOS Safari from zooming the page on focus. */
+  font-size: 1.0625rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.cs-field .cs-input {
+  padding-left: 3.25rem;
+}
+
+.cs-input::placeholder {
+  color: var(--muted);
+}
+
+.cs-input:focus {
+  border-color: var(--blue);
+  outline: none;
+  box-shadow: 0 0 0 0.25rem var(--blue-soft);
+}
+
+.cs-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Selectable row with a radio on the right. */
+.cs-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 1.15rem 1.15rem;
+  background: var(--white);
+  color: var(--navy);
+  text-align: left;
+  transition: border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cs-option-selected {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+
+.cs-option-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--blue);
+}
+
+.cs-option-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cs-option-title {
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.cs-option-copy {
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+/* The radio itself: ring, filled when chosen. */
+.cs-radio {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+}
+
+.cs-option-selected .cs-radio {
+  border-color: var(--blue);
+}
+
+.cs-radio::after {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: var(--blue);
+  content: "";
+  transform: scale(0);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cs-option-selected .cs-radio::after {
+  transform: scale(1);
+}
+
+/* Pale blue information panel with a circled glyph. */
+.cs-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--blue) 22%, var(--line));
+  border-radius: var(--radius-card);
+  padding: 0.9rem 1rem;
+  background: var(--blue-tint);
+  color: var(--slate);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.cs-note-icon {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+/* Bottom sheet over a live call canvas. */
+.cs-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  /* Above the call controls and every other call overlay. */
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: oklch(0.2 0.03 255 / 0.35);
+  animation: cs-fade 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cs-sheet {
+  width: min(100%, 34rem);
+  max-height: 92dvh;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  padding: 0.75rem 1.5rem max(1.5rem, calc(var(--safe-bottom) + 1rem));
+  background: var(--white);
+  animation: cs-sheet-in 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cs-sheet-grip {
+  width: 2.75rem;
+  height: 0.3rem;
+  margin: 0 auto 1.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+}
+
+@keyframes cs-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cs-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-sheet-backdrop,
+  .cs-sheet {
+    animation: none;
+  }
+}
+
+/* Desktop and tablet: the sheet becomes a centred dialog, not a stretched sheet. */
+@media (min-width: 48rem) {
+  .cs-sheet-backdrop {
+    align-items: center;
+  }
+
+  .cs-sheet {
+    max-height: 86dvh;
+    border-radius: var(--radius-sheet);
+    padding-bottom: 1.75rem;
+  }
+
+  .cs-sheet-grip {
+    display: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .landing-content {
+    left: max(3.5rem, calc((100vw - 76rem) / 2));
+    right: auto;
+    width: 31rem;
+    bottom: max(3rem, var(--safe-bottom));
+    padding: 0;
+  }
+
+  .landing-top {
+    padding: max(2rem, var(--safe-top)) max(3.5rem, calc((100vw - 76rem) / 2)) 0;
+  }
+
+  .hero-pip {
+    top: max(6.5rem, calc(var(--safe-top) + 5rem));
+    right: max(3.5rem, calc((100vw - 76rem) / 2));
+    width: 10rem;
+    height: 13rem;
+  }
+
+  .hero-title {
+    max-width: 31rem;
+  }
+
+  .landing-cta {
+    width: 14rem;
+  }
+
+  .privacy-line {
+    width: 14rem;
+  }
+
+  .choose-content {
+    justify-content: center;
+    padding-top: 3rem;
+  }
+
+  .option-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .option-card {
+    min-height: 11rem;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 1.35rem;
+  }
+
+  .selection-mark {
+    position: absolute;
+    top: 1.35rem;
+    right: 1.35rem;
+  }
+
+  .choose-action {
+    width: 20rem;
+    margin: 1.25rem auto 0;
+  }
+
+  .form-wrap {
+    padding: 3rem 0;
+  }
+
+  .form-card {
+    padding: 2.5rem;
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .join-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .avatar-wrap {
+    width: 9rem;
+    height: 9rem;
+  }
+
+  .video-pip {
+    width: 10rem;
+    height: 7.5rem;
+    right: 2rem;
+  }
+
+  .remote-connecting-tile {
+    width: 10rem;
+    height: 7.5rem;
+    right: 2rem;
+  }
+
+  .call-top {
+    left: 2rem;
+    right: 2rem;
+  }
+
+  .call-controls {
+    bottom: max(2rem, calc(var(--safe-bottom) + 1rem));
+    max-width: 32rem;
+    padding: 1rem 0.75rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  .landing-image {
+    object-position: center 36%;
+  }
+
+  .landing-overlay {
+    background:
+      linear-gradient(to right, oklch(0.12 0.04 255 / 0.78), transparent 68%),
+      linear-gradient(to top, oklch(0.12 0.04 255 / 0.46), transparent 55%);
+  }
+
+  .hero-pip {
+    width: 12rem;
+    height: 9rem;
+  }
+
+  .active-call {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    box-sizing: border-box;
+    background: oklch(0.16 0.035 255);
+  }
+
+  .call-main-slot {
+    position: relative;
+    inset: auto;
+    width: min(100%, calc((100dvh - 4rem) * 1.7778));
+    max-height: calc(100dvh - 4rem);
+    aspect-ratio: 16 / 9;
+    border-radius: 1.5rem;
+    box-shadow: 0 1.5rem 4rem oklch(0.08 0.03 255 / 0.38);
+  }
+
+  .main-video-fit { object-fit: cover; }
+
+  .video-pip,
+  .remote-connecting-tile {
+    width: clamp(13.75rem, 18vw, 17.5rem);
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+
+  .active-call {
+    --pip-inset: clamp(1.5rem, 2.5vw, 2rem);
+    --pip-top: clamp(5.5rem, 9vh, 7rem);
+    --pip-bottom: 11rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

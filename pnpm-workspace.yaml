@@ -1,0 +1,5 @@
+# esbuild ships a prebuilt binary through a postinstall script. Vitest here runs
+# on Vite 8 (rolldown) and transforms tests without it, so the script stays
+# disabled rather than being approved for a binary nothing in this repo runs.
+allowBuilds:
+  esbuild: false

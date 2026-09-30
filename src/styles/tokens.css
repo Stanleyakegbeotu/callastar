@@ -1,0 +1,62 @@
+/**
+ * Design tokens for the approved CallaStar palette.
+ *
+ * The colour values are the ones the Figma design shipped with and are
+ * unchanged. The radius and spacing scales were added alongside them: new rules
+ * use the tokens, while existing rules keep their literal values so the
+ * rendered design stays byte-for-byte what was approved.
+ *
+ * Note on --radius-*: Tailwind ships a theme scale under the same names. This
+ * file is imported after Tailwind, so these values win, and a `rounded-md`
+ * utility would follow the CallaStar radius rather than the Tailwind default.
+ * That is intentional - the design is the source of truth here - and worth
+ * knowing before reaching for a Tailwind radius utility.
+ */
+:root {
+  /* Exact brand values from the approved prototype screens. */
+  --blue: #0a84ff;
+  --blue-dark: #006be6;
+  --blue-soft: #eaf3ff;
+  --blue-tint: #f1f7ff;
+  --navy: #071d42;
+  --slate: #667894;
+  --muted: #8ea0b8;
+  --line: #dde7f1;
+  --surface: #f6f9fc;
+  --white: oklch(1 0 0);
+  --danger: oklch(0.58 0.23 27);
+  --danger-dark: oklch(0.5 0.22 27);
+  --success: oklch(0.62 0.16 153);
+  /* Amber is reserved for "needs attention" in the admin workspace. */
+  --warning: oklch(0.78 0.15 75);
+  --warning-soft: oklch(0.97 0.04 85);
+  --warning-text: oklch(0.45 0.11 70);
+  --shadow: 0 1.5rem 4rem oklch(0.25 0.04 255 / 0.1);
+
+  /* Semantic aliases over the palette above. */
+  --color-primary: var(--blue);
+  --color-primary-strong: var(--blue-dark);
+  --color-background: var(--white);
+  --color-surface: var(--surface);
+  --color-text: var(--navy);
+  --color-text-muted: var(--slate);
+  --color-border: var(--line);
+  --color-danger: var(--danger);
+
+  --radius-sm: 0.8rem;
+  --radius-md: 0.9rem;
+  --radius-lg: 1.15rem;
+  --radius-pill: 999px;
+  /* Sheets and large modals in the prototype are noticeably rounder. */
+  --radius-sheet: 1.75rem;
+  --radius-card: 1rem;
+  /* The prototype CTA is a full pill, tall enough for a thumb. */
+  --control-height: 3.5rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+}

@@ -1,0 +1,23 @@
+{
+  "name": "callastar-signaling",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "CallaStar WebSocket signalling service. Call control only — never media.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}
