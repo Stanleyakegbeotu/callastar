@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { COLLECTION, CalibrationCollector, gradeCalibration, type CalibrationContext } from "./calibrationCollector";
 import { CALIBRATION_PROFILE_VERSION } from "./calibrationTypes";
 import type { DerivedFaceGeometry, FaceTrackingResult } from "./faceTypes";
+import { ACCEPTANCE_ENVELOPE } from "./calibrationStatistics";
 import type { PoseDerivedGeometry, PoseTrackingResult } from "./poseTypes";
 
 /**
@@ -321,6 +322,31 @@ describe("window length", () => {
     expect(completedAt!, "calibration should not feel like a scan").toBeLessThan(2500);
   });
 
+  it("names the head position, not jitter, when a steady head stayed tilted", () => {
+    // The real-photograph camera fixture rests at 14° of roll. It is perfectly
+    // still, and used to time out as "Could not get a steady reading".
+    const collector = new CalibrationCollector();
+    collector.start("full", CONTEXT, 0);
+    const end = feed(collector, 200, () => ({ face: face({}, { roll: 0.25 }), pose: pose() }), { stepMs: 110 });
+    collector.accept(face({}, { roll: 0.25 }), pose(), end + COLLECTION.timeoutMs);
+
+    const state = collector.getState();
+    expect(state.phase).toBe("failed");
+    expect(state.failure).toBe("out-of-position");
+    expect(state.failureRejection).toBe("head-tilted");
+  });
+
+  it("still calls a moving operator unstable", () => {
+    const collector = new CalibrationCollector();
+    collector.start("full", CONTEXT, 0);
+    // In the envelope every frame, but never still: yaw swings past tolerance.
+    const end = feed(collector, 200, (index) => ({ face: face({}, { yaw: index % 2 ? 0.1 : -0.1 }), pose: pose() }), { stepMs: 110 });
+    collector.accept(face(), pose(), end + COLLECTION.timeoutMs);
+
+    expect(collector.getState().failure).toBe("unstable");
+    expect(collector.getState().failureRejection).toBeNull();
+  });
+
   it("gives up rather than waiting forever", () => {
     const collector = new CalibrationCollector();
     collector.start("full", CONTEXT, 0);
@@ -390,7 +416,7 @@ describe("partial pose", () => {
 });
 
 describe("warnings", () => {
-  it("flags a strongly angled resting head without failing", () => {
+  it("refuses a strongly angled neutral while leaving collection available", () => {
     const collector = new CalibrationCollector();
     collector.start("full", CONTEXT, 0);
     feed(collector, 40, (index) => ({
@@ -398,10 +424,9 @@ describe("warnings", () => {
       pose: pose(),
     }), { stepMs: 60 });
 
-    const profile = collector.getState().profile!;
-    expect(profile.quality.warnings).toContain("head-strongly-angled");
-    // Informational, not an engine failure.
-    expect(collector.getState().phase).toBe("ready");
+    expect(collector.getState().profile).toBeNull();
+    expect(collector.getState().rejection).toBe('head-angled');
+    expect(collector.getState().phase).toBe("waiting-for-stable-tracking");
   });
 
   it("flags shoulders that already reach the frame edge", () => {
@@ -460,12 +485,12 @@ describe("recalibration", () => {
     expect(collector.getState().acceptedFrames).toBe(0);
 
     feed(collector, 40, (index) => ({
-      face: face({}, { ...faceGeometry({ yaw: 0.2, scale: 0.14 }), center: { x: 0.44, y: 0.5, z: 0 } }),
+      face: face({}, { ...faceGeometry({ yaw: 0.12, scale: 0.14 }), center: { x: 0.44, y: 0.5, z: 0 } }),
       pose: pose(),
     }), { startMs: 10_000, stepMs: 60 });
 
     const second = collector.getState().profile!;
-    expect(second.face.yaw).toBeCloseTo(0.2, 3);
+    expect(second.face.yaw).toBeCloseTo(0.12, 3);
     expect(second.face.yaw).not.toBeCloseTo(first.face.yaw, 2);
     expect(second.createdAt).toBeGreaterThan(first.createdAt);
   });
@@ -500,4 +525,24 @@ describe("recalibration", () => {
     expect(collector.accept(face(), pose(), 0)).toBe(false);
     expect(collector.getState().acceptedFrames).toBe(0);
   });
+});
+
+it('confirms calibration guidance over three frames without admitting rejected samples', () => {
+ // Straddles the envelope's own limit, so the debounce is tested, not a number.
+ const over = ACCEPTANCE_ENVELOPE.maxFaceScale + 0.001, under = ACCEPTANCE_ENVELOPE.maxFaceScale - 0.001;
+ const c = new CalibrationCollector(); c.start('face-only', CONTEXT, 0);
+ c.accept(face({}, {scale:over}), null, 0);
+ expect(c.getState().rejection).toBeNull(); expect(c.getState().acceptedFrames).toBe(0);
+ c.accept(face({}, {scale:under}), null, 40);
+ c.accept(face({}, {scale:over}), null, 80);
+ expect(c.getState().rejection).toBeNull();
+ c.accept(face({}, {scale:over}), null, 120); c.accept(face({}, {scale:over}), null, 160);
+ expect(c.getState().rejection).toBe('too-close');
+ c.accept(face(), null, 200);expect(c.getState().rejection).toBe('too-close');
+ c.accept(face(), null, 240);c.accept(face(), null, 280);expect(c.getState().rejection).toBeNull();
+});
+it('rejects the physically reported eleven-degree pitched neutral', () => {
+ const c=new CalibrationCollector();c.start('face-only',CONTEXT,0);
+ feed(c,30,()=>({face:face({}, {pitch:-11*Math.PI/180}),pose:null}),{stepMs:60});
+ expect(c.getState().profile).toBeNull();expect(c.getState().rejection).toBe('head-pitched');
 });

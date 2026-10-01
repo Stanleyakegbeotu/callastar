@@ -1,17 +1,12 @@
 import type { CalibrationMotion } from "../relativeMotion";
 import type { SourceMovementEnvelope } from "../../source/sourceTypes";
+import { rigidMotionFromCalibration } from "../rigidFaceMotion";
 
 /**
- * Coordinates used by the first renderer.
- *
- * Source landmark space is normalised image space: x grows right, y grows
- * down and z is MediaPipe's shallow relative depth. Live tracking uses that
- * same unmirrored convention. `CalibrationMotion` is relative to its neutral
- * pose in face-width units. The render scene is centred world space: x grows
- * right, y grows up, and the camera looks down -z. The y conversion happens
- * exactly once here; source texture v also flips once in `sourceMesh.ts`.
+ * The renderer's pose: `RigidFaceMotion` (physical — pitch + looking UP, y +
+ * UP) after the envelope, in eye-spans of the operator's neutral face. Every
+ * MediaPipe sign was converted in `rigidFaceMotion.ts`; nothing here negates.
  */
-
 export interface FaceRenderPose {
   x: number;
   y: number;
@@ -31,14 +26,22 @@ export interface FaceRenderLimits {
   roll: number;
 }
 
+/**
+ * Only yaw and pitch are limited by what a photograph contains. Moving,
+ * zooming and tilting in the image plane show nothing the source lacks, so
+ * those bounds are sanity limits on tracking, not on the source — the earlier
+ * 0.45 eye-span and 0.82–1.25 scale envelopes clamped ordinary call movement
+ * and made the face feel detached from the operator. The renderer separately
+ * keeps the face on screen.
+ */
 export const FACE_RENDER_LIMITS: FaceRenderLimits = {
-  translationX: 0.55,
-  translationY: 0.45,
-  scaleMin: 0.78,
-  scaleMax: 1.28,
+  translationX: 3,
+  translationY: 3,
+  scaleMin: 0.45,
+  scaleMax: 2.4,
   yaw: 0.42,
   pitch: 0.28,
-  roll: 0.22,
+  roll: Math.PI / 3,
 };
 
 export const NEUTRAL_FACE_RENDER_POSE: FaceRenderPose = {
@@ -67,15 +70,14 @@ export function poseFromMotion(
   motion: CalibrationMotion | null | undefined,
   limits: FaceRenderLimits = FACE_RENDER_LIMITS,
 ): FaceRenderPoseResult {
-  const head = motion?.head;
+  const rigid = rigidMotionFromCalibration(motion?.head);
   const requested: FaceRenderPose = {
-    // Tracking y grows down; world y grows up.
-    x: finite(head?.translationX, 0),
-    y: -finite(head?.translationY, 0),
-    scale: finite(head?.scaleDelta, 1),
-    yaw: finite(head?.yawDelta, 0),
-    pitch: finite(head?.pitchDelta, 0),
-    roll: finite(head?.rollDelta, 0),
+    x: finite(rigid.translationX, 0),
+    y: finite(rigid.translationY, 0),
+    scale: finite(rigid.scale, 1),
+    yaw: finite(rigid.yaw, 0),
+    pitch: finite(rigid.pitch, 0),
+    roll: finite(rigid.roll, 0),
   };
   const applied: FaceRenderPose = {
     x: clamp(requested.x, -limits.translationX, limits.translationX),
@@ -91,21 +93,22 @@ export function poseFromMotion(
   return { requested, applied, clamped };
 }
 
-/** The usable motion is the intersection of renderer safety and source coverage. */
+/**
+ * The usable motion is the intersection of renderer safety and source
+ * coverage — for the two axes where coverage means anything. A turn or a nod
+ * reveals a side of the head the photograph may not show; moving, zooming and
+ * tilting do not, so the source's translation, scale and roll figures are not
+ * applied to the face (the avatar and diagnostics still read them).
+ */
 export function poseFromSourceMotion(
   motion: CalibrationMotion | null | undefined,
   source: SourceMovementEnvelope,
 ): FaceRenderPoseResult {
-  const sourceTranslation = source.translation ?? FACE_RENDER_LIMITS.translationX;
-  return poseFromMotion(motion, {
-    translationX: Math.min(FACE_RENDER_LIMITS.translationX, sourceTranslation),
-    translationY: Math.min(FACE_RENDER_LIMITS.translationY, sourceTranslation),
-    scaleMin: Math.max(FACE_RENDER_LIMITS.scaleMin, source.scaleMin),
-    scaleMax: Math.min(FACE_RENDER_LIMITS.scaleMax, source.scaleMax),
-    yaw: Math.min(FACE_RENDER_LIMITS.yaw, source.yawLeft, source.yawRight),
-    pitch: Math.min(FACE_RENDER_LIMITS.pitch, source.pitchUp, source.pitchDown),
-    roll: Math.min(FACE_RENDER_LIMITS.roll, source.roll),
-  });
+  const result = poseFromMotion(motion, FACE_RENDER_LIMITS);
+  result.applied.yaw = clamp(result.applied.yaw, -source.yawRight, source.yawLeft);
+  result.applied.pitch = clamp(result.applied.pitch, -source.pitchDown, source.pitchUp);
+  result.clamped = (Object.keys(result.applied) as (keyof FaceRenderPose)[]).filter(key => result.applied[key] !== result.requested[key]);
+  return result;
 }
 
 /** Frame-rate independent exponential smoothing of only the six global values. */

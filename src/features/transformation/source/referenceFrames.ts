@@ -1,5 +1,6 @@
 import type { DerivedFaceGeometry } from "../engine/faceTypes";
 import type { PoseDerivedGeometry } from "../engine/poseTypes";
+import { physicalOrientation } from "../engine/rigidFaceMotion";
 
 import { SOURCE_RULES } from "./sourceQuality";
 import type { ReferenceAngle, ReferenceFrame } from "./sourceTypes";
@@ -75,8 +76,8 @@ export function classifyAngle(face: DerivedFaceGeometry): ReferenceAngle | null 
   }
 
   if (Math.abs(pitch) >= CLASSIFICATION.minVerticalPitch) {
-    // Positive pitch is the head tilted back, which is looking up.
-    return pitch > 0 ? "slight-up" : "slight-down";
+    // MediaPipe pitch is positive looking DOWN (measured; see rigidFaceMotion.ts).
+    return physicalOrientation(face).pitch > 0 ? "slight-up" : "slight-down";
   }
 
   if (Math.abs(yaw) <= CLASSIFICATION.frontYaw && Math.abs(pitch) <= CLASSIFICATION.frontPitch) {
@@ -92,6 +93,21 @@ export interface CandidateInput {
   timestampSeconds: number;
   face: DerivedFaceGeometry;
   pose: PoseDerivedGeometry | null;
+}
+
+/** Neutral primary score, independent of the multi-angle bank. No unmeasured blur/lighting claim. */
+export function scoreNeutralCandidate(candidate: CandidateInput): number {
+  if (screenCandidate(candidate)) return -Infinity;
+  const f = candidate.face;
+  const frontal = Math.max(0, 1 - (Math.abs(f.yaw) + Math.abs(f.pitch) + Math.abs(f.roll)) / .7);
+  const eyes = Math.min(f.eyeOpennessLeft, f.eyeOpennessRight);
+  const mouth = 1 - Math.min(1, f.mouthOpenness);
+  return .6 * frontal + .15 * eyes + .15 * mouth + .1 * Math.min(1, f.scale / SOURCE_RULES.smallFaceScale);
+}
+
+export function selectNeutralCandidate(candidates: readonly CandidateInput[]): CandidateInput | null {
+  return [...candidates].filter(c => Number.isFinite(scoreNeutralCandidate(c)))
+    .sort((a, b) => scoreNeutralCandidate(b) - scoreNeutralCandidate(a) || a.timestampSeconds - b.timestampSeconds)[0] ?? null;
 }
 
 export type CandidateRejection =

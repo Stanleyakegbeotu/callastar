@@ -14,13 +14,25 @@ describe("face renderer motion", () => {
       tracked: true,
       expression: null,
       upperBody: null,
-      head: { translationX: 3, translationY: 2, scaleDelta: 2, yawDelta: 2, pitchDelta: -2, rollDelta: 2 },
+      head: { translationX: 5, translationY: 4, scaleDelta: 3, yawDelta: 2, pitchDelta: -2, rollDelta: 2 },
     });
-    expect(result.requested.y).toBe(-2);
+    expect(result.requested.y).toBe(-4);
+    // MediaPipe's negative pitch is the operator looking UP: physical +.
+    expect(result.requested.pitch).toBe(2);
+    expect(result.applied.pitch).toBe(FACE_RENDER_LIMITS.pitch);
     expect(result.applied.x).toBe(FACE_RENDER_LIMITS.translationX);
     expect(result.applied.y).toBe(-FACE_RENDER_LIMITS.translationY);
     expect(result.applied.scale).toBe(FACE_RENDER_LIMITS.scaleMax);
     expect(result.clamped).toContain("yaw");
+  });
+
+  it("does not crush ordinary call movement", () => {
+    // A step sideways of a face width, a quarter closer, a 20° tilt.
+    const result = poseFromMotion({
+      tracked: true, expression: null, upperBody: null,
+      head: { translationX: 1.5, translationY: -0.8, scaleDelta: 1.25, yawDelta: 0, pitchDelta: 0, rollDelta: 0.35 },
+    });
+    expect(result.clamped).toEqual([]);
   });
 
   it("smooths only toward a global pose and is frame-rate independent", () => {
@@ -40,11 +52,25 @@ describe("face renderer motion", () => {
       { translation: 0.2, scaleMin: 0.9, scaleMax: 1.1, yawLeft: 0.15, yawRight: 0.2,
         pitchUp: 0.1, pitchDown: 0.12, roll: 0.08, basis: "single-image" },
     );
-    expect(result.applied.x).toBeCloseTo(0.2);
-    expect(result.applied.scale).toBeCloseTo(1.1);
+    // A turn or a nod needs pixels the photograph may not have...
     expect(result.applied.yaw).toBeCloseTo(0.15);
+    // ...MediaPipe +0.2 is looking DOWN, so the DOWN budget is the limit.
+    expect(result.applied.pitch).toBeCloseTo(-0.12);
+    // ...but moving, zooming and tilting in the image plane do not.
+    expect(result.applied.x).toBeCloseTo(0.5);
+    expect(result.applied.scale).toBeCloseTo(1.2);
+    expect(result.applied.roll).toBeCloseTo(0.1);
+    expect(result.clamped).toEqual(["yaw", "pitch"]);
+  });
+
+  it("spends the source's UP budget when the operator looks up", () => {
+    const result = poseFromSourceMotion(
+      { tracked: true, expression: null, upperBody: null, head: {
+        translationX: 0, translationY: 0, scaleDelta: 1, yawDelta: 0, pitchDelta: -0.2, rollDelta: 0,
+      } },
+      { translation: 0.2, scaleMin: 0.9, scaleMax: 1.1, yawLeft: 0.15, yawRight: 0.2,
+        pitchUp: 0.1, pitchDown: 0.12, roll: 0.08, basis: "single-image" },
+    );
     expect(result.applied.pitch).toBeCloseTo(0.1);
-    expect(result.applied.roll).toBeCloseTo(0.08);
-    expect(result.clamped).toEqual(["x", "y", "scale", "yaw", "pitch", "roll"]);
   });
 });

@@ -18,7 +18,7 @@ import { expect, test, type Page } from "@playwright/test";
  * contended machine before it could measure anything.
  */
 
-const WIDTHS = [360, 375, 390, 393, 430] as const;
+const WIDTHS = [320, 360, 375, 390, 393, 414, 430] as const;
 const DEV_SESSION_KEY = "callastar.development-admin";
 
 interface Offender {
@@ -34,7 +34,7 @@ async function findOverflow(page: Page): Promise<{
   innerWidth: number;
 }> {
   return page.evaluate(() => {
-    const limit = window.innerWidth;
+    const limit = document.documentElement.clientWidth;
     const offenders: { selector: string; right: number; width: number; scrollWidth: number }[] = [];
 
     const describe = (element: Element): string => {

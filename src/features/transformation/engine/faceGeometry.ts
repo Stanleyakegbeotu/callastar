@@ -126,31 +126,71 @@ export function poseFromLandmarks(landmarks: readonly Point3[]): { yaw: number; 
  * score — high when closed — and mixing the two conventions is an easy way to
  * render a face that blinks inside out.
  */
+/** Vertical eyelid pairs across each eye: outer third, centre, inner third. */
+const EYELID_PAIRS = {
+  left: [[160, 144], [159, 145], [158, 153]],
+  right: [[387, 373], [386, 374], [385, 380]],
+} as const;
+
+/**
+ * Eyelid aperture: the mean of three vertical lid separations over eye width,
+ * so it is scale-free and one noisy landmark cannot open or close an eye.
+ * Normalised so a fully open eye (~0.45 of its width at the centre) reads 1.
+ */
 export function eyeOpenness(landmarks: readonly Point3[], side: "left" | "right"): number {
-  const upper = landmarks[side === "left" ? FACE_LANDMARKS.leftEyeUpper : FACE_LANDMARKS.rightEyeUpper];
-  const lower = landmarks[side === "left" ? FACE_LANDMARKS.leftEyeLower : FACE_LANDMARKS.rightEyeLower];
   const outer = landmarks[side === "left" ? FACE_LANDMARKS.leftEyeOuter : FACE_LANDMARKS.rightEyeOuter];
   const inner = landmarks[side === "left" ? FACE_LANDMARKS.leftEyeInner : FACE_LANDMARKS.rightEyeInner];
-
-  if (!upper || !lower || !outer || !inner) return 0;
-
+  if (!outer || !inner) return 0;
+  let sum = 0;
+  for (const [u, l] of EYELID_PAIRS[side]) {
+    const upper = landmarks[u];
+    const lower = landmarks[l];
+    if (!upper || !lower) return 0;
+    sum += distance(upper, lower);
+  }
   const width = distance(outer, inner) || 1e-6;
-  // A fully open eye sits near 0.45 of its width; that maps to 1.
-  return Math.max(0, Math.min(1, (distance(upper, lower) / width) / 0.45));
+  return Math.max(0, Math.min(1, (sum / 3 / width) / 0.45));
 }
 
 /** Lip separation, normalised by mouth width. */
 export function mouthOpenness(landmarks: readonly Point3[]): number {
-  const upper = landmarks[FACE_LANDMARKS.mouthUpper];
-  const lower = landmarks[FACE_LANDMARKS.mouthLower];
   const left = landmarks[FACE_LANDMARKS.mouthLeft];
   const right = landmarks[FACE_LANDMARKS.mouthRight];
 
-  if (!upper || !lower || !left || !right) return 0;
+  if (!left || !right) return 0;
 
-  const width = distance(left, right) || 1e-6;
+  const dx = right.x - left.x;
+  const dy = right.y - left.y;
+  const width = Math.hypot(dx, dy) || 1e-6;
+  const vx = -dy / width;
+  const vy = dx / width;
+  // Inner-lip cross-sections from the centre out to either side. Projecting
+  // onto the mouth's local perpendicular rejects horizontal corner movement
+  // and remains stable when the head rolls.
+  const pairs = [[13, 14], [82, 87], [312, 317], [81, 178], [311, 402]] as const;
+  let opening = 0;
+  let count = 0;
+  for (const [upperIndex, lowerIndex] of pairs) {
+    const upper = landmarks[upperIndex];
+    const lower = landmarks[lowerIndex];
+    if (!upper || !lower) continue;
+    opening += Math.abs((upper.x - lower.x) * vx + (upper.y - lower.y) * vy);
+    count++;
+  }
+  if (count === 0) return 0;
   // A wide-open jaw is roughly 0.6 of mouth width.
-  return Math.max(0, Math.min(1, (distance(upper, lower) / width) / 0.6));
+  return Math.max(0, Math.min(1, (opening / count / width) / 0.6));
+}
+
+/** Lower-jaw drop relative to the nose, normalized by the cheek-to-cheek span. */
+export function jawDisplacement(landmarks: readonly Point3[]): number {
+  const nose = landmarks[FACE_LANDMARKS.noseTip];
+  const chin = landmarks[FACE_LANDMARKS.chin];
+  const left = landmarks[FACE_LANDMARKS.leftCheek];
+  const right = landmarks[FACE_LANDMARKS.rightCheek];
+  if (!nose || !chin || !left || !right) return 0;
+  const faceWidth = Math.hypot(right.x - left.x, right.y - left.y) || 1e-6;
+  return (chin.y - nose.y) / faceWidth;
 }
 
 /**
@@ -177,7 +217,10 @@ export function mouthCornerLift(landmarks: readonly Point3[], side: "left" | "ri
   // y grows down, so a raised corner has the SMALLER y.
   const lift = (centreY - corner.y) / width;
   // A broad smile lifts a corner by roughly a fifth of mouth width.
-  return Math.max(0, Math.min(1, lift / 0.2));
+  // Do not clamp the upper end here. Jaw opening can move the lip centre down
+  // far enough to exceed 1; retaining the excess lets the caller subtract that
+  // measured jaw contribution before clamping an actual smile signal.
+  return Math.max(0, lift / 0.2);
 }
 
 export function faceBounds(landmarks: readonly Point3[]): DerivedFaceGeometry["bounds"] {

@@ -27,6 +27,16 @@ reasoning recorded there.
 
 **2. Pitch was never inverted.**
 
+> **Corrected in M8.3 — this section is wrong.** MediaPipe pitch is positive
+> looking **down**, not up. It was never measured here (the M5 sign proof
+> covered roll, translation and scale only). M8.3 measured it by rendering the
+> face nose-up and having MediaPipe read the image back
+> (`transformation-m83-roundtrip.browser.spec.ts`): it reads negative. The
+> "physical up → rendered down" symptom below was the inside-out mesh of point
+> 1, which reverses apparent pitch too; fixing the depth AND inverting pitch
+> cancelled out, so the phone kept showing pitch backwards. The conversion now
+> lives in `engine/rigidFaceMotion.ts`.
+
 A genuine conflict of conventions about one axis. MediaPipe pitch is positive
 when the head tilts **back** to look up. A positive Three.js rotation about +x
 carries +z towards −y, pitching the nose **down**. Opposite meanings, same axis.

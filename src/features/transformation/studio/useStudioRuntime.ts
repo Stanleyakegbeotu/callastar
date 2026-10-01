@@ -32,6 +32,8 @@ import { hasRequiredTransformationModels } from "../modelAssets";
 
 import { DEFAULT_OVERLAY_STYLE, drawTrackingOverlay } from "./overlayDrawing";
 import { describeTracking, type TrackingGuidance } from "./trackingGuidance";
+import { BlinkStateMachine } from "../engine/blinkState";
+import { GazeSmoother } from "../engine/eyeGaze";
 
 /**
  * Everything the live Studio owns.
@@ -70,6 +72,7 @@ export interface StudioSummary {
    * would claim the operator is sitting in a neutral nobody has captured.
    */
   motion: CalibrationMotion;
+  expression: ExpressionMotion | null;
 }
 
 const EMPTY_SUMMARY: StudioSummary = {
@@ -82,6 +85,7 @@ const EMPTY_SUMMARY: StudioSummary = {
   faceInitMs: null,
   poseInitMs: null,
   motion: NO_MOTION,
+  expression: null,
 };
 
 /**
@@ -155,6 +159,8 @@ interface Runtime {
   /** Where each camera frame is downscaled before inference. */
   trackingCanvas: HTMLCanvasElement;
   trackingContext: CanvasRenderingContext2D;
+  gazeSmoother: GazeSmoother;
+  blinkState: BlinkStateMachine;
 }
 
 export interface StudioRuntime {
@@ -223,6 +229,7 @@ export function useStudioRuntime(): StudioRuntime {
   const motionRef = useRef<CalibrationMotion>(NO_MOTION);
   const expressionRef = useRef<ExpressionMotion | null>(null);
   const renderPausedRef = useRef(false);
+  const startCalibrationRef = useRef<((mode?: CalibrationMode) => void) | null>(null);
 
   showFaceRef.current = showFace;
   showPoseRef.current = showPose;
@@ -305,7 +312,12 @@ export function useStudioRuntime(): StudioRuntime {
     const pose = new SwappablePoseTracker(clock, false);
     const camera = new StudioCamera();
     const calibrationCollector = new CalibrationCollector();
+    // One per runtime: it advances once per TRACKER update, never per render.
+    const blinkState = new BlinkStateMachine();
+    const gazeSmoother = new GazeSmoother();
 
+    let lastObservedFaceTimestamp = Number.NaN;
+    let trackingLostAt: number | null = null;
     const scheduler = new TrackingScheduler({
       face,
       pose,
@@ -333,6 +345,26 @@ export function useStudioRuntime(): StudioRuntime {
 
         const now = performance.now();
 
+        // The Face Landmarker is configured for one active controller. If it
+        // loses that face and a clear face returns after a brief stable window,
+        // capture a fresh face-only neutral automatically. The source asset is
+        // separate and is never re-analysed or replaced.
+        if (faceResult && faceResult.timestampMs !== lastObservedFaceTimestamp) {
+          lastObservedFaceTimestamp = faceResult.timestampMs;
+          if (faceResult.detected) {
+            if (trackingLostAt !== null && now - trackingLostAt >= 250) {
+              blinkState.reset();
+              gazeSmoother.reset();
+              expressionRef.current = null;
+              motionRef.current = NO_MOTION;
+              startCalibrationRef.current?.("face-only");
+            }
+            trackingLostAt = null;
+          } else if (trackingLostAt === null && calibrationCollector.getState().phase === "ready") {
+            trackingLostAt = now;
+          }
+        }
+
         /*
          * Calibration is fed every frame, because a window of a dozen frames
          * cannot afford to miss any. Publishing it to React is throttled — but
@@ -354,7 +386,16 @@ export function useStudioRuntime(): StudioRuntime {
         // tracker update without a second inference loop or 60 renders/sec.
         const currentMotion = computeRelativeMotion(calibrationCollector.getState().profile, faceResult, poseResult);
         motionRef.current = currentMotion;
-        expressionRef.current = computeExpressionMotion(faceResult, calibrationCollector.getState().profile);
+        const expression = blinkState.apply(computeExpressionMotion(faceResult, calibrationCollector.getState().profile), now);
+        if (expression?.eyeGaze) {
+          expression.eyeGaze.applied = gazeSmoother.update(
+            expression.eyeGaze.normalized,
+            expression.eyeGaze.quality,
+            now,
+            { left: expression.blinkLeft >= 0.5, right: expression.blinkRight >= 0.5 },
+          );
+        }
+        expressionRef.current = expression;
         if (calibrationCollector.getState().phase === "ready") renderPausedRef.current = false;
 
         // React sees the rest a few times a second, not every frame.
@@ -373,6 +414,7 @@ export function useStudioRuntime(): StudioRuntime {
           // Against whatever baseline exists right now. Null profile gives
           // `NO_MOTION`, which is absent rather than zero.
           motion: currentMotion,
+          expression: expressionRef.current,
         });
       },
     });
@@ -386,6 +428,8 @@ export function useStudioRuntime(): StudioRuntime {
       calibration: calibrationCollector,
       trackingCanvas,
       trackingContext,
+      gazeSmoother,
+      blinkState,
     };
     runtimeRef.current = runtime;
 
@@ -490,11 +534,8 @@ export function useStudioRuntime(): StudioRuntime {
   }, [teardown]);
 
   /**
-   * Begins a capture. Only ever from an explicit click.
-   *
-   * Never automatically after the camera starts: a calibration nobody asked for
-   * captures whatever pose somebody happened to be in while reaching for the
-   * mouse, and then everything afterwards is measured from it.
+   * Begins a face-neutral capture after an explicit operator request or when a
+   * camera flip / sustained tracking loss changes the active controller.
    */
   const startCalibration = useCallback((mode: CalibrationMode = "full") => {
     const runtime = runtimeRef.current;
@@ -518,10 +559,15 @@ export function useStudioRuntime(): StudioRuntime {
     );
 
     setCalibrationInvalidation(null);
+    runtime.blinkState.reset();
+    runtime.gazeSmoother.reset();
+    motionRef.current = NO_MOTION;
+    expressionRef.current = null;
     renderPausedRef.current = true;
     lastCalibrationPhaseRef.current = runtime.calibration.getState().phase;
     setCalibration(runtime.calibration.getState());
   }, []);
+  startCalibrationRef.current = startCalibration;
 
   const cancelCalibration = useCallback(() => {
     const runtime = runtimeRef.current;
@@ -566,6 +612,7 @@ export function useStudioRuntime(): StudioRuntime {
   const flipCamera = useCallback(() => {
     const runtime = runtimeRef.current;
     if (!runtime || runtime.camera.isSwitching) return;
+    runtime.gazeSmoother.reset();
 
     dispatch({ type: "CAMERA_SWITCHING" });
     // A baseline belongs to its camera. Freeze the experimental output until
@@ -605,6 +652,7 @@ export function useStudioRuntime(): StudioRuntime {
         cameraSizeRef.current = { width: runtime.camera.state.width, height: runtime.camera.state.height };
         setFacing(result.facing);
         dispatch({ type: "CAMERA_LIVE" });
+        startCalibration("face-only");
       } catch (error) {
         if (runtimeRef.current !== runtime) return;
 
@@ -619,7 +667,7 @@ export function useStudioRuntime(): StudioRuntime {
         );
       }
     })();
-  }, []);
+  }, [startCalibration]);
 
   /**
    * Changing quality does NOT invalidate a calibration.

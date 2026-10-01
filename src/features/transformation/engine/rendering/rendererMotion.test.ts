@@ -23,10 +23,11 @@ import {
  * rotates the mesh's own forward (+z) and up (+y) by the Euler the renderer
  * applies. Where the nose ends up IS what the operator sees.
  *
- * Tracking conventions, from `faceTypes.ts` and measured against real model
- * output in Milestone 5:
+ * Tracking conventions, as MediaPipe reports the OPERATOR. Yaw and roll were
+ * measured in Milestone 5; pitch in M8.3, by rendering the face nose-up and
+ * having MediaPipe read it back (transformation-m83-roundtrip):
  *   yaw   > 0  head turned towards the SUBJECT'S LEFT
- *   pitch > 0  head tilted BACK, looking UP
+ *   pitch > 0  head tilted FORWARD, looking DOWN
  *   roll  > 0  head tilted towards the SUBJECT'S RIGHT ear
  */
 
@@ -78,13 +79,13 @@ describe("physical head turns, as the operator sees them", () => {
   });
 
   it("physical_look_up_renders_up", () => {
-    // Positive pitch is the head tilting back. The nose must rise.
-    const seen = seenInStudio(head({ pitchDelta: STRONG }));
+    // MediaPipe reads looking up as NEGATIVE pitch. The nose must rise.
+    const seen = seenInStudio(head({ pitchDelta: -STRONG }));
     expect(seen.nose.y).toBeGreaterThan(0.2);
   });
 
   it("physical_look_down_renders_down", () => {
-    const seen = seenInStudio(head({ pitchDelta: -STRONG }));
+    const seen = seenInStudio(head({ pitchDelta: STRONG }));
     expect(seen.nose.y).toBeLessThan(-0.2);
   });
 
@@ -163,13 +164,12 @@ describe("what a caller would see", () => {
 });
 
 describe("the sign contract itself", () => {
-  it("inverts pitch and nothing else", () => {
+  it("hands MediaPipe's angles to Three unchanged, because they already agree", () => {
     /*
-     * Recorded as the specific conclusion of the real-device investigation.
-     * Pitch is the one axis where MediaPipe and Three.js genuinely disagree:
-     * MediaPipe is positive looking up, Three is positive pitching the nose
-     * down. Yaw and roll already agree once the subject/viewer mirror is
-     * accounted for at the display.
+     * Measured, not reasoned: MediaPipe pitch is positive nose-DOWN, and so is
+     * Three's rotation.x. M8.1 negated it believing MediaPipe positive-up, and
+     * every nod rendered backwards. The negation now sits between PHYSICAL
+     * pitch (+ up) and Three, with MediaPipe -> physical in rigidFaceMotion.ts.
      */
     const motion = rendererMotionFromTracking(
       head({ yawDelta: 0.2, pitchDelta: 0.2, rollDelta: 0.2 }),
@@ -177,13 +177,13 @@ describe("the sign contract itself", () => {
 
     expect(motion.rotationY).toBeCloseTo(0.2, 10);
     expect(motion.rotationZ).toBeCloseTo(0.2, 10);
-    expect(motion.rotationX).toBeCloseTo(-0.2, 10);
+    expect(motion.rotationX).toBeCloseTo(0.2, 10);
   });
 
   it("maps a clamped pose the same way it maps raw tracking", () => {
-    // Clamping happens in tracking semantics; the sign change must still occur
-    // exactly once, in one place.
-    const viaPose = rendererMotionFromPose({ x: 0.1, y: -0.2, scale: 1.1, yaw: 0.2, pitch: 0.3, roll: -0.1 });
+    // Clamping happens on the PHYSICAL pose (pitch + up, y + up); each sign
+    // still changes exactly once.
+    const viaPose = rendererMotionFromPose({ x: 0.1, y: -0.2, scale: 1.1, yaw: 0.2, pitch: -0.3, roll: -0.1 });
     const viaTracking = rendererMotionFromTracking(
       head({ translationX: 0.1, translationY: 0.2, scaleDelta: 1.1, yawDelta: 0.2, pitchDelta: 0.3, rollDelta: -0.1 }),
     );

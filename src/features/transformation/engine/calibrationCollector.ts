@@ -19,6 +19,9 @@ import {
 import type { FaceTrackingResult, Point3 } from "./faceTypes";
 import type { PoseTrackingResult } from "./poseTypes";
 import type { CameraFacing } from "./studioCamera";
+import { canonicalFaceLandmarks, localBrowHeights } from './faceLocalGeometry';
+import { eyeOpenness, jawDisplacement, mouthOpenness, mouthCornerLift } from './faceGeometry';
+import { measureBinocularGaze } from './eyeGaze';
 
 /**
  * Capturing a neutral baseline.
@@ -42,6 +45,11 @@ import type { CameraFacing } from "./studioCamera";
  * in 200ms on a fast machine running at 60fps, and an elapsed time alone would
  * accept three frames on a slow one. Neither assumes a frame rate.
  */
+/** Refusals caused by WHERE the head is, not by tracking failing to see it. */
+const POSITION_REJECTIONS: readonly FrameRejection[] = [
+  "too-far", "too-close", "head-angled", "head-pitched", "head-tilted", "face-near-edge",
+];
+
 export const COLLECTION = {
   /** Enough samples for a median to mean something. */
   minFrames: 12,
@@ -75,7 +83,14 @@ interface Sample {
   pitch: number;
   roll: number;
   eyeOpenness: number;
+  eyeLeft: number;
+  eyeRight: number;
+  smileLeft: number;
+  smileRight: number;
+  browHeights: [number, number, number] | null;
   mouthOpenness: number;
+  jawDisplacement: number;
+  eyeGaze: { left: { x: number; y: number }; right: { x: number; y: number } } | null;
   expression: {
     blinkLeft: number; blinkRight: number; jawOpen: number;
     smileLeft: number; smileRight: number; browInnerUp: number;
@@ -102,6 +117,8 @@ export interface CalibrationCollectorState {
   stability: StabilityAssessment | null;
   profile: TransformationCalibrationProfile | null;
   failure: CalibrationFailure | null;
+  /** With `failure === "out-of-position"`: the refusal that dominated the window. */
+  failureRejection?: FrameRejection | null;
   /** True when a full calibration failed only because the shoulders were absent. */
   faceOnlyAvailable: boolean;
 }
@@ -130,10 +147,13 @@ export class CalibrationCollector {
   private rejected = 0;
   private consecutiveRejections = 0;
   private rejection: FrameRejection | null = null;
+  private pendingRejection: FrameRejection | null = null;
+  private pendingFrames = 0;
   private rejectionCounts: Partial<Record<FrameRejection, number>> = {};
   private stability: StabilityAssessment | null = null;
   private profile: TransformationCalibrationProfile | null = null;
   private failure: CalibrationFailure | null = null;
+  private failureRejection: FrameRejection | null = null;
   private sawFace = false;
   private sawPose = false;
   private context: CalibrationContext | null = null;
@@ -150,6 +170,7 @@ export class CalibrationCollector {
       stability: this.stability,
       profile: this.profile,
       failure: this.failure,
+      failureRejection: this.failureRejection,
       // Only worth offering once we know a face is trackable and the shoulders
       // are not — otherwise it is a worse calibration for no reason.
       faceOnlyAvailable: this.failure === "pose-unavailable",
@@ -181,10 +202,13 @@ export class CalibrationCollector {
     this.rejected = 0;
     this.consecutiveRejections = 0;
     this.rejection = null;
+    this.pendingRejection = null;
+    this.pendingFrames = 0;
     this.rejectionCounts = {};
     this.stability = null;
     this.profile = null;
     this.failure = null;
+    this.failureRejection = null;
     this.sawFace = false;
     this.sawPose = false;
   }
@@ -202,6 +226,7 @@ export class CalibrationCollector {
     this.samples = [];
     this.profile = null;
     this.failure = null;
+    this.failureRejection = null;
     this.stability = null;
     this.rejection = null;
     this.rejectionCounts = {};
@@ -225,10 +250,14 @@ export class CalibrationCollector {
     }
 
     const rejection = this.screen(face, pose);
+    // Admission is immediate; only presentation is debounced. Bad frames never
+    // enter the neutral baseline while guidance waits for confirmation.
+    if (rejection === this.pendingRejection) this.pendingFrames++;
+    else { this.pendingRejection = rejection; this.pendingFrames = 1; }
+    if (this.pendingFrames >= 3) this.rejection = rejection;
     if (rejection) {
       this.rejected += 1;
       this.consecutiveRejections += 1;
-      this.rejection = rejection;
       this.rejectionCounts[rejection] = (this.rejectionCounts[rejection] ?? 0) + 1;
 
       // A run of refusals mid-collection means the operator moved, and the
@@ -241,7 +270,6 @@ export class CalibrationCollector {
     }
 
     this.consecutiveRejections = 0;
-    this.rejection = null;
     this.accepted += 1;
     this.samples.push(this.toSample(face!, pose, nowMs));
 
@@ -281,6 +309,10 @@ export class CalibrationCollector {
   private screen(face: FaceTrackingResult | null, pose: PoseTrackingResult | null): FrameRejection | null {
     if (!face || !face.detected || !face.derived) return "no-face";
     this.sawFace = true;
+    // Shoulders are seen whether or not this frame's HEAD is acceptable. Noted
+    // only after the head checks, a tilted head made a full calibration report
+    // "could not see both shoulders" with both shoulders in frame.
+    if (pose?.derived?.trackability === "tracked") this.sawPose = true;
 
     if (face.confidence < ACCEPTANCE_ENVELOPE.minConfidence) return "low-confidence";
 
@@ -293,13 +325,9 @@ export class CalibrationCollector {
     if (derived.scale < ACCEPTANCE_ENVELOPE.minFaceScale) return "too-far";
     if (derived.scale > ACCEPTANCE_ENVELOPE.maxFaceScale) return "too-close";
 
-    if (
-      Math.abs(derived.yaw) > ACCEPTANCE_ENVELOPE.maxYaw ||
-      Math.abs(derived.pitch) > ACCEPTANCE_ENVELOPE.maxPitch ||
-      Math.abs(derived.roll) > ACCEPTANCE_ENVELOPE.maxRoll
-    ) {
-      return "head-angled";
-    }
+    if (Math.abs(derived.pitch) > ACCEPTANCE_ENVELOPE.maxPitch) return "head-pitched";
+    if (Math.abs(derived.yaw) > ACCEPTANCE_ENVELOPE.maxYaw) return "head-angled";
+    if (Math.abs(derived.roll) > ACCEPTANCE_ENVELOPE.maxRoll) return "head-tilted";
 
     const margin = ACCEPTANCE_ENVELOPE.edgeMargin;
     if (
@@ -307,11 +335,11 @@ export class CalibrationCollector {
       derived.center.x > 1 - margin ||
       derived.center.y < margin ||
       derived.center.y > 1 - margin
+      || derived.bounds.minX < 0 || derived.bounds.maxX > 1
+      || derived.bounds.minY < 0 || derived.bounds.maxY > 1
     ) {
       return "face-near-edge";
     }
-
-    if (pose?.derived?.trackability === "tracked") this.sawPose = true;
 
     // Face-only asks nothing of the shoulders, by the operator's own choice.
     if (this.mode === "face-only") return null;
@@ -326,6 +354,9 @@ export class CalibrationCollector {
   private toSample(face: FaceTrackingResult, pose: PoseTrackingResult | null, nowMs: number): Sample {
     const derived = face.derived!;
     const posed = pose?.derived ?? null;
+    const local = canonicalFaceLandmarks(face.landmarks, derived,
+      this.context!.trackingWidth / this.context!.trackingHeight);
+    const hasMesh = local.length >= 468;
 
     return {
       timestampMs: nowMs,
@@ -335,7 +366,14 @@ export class CalibrationCollector {
       pitch: derived.pitch,
       roll: derived.roll,
       eyeOpenness: derived.eyeOpenness,
-      mouthOpenness: derived.mouthOpenness,
+      eyeLeft: hasMesh ? eyeOpenness(local, 'left') : derived.eyeOpennessLeft,
+      eyeRight: hasMesh ? eyeOpenness(local, 'right') : derived.eyeOpennessRight,
+      smileLeft: hasMesh ? mouthCornerLift(local, 'left') : 0,
+      smileRight: hasMesh ? mouthCornerLift(local, 'right') : 0,
+      browHeights: localBrowHeights(local),
+      mouthOpenness: hasMesh ? mouthOpenness(local) : derived.mouthOpenness,
+      jawDisplacement: hasMesh ? jawDisplacement(local) : 0,
+      eyeGaze: hasMesh ? measureBinocularGaze(local) : null,
       expression: {
         blinkLeft: face.blendshapes.eyeBlinkLeft ?? 1 - derived.eyeOpennessLeft,
         blinkRight: face.blendshapes.eyeBlinkRight ?? 1 - derived.eyeOpennessRight,
@@ -451,7 +489,25 @@ export class CalibrationCollector {
         roll,
         // Recorded, not subtracted. See `relativeMotion.ts`.
         neutralEyeOpenness: median(samples.map((sample) => sample.eyeOpenness)) ?? 0,
+        neutralEyeOpennessLeft: median(samples.map(s => s.eyeLeft)) ?? 0,
+        neutralEyeOpennessRight: median(samples.map(s => s.eyeRight)) ?? 0,
+        neutralSmileLeft: median(samples.map(s => s.smileLeft)) ?? 0,
+        neutralSmileRight: median(samples.map(s => s.smileRight)) ?? 0,
+        neutralBrowHeights: samples.every(s => s.browHeights) ? [0, 1, 2].map(i => median(samples.map(s => s.browHeights![i]!)) ?? 0) as [number, number, number] : undefined,
         neutralMouthOpenness: median(samples.map((sample) => sample.mouthOpenness)) ?? 0,
+        neutralJawDisplacement: median(samples.map((sample) => sample.jawDisplacement)) ?? 0,
+        neutralEyeGaze: samples.filter((sample) => sample.eyeGaze !== null).length >= Math.ceil(samples.length * 0.7)
+          ? {
+              left: {
+                x: median(samples.filter((sample) => sample.eyeGaze).map((sample) => sample.eyeGaze!.left.x)) ?? 0,
+                y: median(samples.filter((sample) => sample.eyeGaze).map((sample) => sample.eyeGaze!.left.y)) ?? 0,
+              },
+              right: {
+                x: median(samples.filter((sample) => sample.eyeGaze).map((sample) => sample.eyeGaze!.right.x)) ?? 0,
+                y: median(samples.filter((sample) => sample.eyeGaze).map((sample) => sample.eyeGaze!.right.y)) ?? 0,
+              },
+            }
+          : undefined,
         expressionNeutral: {
           blinkLeft: median(samples.map((sample) => sample.expression.blinkLeft)) ?? 0,
           blinkRight: median(samples.map((sample) => sample.expression.blinkRight)) ?? 0,
@@ -526,6 +582,19 @@ export class CalibrationCollector {
   /** A timeout means different things depending on what was seen. */
   private diagnoseTimeout(): CalibrationFailure {
     if (!this.sawFace) return "no-face";
+    // A head held steadily OUTSIDE the envelope is not unsteady, and is not a
+    // shoulder problem either: say which way. Checked first, because fixing
+    // the head is what the operator has to do next either way.
+    const seen = this.accepted + this.rejected;
+    let dominant: FrameRejection | null = null;
+    for (const reason of POSITION_REJECTIONS) {
+      const count = this.rejectionCounts[reason] ?? 0;
+      if (count * 2 >= seen && count > (dominant ? this.rejectionCounts[dominant] ?? 0 : 0)) dominant = reason;
+    }
+    if (dominant) {
+      this.failureRejection = dominant;
+      return "out-of-position";
+    }
     if (this.mode === "full" && !this.sawPose) return "pose-unavailable";
     return "unstable";
   }

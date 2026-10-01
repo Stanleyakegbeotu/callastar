@@ -657,13 +657,144 @@
   object-fit: contain;
 }
 
-.studio-source-decoder {
+/*
+ * Once a camera is live the source is a REFERENCE, not the preview: a small
+ * card top-right, clear of the status bar along the bottom edge.
+ */
+.studio-source-preview.is-thumbnail {
+  inset: 0.75rem 0.75rem auto auto;
+  z-index: 4;
+  width: clamp(4.5rem, 24%, 8rem);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 2px solid rgb(255 255 255 / 0.75);
+  border-radius: 0.75rem;
+  box-shadow: 0 6px 18px rgb(2 6 23 / 0.45);
+}
+
+.studio-source-preview.is-thumbnail img,
+.studio-source-preview.is-thumbnail video {
+  object-fit: cover;
+}
+
+.studio-source-label {
   position: absolute;
+  inset: auto 0 0;
+  padding: 0.15rem 0.3rem;
+  background: rgb(15 23 42 / 0.7);
+  color: rgb(241 245 249);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Under face or avatar output the source element only decodes frames. */
+.studio-source-preview.is-decoder {
+  inset: auto;
   z-index: 0;
   width: 1px;
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+/*
+ * Face / avatar output owns the stage; the live camera stays visible as a
+ * comparison PiP. Same <video> element, restyled — never a second stream.
+ * Top-right, because the rendered face sits at the centre and the status bar
+ * along the bottom.
+ */
+.studio-viewport.is-output-preview .studio-video {
+  inset: 0.75rem 0.75rem auto auto;
+  z-index: 4;
+  width: clamp(4.5rem, 26%, 9rem);
+  height: auto;
+  aspect-ratio: 3 / 4;
+  border: 2px solid rgb(255 255 255 / 0.75);
+  border-radius: 0.75rem;
+  box-shadow: 0 6px 18px rgb(2 6 23 / 0.45);
+  background: rgb(15 23 42);
+}
+
+/* ---- Viewport tools and expanded preview -------------------------------- */
+
+.studio-viewport-tools {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: calc(100% - 1.5rem - clamp(4.5rem, 26%, 9rem));
+}
+
+.studio-viewport-button,
+.studio-viewport-modes button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0 0.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(15 23 42 / 0.7);
+  backdrop-filter: blur(8px);
+  color: rgb(241 245 249);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.studio-viewport-modes {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.studio-viewport-modes button[aria-pressed="true"] {
+  background: rgb(241 245 249);
+  color: rgb(15 23 42);
+}
+
+.studio-viewport-modes button:disabled {
+  opacity: 0.45;
+}
+
+/*
+ * Expanded: the stage becomes a fixed layer over the page. The same element is
+ * also what the Fullscreen API is asked to show where it exists; iPhone Safari
+ * has no element fullscreen, so this layer alone fills the viewport there.
+ */
+.studio-stage.is-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  padding: var(--safe-top) var(--safe-right) calc(var(--safe-bottom) + 0.5rem) var(--safe-left);
+  gap: 0.5rem;
+  background: rgb(2 6 23);
+}
+
+.studio-stage.is-expanded .studio-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.studio-stage.is-expanded .studio-controls {
+  padding-inline: 0.5rem;
+}
+
+/* Diagnostics and the mode card stay on the page; the toolbar replaces them. */
+.studio-stage.is-expanded > .studio-card {
+  display: none;
+}
+
+body:has(.studio-stage.is-expanded) {
+  overflow: hidden;
 }
 
 .studio-viewport.is-face-render-preview .studio-overlay {
@@ -1049,6 +1180,14 @@
   padding: 0.3rem 0;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
+
+.studio-live-mouth-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  font-size: 0.9rem;
+}
 .studio-expression-row span:first-child { overflow-wrap: anywhere; }
 .studio-expression-manual { display: grid; gap: 0.5rem; margin-top: 0.8rem; }
 .studio-expression-manual label { display: grid; gap: 0.2rem; }
@@ -1075,7 +1214,7 @@
 
 .studio-expression-row {
   display: grid;
-  grid-template-columns: 8.5rem repeat(5, 3rem) 3.2rem auto;
+  grid-template-columns: 8.5rem repeat(6, 3rem) 3.2rem auto;
   gap: 0.3rem;
   align-items: baseline;
   min-width: max-content;

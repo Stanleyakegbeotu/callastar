@@ -31,7 +31,6 @@ export function OnboardingPage() {
       return false;
     }
   });
-
   useEffect(() => {
     try {
       window.sessionStorage.setItem("callastar-onboarding-seen", "true");
@@ -42,11 +41,7 @@ export function OnboardingPage() {
 
   return (
     <main className={`landing landing-wake ${returning ? "landing-returning" : ""}`.trim()}>
-      <img
-        className="landing-image"
-        src={images.hero}
-        alt="Person waving during a video call"
-      />
+      <img className="landing-image" src={images.hero} alt="Woman smiling during a video call" />
       <div className="landing-overlay" />
 
       {/* The brand mark is unchanged: same element, same position, same

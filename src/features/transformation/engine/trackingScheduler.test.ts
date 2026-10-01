@@ -20,7 +20,7 @@ import type { PoseTrackingResult } from "./poseTypes";
  * the battery with nothing on screen.
  */
 
-type FrameCallback = (now: number, metadata: { mediaTime: number }) => void;
+type FrameCallback = (now: number, metadata: { mediaTime: number; presentedFrames?: number }) => void;
 
 /**
  * A video element whose frame callbacks the test delivers by hand.
@@ -50,17 +50,17 @@ function makeVideo() {
   return {
     video: video as unknown as HTMLVideoElement,
     /** Delivers one frame to whatever callback is currently queued. */
-    deliver(mediaTimeSeconds: number): boolean {
+    deliver(mediaTimeSeconds: number, presentedFrames?: number): boolean {
       const entry = [...pending.entries()][0];
       if (!entry) return false;
       const [handle, callback] = entry;
       pending.delete(handle);
-      callback(mediaTimeSeconds * 1000, { mediaTime: mediaTimeSeconds });
+      callback(mediaTimeSeconds * 1000, { mediaTime: mediaTimeSeconds, presentedFrames });
       return true;
     },
     /** Fires the last-requested callback again, queue untouched. */
-    replay(mediaTimeSeconds: number): void {
-      lastRequested?.(mediaTimeSeconds * 1000, { mediaTime: mediaTimeSeconds });
+    replay(mediaTimeSeconds: number, presentedFrames?: number): void {
+      lastRequested?.(mediaTimeSeconds * 1000, { mediaTime: mediaTimeSeconds, presentedFrames });
     },
     get queued() {
       return pending.size;
@@ -120,6 +120,20 @@ function setup(options: { faceInterval?: number; poseInterval?: number } = {}) {
 }
 
 describe("single frame owner", () => {
+  it("counts camera frames skipped while synchronous inference occupies the main thread", () => {
+    const { harness, scheduler } = setup();
+    scheduler.start(harness.video);
+    harness.deliver(0.1, 10);
+    harness.deliver(0.2, 13);
+    const stats = scheduler.getStats();
+    expect(stats.cameraFrames).toBe(4);
+    expect(stats.cameraCallbacks).toBe(2);
+    expect(stats.droppedInputFrames).toBe(2);
+    expect(stats.droppedTrackingFrames).toBe(0);
+    expect(stats.cameraTimestampMs).toBe(200);
+    scheduler.dispose();
+  });
+
   it("keeps exactly one frame callback outstanding", () => {
     // Two loops racing for the same GPU is the failure this prevents.
     const { harness, scheduler } = setup();

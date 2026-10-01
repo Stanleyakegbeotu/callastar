@@ -1,4 +1,5 @@
 import type { CalibrationMotion } from "../relativeMotion";
+import { rigidMotionFromCalibration } from "../rigidFaceMotion";
 
 /**
  * THE coordinate and sign contract between tracking and the renderer.
@@ -15,14 +16,18 @@ import type { CalibrationMotion } from "../relativeMotion";
  *
  * 1. MEDIAPIPE TRACKING — normalised image space. x grows RIGHT across the
  *    image, y grows DOWN, and landmark z is smaller the CLOSER a point is to
- *    the camera. Head angles are in the SUBJECT'S frame: positive yaw is the
- *    head turning towards the subject's own LEFT, positive pitch is the head
- *    tilting BACK (looking up), positive roll is a tilt towards the subject's
- *    own RIGHT ear. These are the conventions `faceTypes.ts` documents and the
- *    Milestone 5 browser proof measured against real model output.
+ *    the camera. Head angles: positive yaw is the head turning towards the
+ *    subject's own LEFT, positive pitch is looking DOWN, positive roll is a
+ *    tilt towards the subject's own RIGHT ear. Yaw and roll were measured in
+ *    Milestone 5; pitch was not, and was assumed backwards until M8.3's
+ *    round trip measured it (see `rigidFaceMotion.ts`).
  *
  * 2. CALIBRATION MOTION — the same conventions, expressed as deltas from the
  *    operator's neutral pose. `relativeMotion.ts` changes no signs.
+ *
+ * 2b. RIGID FACE MOTION — `rigidFaceMotion.ts` converts (2) into PHYSICAL
+ *    terms: pitch positive looking UP, y positive UP. That conversion and the
+ *    one below are the only sign decisions in the pipeline.
  *
  * 3. THREE.JS WORLD — right-handed. x grows RIGHT, y grows UP, and z grows
  *    TOWARDS THE VIEWER (the camera sits at +z looking down −z). Positive
@@ -48,11 +53,13 @@ import type { CalibrationMotion } from "../relativeMotion";
  *   rotation.y puts the nose. The signs already agree; negating here was the
  *   bug.
  *
- * PITCH → rotation.x, NEGATED.
- *   A genuine conflict of conventions about one axis. MediaPipe pitch is
- *   positive when the head tilts BACK to look UP. A positive Three rotation
- *   about +x carries +z towards −y, pitching the nose DOWN. The two are
- *   opposite, so pitch must be inverted. This is the only axis that needs it.
+ * PITCH → rotation.x, NEGATED from PHYSICAL pitch.
+ *   Physical pitch (`RigidFaceMotion`) is positive looking UP. A positive Three
+ *   rotation about +x carries +z towards −y, pitching the nose DOWN. So the
+ *   physical value is negated here — which, because MediaPipe's own pitch is
+ *   positive DOWN, means MediaPipe pitch reaches rotation.x with its sign
+ *   intact. The earlier code negated MediaPipe pitch directly, believing it
+ *   positive-up, and rendered every nod backwards.
  *
  * ROLL → rotation.z, NOT negated.
  *   Positive roll is a tilt towards the subject's right ear. The top of the
@@ -64,8 +71,8 @@ import type { CalibrationMotion } from "../relativeMotion";
  *   subject's right on the viewer's left. So the sign already describes where
  *   the face should appear.
  *
- * TRANSLATION Y → world y, NEGATED.
- *   Tracking y grows down; world y grows up. Converted exactly once, here.
+ * TRANSLATION Y → world y, NOT negated from physical y.
+ *   Tracking y grows down; `rigidFaceMotion.ts` makes it physical (up) once.
  *
  * ────────────────────────────────────────────────────────────────────────
  * MIRRORING IS NOT DONE HERE
@@ -114,22 +121,12 @@ function finite(value: number | undefined, fallback: number): number {
  * negate an axis; if a direction is wrong, it is wrong here.
  */
 export function rendererMotionFromTracking(motion: CalibrationMotion | null | undefined): RendererMotion {
-  const head = motion?.head;
-  if (!head) return NEUTRAL_RENDERER_MOTION;
-
-  return {
-    // Tracking x already describes the viewer's frame for an unmirrored image.
-    x: finite(head.translationX, 0),
-    // Tracking y grows down, world y grows up.
-    y: -finite(head.translationY, 0),
-    scale: finite(head.scaleDelta, 1),
-    // MediaPipe pitch is positive looking UP; Three rotation.x is positive
-    // pitching the nose DOWN. The one axis that genuinely conflicts.
-    rotationX: -finite(head.pitchDelta, 0),
-    // Subject-frame yaw and viewer-frame rotation.y already agree.
-    rotationY: finite(head.yawDelta, 0),
-    rotationZ: finite(head.rollDelta, 0),
-  };
+  if (!motion?.head) return NEUTRAL_RENDERER_MOTION;
+  const rigid = rigidMotionFromCalibration(motion.head);
+  return rendererMotionFromPose({
+    x: rigid.translationX, y: rigid.translationY, scale: rigid.scale,
+    yaw: rigid.yaw, pitch: rigid.pitch, roll: rigid.roll,
+  });
 }
 
 /**

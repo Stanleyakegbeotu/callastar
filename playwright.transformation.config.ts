@@ -44,6 +44,6 @@ export default defineConfig({
     port,
     reuseExistingServer: false,
     timeout: 180_000,
-    env: { PORT: String(port) },
+    env: { PORT: String(port), VITE_ADMIN_AUTH_MODE: 'development' },
   },
 });

@@ -1,7 +1,14 @@
 import type { TransformationCalibrationProfile } from "./calibrationTypes";
 import type { FaceTrackingResult } from "./faceTypes";
-import { eyeOpenness, mouthCornerLift, mouthOpenness } from "./faceGeometry";
+import { eyeOpenness, jawDisplacement, mouthCornerLift, mouthOpenness } from "./faceGeometry";
 import type { SourceExpressionProfile, SourceFaceGeometry } from "../source/sourceTypes";
+import { canonicalFaceLandmarks, localBrowHeights } from './faceLocalGeometry';
+import type { Point3 } from './faceTypes';
+import { measureBinocularGaze, normalizeBinocularGaze, type NormalizedGaze } from './eyeGaze';
+
+const BROW_FULL_RAISE = 0.085;
+const localScratch: Point3[] = [];
+const previousBrow = new WeakMap<TransformationCalibrationProfile, { pitch: number; shape: number; height: number }>();
 
 /** Only the eight expressions the face renderer currently supports. */
 export const EXPRESSION_KEYS = [
@@ -33,6 +40,31 @@ export interface ExpressionTraceEntry {
 export type ExpressionTrace = Record<ExpressionKey, ExpressionTraceEntry>;
 
 export interface ExpressionMotion extends ExpressionValues {
+  /** Performance-clock time when this frame's expression calculation completed. */
+  updatedAtMs?: number;
+  /** Independent, calibrated eye motion. The source eye pixels stay the source's. */
+  eyeGaze?: {
+    raw: { left: { x: number; y: number }; right: { x: number; y: number } } | null;
+    neutral: { left: { x: number; y: number }; right: { x: number; y: number } } | null;
+    normalized: NormalizedGaze | null;
+    applied: NormalizedGaze | null;
+    quality: { left: number; right: number } | null;
+  } | null;
+  /** Observational only: never modifies expression values. */
+  leakage?: boolean;
+  /** Eyelid aperture per eye (face-local, multi-point), for diagnostics. */
+  eyeAperture?: { left: number | null; right: number | null };
+  /** Local inner-lip aperture and chin drop, retained for jaw diagnostics. */
+  mouthAperture?: { ratio: number | null; jawDrop: number | null };
+  /** Ephemeral landmarks only; consumed in-memory by the optional compositor. */
+  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[] };
+  /** Per-eye blink state and the closure measured before it shaped the value. */
+  blinkState?: {
+    left: "open" | "closing" | "closed" | "opening";
+    right: "open" | "closing" | "closed" | "opening";
+    measuredLeft: number;
+    measuredRight: number;
+  };
   status: "tracked" | "manual";
   calculationMs: number;
   /**
@@ -55,6 +87,34 @@ export const NEUTRAL_EXPRESSION: ExpressionValues = {
 const unit = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 const relative = (value: number, neutral: number) => unit((value - neutral) / Math.max(0.25, 1 - neutral));
 
+/**
+ * How far a blendshape may drift from its neutral before it counts.
+ *
+ * MediaPipe's blendshapes are not pose-invariant; face-local geometry is. Measured
+ * through the real tracker (transformation-m83-expression-isolation): a still
+ * face turned or nodded 15° moved brow blendshapes by up to +0.13 and a resting
+ * smile's by +0.06 — which the headroom normalisation above turned into a 0.24
+ * "smile" for anyone who smiles at rest. So the blendshape's dead zone grows
+ * with distance from the calibrated pose: frame jitter when frontal, the
+ * measured drift by 15°. Geometry is never dead-zoned, so a real expression at
+ * any pose still reads through it.
+ */
+export const BLENDSHAPE_JITTER = 0.02;
+
+/**
+ * Where a closed eye's aperture sits, as a fraction of the same eye open. Lid
+ * landmarks stay ~20–30% apart on a shut eye, which is why eye-aspect-ratio
+ * blink detectors threshold near 0.2 of open rather than at zero. Provisional
+ * until a physical recording measures it.
+ */
+export const EYE_CLOSED_FRACTION = 0.25;
+export const BLENDSHAPE_POSE_DRIFT = 0.12;
+const POSE_DRIFT_FULL_AT = 0.26;
+const LIVE_INNER_LIP_RING = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191] as const;
+
+const relativeShape = (value: number, neutral: number, deadZone: number) =>
+  unit((value - neutral - deadZone) / Math.max(0.25, 1 - neutral - deadZone));
+
 /** All geometry ratios divide by local feature width, cancelling translation and scale.
  * Blendshapes supply the semantic signal and are preferred under moderate yaw.
  * Geometry is used only if that named blendshape is absent. */
@@ -75,11 +135,53 @@ export function computeExpressionMotion(
    * supposed to protect. The classic mesh is 468 points; 478 with irises.
    */
   const hasMesh = face.landmarks.length >= 468;
-  const eyeBase = Math.max(0.05, calibration.face.neutralEyeOpenness);
+  const local = hasMesh ? canonicalFaceLandmarks(face.landmarks, face.derived,
+    calibration.trackingSpace ? calibration.trackingSpace.width / calibration.trackingSpace.height : 1, localScratch) : [];
+  const brow = localBrowHeights(local);
+  const browNeutral = calibration.face.neutralBrowHeights;
+  // A full raise lifts the brow about 8.5% of face width above its neutral —
+  // the same fraction the deformer moves the source brow by.
+  const browSignal = (index: number) => brow && browNeutral ? unit((brow[index]! - browNeutral[index]!) / BROW_FULL_RAISE) : null;
+  const before = previousBrow.get(calibration);
+  const current = { pitch: face.derived.pitch, shape: shapes.browInnerUp ?? 0, height: brow?.[0] ?? 0 };
+  const leakage = !!before && !!brow && Math.abs(current.pitch - before.pitch) > .08 &&
+    Math.abs(current.shape - before.shape) > .1 && Math.abs(current.height - before.height) < .01;
+  if (!before || Math.abs(current.pitch - before.pitch) > .08) previousBrow.set(calibration, current);
   const mouthBase = calibration.face.neutralMouthOpenness;
-  const eyeL = hasMesh ? eyeOpenness(face.landmarks, "left") : null;
-  const eyeR = hasMesh ? eyeOpenness(face.landmarks, "right") : null;
-  const lidClosure = (open: number | null) => (open === null ? null : 1 - Math.min(1, open / eyeBase));
+  const mouthGeometry = hasMesh ? mouthOpenness(local) : null;
+  const jawGeometry = hasMesh ? jawDisplacement(local) : null;
+  const jawNeutral = calibration.face.neutralJawDisplacement ?? jawGeometry ?? 0;
+  // Chin-to-nose distance also changes slightly when canonical pose is estimated
+  // from a real image. Let it support measured lip separation, but cap that vote
+  // so a nod alone cannot overwhelm the actual mouth aperture. Full travel is
+  // about 8% of face width.
+  const mouthGeometrySignal = mouthGeometry === null ? 0 : relative(mouthGeometry, mouthBase);
+  const jawDropSignal = jawGeometry === null ? 0 : Math.min(
+    unit((jawGeometry - jawNeutral) / 0.08), mouthGeometrySignal + 0.15,
+  );
+  const mouthDelta = mouthGeometry === null ? 0 : Math.max(0, mouthGeometry - mouthBase);
+  const eyeL = hasMesh ? eyeOpenness(local, "left") : null;
+  const eyeR = hasMesh ? eyeOpenness(local, "right") : null;
+  const rawGaze = hasMesh ? measureBinocularGaze(local) : null;
+  const neutralGaze = calibration.face.neutralEyeGaze ?? null;
+  const eyeGaze = rawGaze && neutralGaze
+    ? { raw: { left: rawGaze.left, right: rawGaze.right }, neutral: neutralGaze,
+        normalized: normalizeBinocularGaze(rawGaze, neutralGaze),
+        applied: normalizeBinocularGaze(rawGaze, neutralGaze), quality: rawGaze.quality }
+    : { raw: rawGaze ? { left: rawGaze.left, right: rawGaze.right } : null, neutral: neutralGaze,
+        normalized: null, applied: null, quality: rawGaze?.quality ?? null };
+  /*
+   * Closure against THIS eye's calibrated opening, with a closed eye at
+   * EYE_CLOSED_FRACTION of it rather than at zero: MediaPipe's lid landmarks
+   * never fully meet on a shut eye, so measured against zero a real blink could
+   * only ever read part-closed.
+   */
+  const lidClosure = (open: number | null, baseline: number) => {
+    if (open === null) return null;
+    const opened = Math.max(.05, baseline);
+    const closed = opened * EYE_CLOSED_FRACTION;
+    return 1 - unit((open - closed) / (opened - closed));
+  };
 
   /*
    * FUSED, not one preferred over the other.
@@ -97,54 +199,78 @@ export function computeExpressionMotion(
    * unreliable input stays visible instead of being silently compensated for.
    */
   const trace = {} as ExpressionTrace;
+  const rotated = Math.hypot(
+    face.derived.yaw - calibration.face.yaw,
+    face.derived.pitch - calibration.face.pitch,
+    face.derived.roll - calibration.face.roll,
+  );
+  const shapeDeadZone = BLENDSHAPE_JITTER + BLENDSHAPE_POSE_DRIFT * Math.min(1, (Number.isFinite(rotated) ? rotated : 0) / POSE_DRIFT_FULL_AT);
   const fuse = (
     key: ExpressionKey,
     name: string,
     geometry: number | null,
     geometryBaseline: number,
     blendshapeBaseline: number,
+    additionalGeometrySignal = 0,
+    blendshapeCorrection = 0,
   ): number => {
     const raw = typeof shapes[name] === "number" ? shapes[name]! : null;
-    const fromBlendshape = raw === null ? 0 : relative(raw, blendshapeBaseline);
+    const fromBlendshape = raw === null ? 0 : relativeShape(raw - blendshapeCorrection, blendshapeBaseline, shapeDeadZone);
     const fromGeometry = geometry === null ? 0 : relative(geometry, geometryBaseline);
-    const normalized = Math.max(fromBlendshape, fromGeometry);
+    const normalized = Math.max(fromBlendshape, fromGeometry, additionalGeometrySignal);
     trace[key] = {
       blendshape: raw,
       geometry,
       neutral: blendshapeBaseline,
       normalized,
-      origin: geometry !== null && fromGeometry > fromBlendshape ? "geometry" : "blendshape",
+      origin: Math.max(fromGeometry, additionalGeometrySignal) > fromBlendshape ? "geometry" : "blendshape",
     };
     return normalized;
   };
 
   return {
     // Eyelid aspect ratio, against the operator's own calibrated opening.
-    blinkLeft: fuse("blinkLeft", "eyeBlinkLeft", lidClosure(eyeL), 0, neutral?.blinkLeft ?? 0),
-    blinkRight: fuse("blinkRight", "eyeBlinkRight", lidClosure(eyeR), 0, neutral?.blinkRight ?? 0),
+    blinkLeft: fuse("blinkLeft", "eyeBlinkLeft", lidClosure(eyeL, calibration.face.neutralEyeOpennessLeft ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkLeft ?? 0),
+    blinkRight: fuse("blinkRight", "eyeBlinkRight", lidClosure(eyeR, calibration.face.neutralEyeOpennessRight ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkRight ?? 0),
     // Lip separation, normalised by mouth width.
-    jawOpen: fuse("jawOpen", "jawOpen", hasMesh ? mouthOpenness(face.landmarks) : null, mouthBase, neutral?.jawOpen ?? mouthBase),
+    jawOpen: fuse("jawOpen", "jawOpen", mouthGeometry, mouthBase, neutral?.jawOpen ?? mouthBase, jawDropSignal),
     /*
      * Mouth-corner lift. Its geometric baseline is zero because a relaxed mouth
      * has its corners roughly level with the lip centre — an approximation,
      * documented rather than measured, because calibration records no
      * corner-lift neutral of its own.
      */
-    smileLeft: fuse("smileLeft", "mouthSmileLeft", hasMesh ? mouthCornerLift(face.landmarks, "left") : null, 0, neutral?.smileLeft ?? 0),
-    smileRight: fuse("smileRight", "mouthSmileRight", hasMesh ? mouthCornerLift(face.landmarks, "right") : null, 0, neutral?.smileRight ?? 0),
+    // Opening the jaw moves the lip centre and can raise both MediaPipe smile
+    // scores even with still corners. Remove the measured jaw contribution;
+    // genuine corner lift beyond it remains available, including with jaw open.
+    smileLeft: fuse("smileLeft", "mouthSmileLeft",
+      hasMesh ? Math.max(calibration.face.neutralSmileLeft ?? 0, mouthCornerLift(local, "left") - mouthDelta * 1.8) : null,
+      calibration.face.neutralSmileLeft ?? 0, neutral?.smileLeft ?? 0, 0, mouthDelta * 0.3),
+    smileRight: fuse("smileRight", "mouthSmileRight",
+      hasMesh ? Math.max(calibration.face.neutralSmileRight ?? 0, mouthCornerLift(local, "right") - mouthDelta * 1.8) : null,
+      calibration.face.neutralSmileRight ?? 0, neutral?.smileRight ?? 0, 0, mouthDelta * 0.3),
     /*
-     * Brows get no landmark fallback, deliberately. The mesh's brow points move
-     * with the forehead, so a geometric measure would largely track head pitch
-     * and would raise the brows every time somebody nodded. The blendshape is the
-     * only honest input here, and the trace shows that rather than implying a
-     * fusion which is not happening.
+     * Brow geometry is measured in FACE-LOCAL space only. Measured in camera
+     * space, a nod foreshortens the brow-to-eye distance and read as a raise,
+     * which is why brows once had no geometric input at all. With the head's
+     * rotation removed first, a rigid nod leaves this at neutral (pinned in
+     * m82Isolation.test.ts); `leakage` flags a blendshape riding a nod.
      */
-    browInnerUp: fuse("browInnerUp", "browInnerUp", null, 0, neutral?.browInnerUp ?? 0),
-    browOuterUpLeft: fuse("browOuterUpLeft", "browOuterUpLeft", null, 0, neutral?.browOuterUpLeft ?? 0),
-    browOuterUpRight: fuse("browOuterUpRight", "browOuterUpRight", null, 0, neutral?.browOuterUpRight ?? 0),
+    browInnerUp: fuse("browInnerUp", "browInnerUp", browSignal(0), 0, neutral?.browInnerUp ?? 0),
+    browOuterUpLeft: fuse("browOuterUpLeft", "browOuterUpLeft", browSignal(1), 0, neutral?.browOuterUpLeft ?? 0),
+    browOuterUpRight: fuse("browOuterUpRight", "browOuterUpRight", browSignal(2), 0, neutral?.browOuterUpRight ?? 0),
     status: "tracked",
     calculationMs: performance.now() - started,
+    updatedAtMs: performance.now(),
     trace,
+    leakage,
+    eyeAperture: { left: eyeL, right: eyeR },
+    eyeGaze,
+    mouthAperture: { ratio: mouthGeometry, jawDrop: jawGeometry },
+    liveMouth: hasMesh ? {
+      timestampMs: face.timestampMs,
+      ring: LIVE_INNER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
+    } : undefined,
   };
 }
 
@@ -219,7 +345,7 @@ export function deriveSourceExpression(face: SourceFaceGeometry): SourceExpressi
 export function deriveExpressionEnvelope(source: SourceExpressionProfile): ExpressionEnvelope {
   // An open-eyed source can close its eyes completely; a source photographed
   // mid-blink cannot close much further, and that one IS a real limit.
-  const blink = (open: number) => unit(0.35 + open * 0.65);
+  const blink = (_open: number) => 1;
   // Headroom that falls with what the source already shows, but never below
   // half — enough to stay clearly visible.
   const headroom = (existing: number) => Math.max(0.5, 1 - unit(existing) * 0.35);

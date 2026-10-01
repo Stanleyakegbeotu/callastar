@@ -4,8 +4,7 @@
  * everywhere the remote participant appears.
  */
 export const images = {
-  hero:
-    "https://images.unsplash.com/photo-1758598305797-405b69bd80f2?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=88&w=1800",
+  hero: "/media/onboarding/girl-wallpaper.jpg",
   host:
     "https://images.unsplash.com/photo-1758598305779-8b8465d47e37?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=88&w=1000",
   /**

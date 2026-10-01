@@ -254,6 +254,10 @@ export const SOURCE_PROFILE_VERSION = 2;
  * anywhere, and the models are served from this origin.
  */
 export interface TransformationSourceProfile {
+  /** One prepared neutral video frame; memory-only and released with the profile. */
+  preparedFrame?: Blob;
+  baseFrameTime?: number;
+  baseFrameScore?: number;
   version: number;
   analysisVersion: number;
   createdAt: number;

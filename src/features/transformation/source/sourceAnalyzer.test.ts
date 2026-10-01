@@ -141,7 +141,7 @@ vi.mock("./videoFrameReader", async () => {
     async frameAt(timestamp: number) {
       if (this.disposed) throw new actual.VideoSeekError("disposed", "cancelled");
       this.seeks.push(timestamp);
-      return {} as HTMLCanvasElement;
+      return { toBlob: (callback: BlobCallback) => callback(new Blob(['prepared'], { type: 'image/png' })) } as HTMLCanvasElement;
     }
 
     dispose() {

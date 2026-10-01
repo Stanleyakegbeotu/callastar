@@ -1,5 +1,6 @@
 import type { DerivedFaceGeometry } from "../engine/faceTypes";
 import type { PoseDerivedGeometry } from "../engine/poseTypes";
+import { physicalOrientation } from "../engine/rigidFaceMotion";
 
 import type {
   SourceCapabilities,
@@ -303,9 +304,11 @@ export function deriveMovementEnvelope(
   const yawLeft = Math.max(0.05, baseYaw - Math.max(0, face.yaw)) + (angles.left ? SOURCE_ENVELOPE_BASE.videoYawBonus : 0);
   const yawRight = Math.max(0.05, baseYaw - Math.max(0, -face.yaw)) + (angles.right ? SOURCE_ENVELOPE_BASE.videoYawBonus : 0);
 
-  // Positive pitch is the head tilted back, so it spends the upward budget.
-  const pitchUp = Math.max(0.04, basePitch - Math.max(0, face.pitch)) + (angles.up ? SOURCE_ENVELOPE_BASE.videoPitchBonus : 0);
-  const pitchDown = Math.max(0.04, basePitch - Math.max(0, -face.pitch)) + (angles.down ? SOURCE_ENVELOPE_BASE.videoPitchBonus : 0);
+  // A source already looking up has spent part of its upward budget. Physical
+  // pitch (+ up), because MediaPipe's own pitch is positive looking DOWN.
+  const sourcePitch = physicalOrientation(face).pitch;
+  const pitchUp = Math.max(0.04, basePitch - Math.max(0, sourcePitch)) + (angles.up ? SOURCE_ENVELOPE_BASE.videoPitchBonus : 0);
+  const pitchDown = Math.max(0.04, basePitch - Math.max(0, -sourcePitch)) + (angles.down ? SOURCE_ENVELOPE_BASE.videoPitchBonus : 0);
 
   return {
     yawLeft,

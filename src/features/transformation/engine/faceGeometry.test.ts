@@ -6,6 +6,7 @@ import {
   estimateConfidence,
   eyeOpenness,
   faceBounds,
+  jawDisplacement,
   mouthOpenness,
   poseFromLandmarks,
   poseFromMatrix,
@@ -41,12 +42,22 @@ function neutralFace(): Point3[] {
   points[FACE_LANDMARKS.rightEyeInner] = { x: 0.54, y: 0.45, z: 0 };
   points[FACE_LANDMARKS.rightEyeUpper] = { x: 0.57, y: 0.437, z: 0 };
   points[FACE_LANDMARKS.rightEyeLower] = { x: 0.57, y: 0.464, z: 0 };
+  // The aperture is read at three points across each lid, not only the centre.
+  for (const [upper, lower, x] of [[160, 144, 0.415], [158, 153, 0.445], [387, 373, 0.585], [385, 380, 0.555]] as const) {
+    points[upper] = { x, y: 0.44, z: 0 };
+    points[lower] = { x, y: 0.462, z: 0 };
+  }
 
   // Mouth closed.
   points[FACE_LANDMARKS.mouthLeft] = { x: 0.44, y: 0.62, z: 0 };
   points[FACE_LANDMARKS.mouthRight] = { x: 0.56, y: 0.62, z: 0 };
   points[FACE_LANDMARKS.mouthUpper] = { x: 0.5, y: 0.618, z: 0 };
   points[FACE_LANDMARKS.mouthLower] = { x: 0.5, y: 0.622, z: 0 };
+  const mouthPairs = [[13, 14, 0.5], [82, 87, 0.485], [312, 317, 0.515], [81, 178, 0.47], [311, 402, 0.53]] as const;
+  for (const [upper, lower, x] of mouthPairs) {
+    points[upper] = { x, y: 0.618, z: 0 };
+    points[lower] = { x, y: 0.622, z: 0 };
+  }
 
   return points;
 }
@@ -124,8 +135,10 @@ describe("eye and mouth openness", () => {
     expect(eyeOpenness(face, "left")).toBeGreaterThan(0.5);
 
     const shut = neutralFace();
-    shut[FACE_LANDMARKS.leftEyeUpper] = { x: 0.43, y: 0.45, z: 0 };
-    shut[FACE_LANDMARKS.leftEyeLower] = { x: 0.43, y: 0.45, z: 0 };
+    for (const [upper, lower, x] of [[160, 144, 0.415], [159, 145, 0.43], [158, 153, 0.445]] as const) {
+      shut[upper] = { x, y: 0.45, z: 0 };
+      shut[lower] = { x, y: 0.45, z: 0 };
+    }
     expect(eyeOpenness(shut, "left")).toBeCloseTo(0, 2);
 
     // The other eye is unaffected — a wink must not close both.
@@ -136,9 +149,34 @@ describe("eye and mouth openness", () => {
     expect(mouthOpenness(neutralFace())).toBeLessThan(0.2);
 
     const open = neutralFace();
-    open[FACE_LANDMARKS.mouthUpper] = { x: 0.5, y: 0.6, z: 0 };
-    open[FACE_LANDMARKS.mouthLower] = { x: 0.5, y: 0.67, z: 0 };
+    for (const [upper, lower] of [[13, 14], [82, 87], [312, 317], [81, 178], [311, 402]] as const) {
+      open[upper] = { ...open[upper]!, y: 0.6 };
+      open[lower] = { ...open[lower]!, y: 0.67 };
+    }
     expect(mouthOpenness(open)).toBeGreaterThan(0.5);
+  });
+
+  it("measures opening perpendicular to the mouth axis under roll", () => {
+    const open = neutralFace();
+    for (const [upper, lower] of [[13, 14], [82, 87], [312, 317], [81, 178], [311, 402]] as const) {
+      open[upper] = { ...open[upper]!, y: 0.6 };
+      open[lower] = { ...open[lower]!, y: 0.67 };
+    }
+    const frontal = mouthOpenness(open);
+    const angle = Math.PI / 12;
+    const rotated = open.map((point) => {
+      const x = point.x - 0.5, y = point.y - 0.62;
+      return { ...point, x: 0.5 + Math.cos(angle) * x - Math.sin(angle) * y,
+        y: 0.62 + Math.sin(angle) * x + Math.cos(angle) * y };
+    });
+    expect(mouthOpenness(rotated)).toBeCloseTo(frontal, 5);
+  });
+
+  it("measures chin drop against stable upper-face anchors", () => {
+    const neutral = neutralFace();
+    const open = neutralFace();
+    open[FACE_LANDMARKS.chin] = { ...open[FACE_LANDMARKS.chin]!, y: 0.73 };
+    expect(jawDisplacement(open)).toBeGreaterThan(jawDisplacement(neutral));
   });
 
   it("stays within 0..1 however extreme the landmarks", () => {

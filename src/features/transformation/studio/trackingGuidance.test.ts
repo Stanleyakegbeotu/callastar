@@ -133,6 +133,22 @@ describe("framing", () => {
     expect(result.detail).toMatch(/closer/i);
   });
 
+  it("leaves an ordinary head-and-shoulders call framing alone", () => {
+    // Measured from a real portrait through the Studio camera: eye span 0.23.
+    const result = describeTracking(face({ derived: faceGeometry({ scale: 0.23 }) }), pose(), RUNNING);
+    expect(result.label).not.toBe("Too close");
+  });
+
+  it("calls a face cropped at the top or bottom too close, whatever its size", () => {
+    const result = describeTracking(
+      face({ derived: faceGeometry({ bounds: { minX: 0.2, minY: 0.0, maxX: 0.8, maxY: 0.8 } }) }),
+      pose(),
+      RUNNING,
+    );
+    expect(result.label).toBe("Too close");
+    expect(result.detail).toMatch(/tracking continues/i);
+  });
+
   it("says move back when the face fills the frame", () => {
     const result = describeTracking(
       face({ derived: faceGeometry({ scale: MAX_FACE_SCALE + 0.01 }) }),

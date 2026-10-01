@@ -36,7 +36,9 @@ describe("while waiting for the operator to settle", () => {
     expect(waiting("too-far").message).toMatch(/closer/i);
     expect(waiting("too-close").message).toMatch(/back/i);
     expect(waiting("face-near-edge").message).toBe("Center your face");
-    expect(waiting("head-angled").message).toMatch(/directly/i);
+    expect(waiting("head-angled").message).toBe('Face the camera');
+    expect(waiting("head-pitched").message).toBe('Keep your head level');
+    expect(waiting("head-tilted").message).toBe('Straighten your head');
     expect(waiting("no-pose").message).toMatch(/both shoulders are visible/i);
   });
 
@@ -95,6 +97,13 @@ describe("when it does not work", () => {
 
     const unstable = describeCalibration(state({ phase: "failed", failure: "unstable" }));
     expect(unstable.detail).toMatch(/comfortable position/i);
+  });
+
+  it("names the position a steady head was held in", () => {
+    const tilted = describeCalibration(state({ phase: "failed", failure: "out-of-position", failureRejection: "head-tilted" }));
+    expect(tilted.message).toBe("Straighten your head");
+    expect(tilted.detail).toMatch(/try again/i);
+    expect(tilted.actionable).toBe(true);
   });
 
   it("offers face-only as the way out of a missing-shoulders failure", () => {

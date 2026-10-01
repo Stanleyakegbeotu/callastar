@@ -1,3 +1,4 @@
+import { readyVideoFrame } from "./readyVideoFrame";
 /**
  * Getting one decoded frame out of a video at a chosen moment.
  *
@@ -55,6 +56,7 @@ export class VideoFrameReader {
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
   private disposed = false;
+  private abort = new AbortController();
 
   async open(blob: Blob): Promise<VideoMetadata> {
     if (this.disposed) throw new VideoSeekError("Reader disposed", "cancelled");
@@ -146,68 +148,7 @@ export class VideoFrameReader {
     const context = this.context;
     if (!video || !canvas || !context) throw new VideoSeekError("Reader is not open", "decode");
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-
-      const cleanup = () => {
-        window.clearTimeout(timer);
-        video.removeEventListener("seeked", onSeeked);
-        video.removeEventListener("error", onError);
-      };
-
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve();
-      };
-
-      const fail = (error: VideoSeekError) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      };
-
-      const timer = window.setTimeout(
-        () => fail(new VideoSeekError(`Seek to ${timestampSeconds}s timed out`, "seek-timeout")),
-        SEEK.timeoutMs,
-      );
-
-      const onSeeked = () => {
-        /*
-         * `seeked` means the seek completed, not that a frame was presented.
-         * Where the browser can tell us about an actual frame, wait for it —
-         * otherwise fall back, since `seeked` is all some browsers offer.
-         */
-        const withFrameCallback = video as HTMLVideoElement & {
-          requestVideoFrameCallback?: (callback: () => void) => number;
-        };
-
-        if (typeof withFrameCallback.requestVideoFrameCallback === "function") {
-          withFrameCallback.requestVideoFrameCallback(() => finish());
-          // A presented frame may never arrive for a paused element on some
-          // builds, so the seek still resolves on the next tick.
-          window.setTimeout(finish, 120);
-          return;
-        }
-
-        finish();
-      };
-
-      const onError = () => fail(new VideoSeekError(`Seeking to ${timestampSeconds}s failed`, "seek-failed"));
-
-      video.addEventListener("seeked", onSeeked);
-      video.addEventListener("error", onError);
-
-      try {
-        // Clamped inside the file: a seek to exactly `duration` lands past the
-        // last decodable frame on plenty of encoders and never fires `seeked`.
-        video.currentTime = Math.max(0, Math.min(timestampSeconds, Math.max(0, video.duration - 0.05)));
-      } catch {
-        fail(new VideoSeekError(`Could not seek to ${timestampSeconds}s`, "seek-failed"));
-      }
-    });
+    await readyVideoFrame(video, timestampSeconds, this.abort.signal);
 
     if (this.disposed) throw new VideoSeekError("Reader disposed", "cancelled");
 
@@ -218,6 +159,7 @@ export class VideoFrameReader {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.abort.abort();
 
     const video = this.video;
     const objectUrl = this.objectUrl;

@@ -189,12 +189,21 @@ export function assessStability(samples: Partial<Record<StabilityQuantity, reado
 export const ACCEPTANCE_ENVELOPE = {
   /** Below this the face is too small for the landmarks to be trustworthy. */
   minFaceScale: 0.03,
-  /** Above this a head movement will crop, and the neutral is unusable. */
-  maxFaceScale: 0.25,
-  /** ~26°, ~20°, ~20°. Past these the far side of the mesh is hidden. */
-  maxYaw: 0.45,
-  maxPitch: 0.35,
-  maxRoll: 0.35,
+  /**
+   * Above this a lean will crop, and the neutral is unusable. Just under the
+   * tracking guidance's 0.45 so a neutral never starts already "too close";
+   * the old 0.25 sat a hair above an ordinary call framing (0.23 measured).
+   */
+  maxFaceScale: 0.42,
+  /**
+   * ~8.6°, ~8.6°, ~6.9°: three stability tolerances each. A phone accepted an
+   * 11° pitch as neutral under the old ~20° bound, and every nod afterwards was
+   * measured from a tilted head. Provisional until a physical neutral-noise
+   * recording is available.
+   */
+  maxYaw: STABILITY_TOLERANCE.yaw * 3,
+  maxPitch: STABILITY_TOLERANCE.pitch * 3,
+  maxRoll: STABILITY_TOLERANCE.roll * 3,
   /** Fraction of the frame the face centre must stay inside. */
   edgeMargin: 0.05,
   /** Below this the landmarks are a guess. Matches the guidance threshold. */

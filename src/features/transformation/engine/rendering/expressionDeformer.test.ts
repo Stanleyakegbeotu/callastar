@@ -17,6 +17,8 @@ function fixture() {
   set(61, .43, .615); set(291, .57, .615); set(13, .5, .605); set(14, .5, .625);
   set(152, .5, .80); set(107, .46, .36); set(336, .54, .36);
   set(70, .39, .35); set(300, .61, .35);
+  set(205, .34, .54); set(425, .66, .54);
+  set(216, .395, .57); set(436, .605, .57);
   const mesh = buildSourceFaceMesh(landmarks);
   const deformer = new ExpressionDeformer(mesh, landmarks);
   return { landmarks, mesh, deformer };
@@ -86,6 +88,28 @@ describe("local expression deformer", () => {
     output = deformer.update({ ...NEUTRAL_EXPRESSION, browOuterUpLeft: .5 });
     expect(delta(mesh, output, leftBrow, 1)).toBeGreaterThan(0);
     expect(Math.abs(delta(mesh, output, nose, 1))).toBeLessThan(0.0001);
+  });
+
+  it("shares a smile softly with its cheek, fold and lower eyelid while preserving a mixed blink", () => {
+    const { mesh, deformer } = fixture();
+    const leftCheek = nearest(mesh, .34, .54);
+    const rightCheek = nearest(mesh, .66, .54);
+    const leftFold = nearest(mesh, .395, .57);
+    const leftLowerLid = nearest(mesh, .42, .445);
+    const leftUpperLid = nearest(mesh, .42, .416);
+    const output = deformer.update({
+      ...NEUTRAL_EXPRESSION,
+      smileLeft: .8,
+      smileRight: .35,
+      blinkLeft: .45,
+      jawOpen: .3,
+    });
+
+    expect(delta(mesh, output, leftCheek, 1)).toBeGreaterThan(0.0005);
+    expect(delta(mesh, output, leftFold, 1)).toBeGreaterThan(0.0001);
+    expect(delta(mesh, output, leftLowerLid, 1)).toBeGreaterThan(0);
+    expect(delta(mesh, output, leftUpperLid, 1)).toBeLessThan(0);
+    expect(delta(mesh, output, leftCheek, 1)).toBeGreaterThan(delta(mesh, output, rightCheek, 1));
   });
 
   it("limits a closed-mouth source without silencing it", () => {

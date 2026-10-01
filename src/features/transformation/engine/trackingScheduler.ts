@@ -40,12 +40,21 @@ export const QUALITY_PRESETS: Readonly<Record<QualityMode, SchedulerCadence>> = 
 };
 
 export interface SchedulerStats {
-  /** Frames the camera delivered. */
+  /** Camera frames presented since the prior callback (rVFC can coalesce while inference blocks). */
   cameraFrames: number;
+  cameraCallbacks: number;
   /** Frames on which at least one model ran. */
   trackingFrames: number;
   /** Frames skipped because inference was still busy. */
   droppedFrames: number;
+  droppedInputFrames: number;
+  droppedTrackingFrames: number;
+  cameraTimestampMs: number | null;
+  faceStartMs: number | null;
+  faceEndMs: number | null;
+  poseStartMs: number | null;
+  poseEndMs: number | null;
+  cameraToFaceMs: number | null;
   faceInferences: number;
   poseInferences: number;
   /** Rolling averages in ms; null until measured. */
@@ -54,6 +63,7 @@ export interface SchedulerStats {
   loopAverageMs: number | null;
   /** Frames per second, measured over a rolling window. */
   cameraFps: number | null;
+  acceptedCameraFps: number | null;
   faceFps: number | null;
   poseFps: number | null;
 }
@@ -112,8 +122,8 @@ class RollingAverage {
 class RateCounter {
   private stamps: number[] = [];
 
-  mark(now: number): void {
-    this.stamps.push(now);
+  mark(now: number, count = 1): void {
+    for (let i = 0; i < count; i++) this.stamps.push(now);
     const cutoff = now - 1000;
     while (this.stamps.length > 0 && this.stamps[0]! < cutoff) this.stamps.shift();
   }
@@ -152,10 +162,19 @@ export class TrackingScheduler {
   private readonly poseMs = new RollingAverage();
   private readonly loopMs = new RollingAverage();
   private readonly cameraRate = new RateCounter();
+  private readonly acceptedCameraRate = new RateCounter();
   private readonly faceRate = new RateCounter();
   private readonly poseRate = new RateCounter();
 
-  private counts = { cameraFrames: 0, trackingFrames: 0, droppedFrames: 0, faceInferences: 0, poseInferences: 0 };
+  private counts = { cameraFrames: 0, cameraCallbacks: 0, trackingFrames: 0, droppedFrames: 0,
+    droppedInputFrames: 0, droppedTrackingFrames: 0, faceInferences: 0, poseInferences: 0 };
+  private cameraTimestampMs: number | null = null;
+  private faceStartMs: number | null = null;
+  private faceEndMs: number | null = null;
+  private poseStartMs: number | null = null;
+  private poseEndMs: number | null = null;
+  private cameraToFaceMs: number | null = null;
+  private lastPresentedFrames: number | null = null;
 
   private readonly now: () => number;
 
@@ -176,8 +195,15 @@ export class TrackingScheduler {
       poseAverageMs: this.poseMs.mean,
       loopAverageMs: this.loopMs.mean,
       cameraFps: this.cameraRate.rate(now),
+      acceptedCameraFps: this.acceptedCameraRate.rate(now),
       faceFps: this.faceRate.rate(now),
       poseFps: this.poseRate.rate(now),
+      cameraTimestampMs: this.cameraTimestampMs,
+      faceStartMs: this.faceStartMs,
+      faceEndMs: this.faceEndMs,
+      poseStartMs: this.poseStartMs,
+      poseEndMs: this.poseEndMs,
+      cameraToFaceMs: this.cameraToFaceMs,
     };
   }
 
@@ -223,6 +249,9 @@ export class TrackingScheduler {
    */
   setVideo(video: HTMLVideoElement): void {
     this.video = video;
+    // presentedFrames is scoped to one media timeline; a flipped camera may
+    // reset it, so the first frame of the new track is a new baseline.
+    this.lastPresentedFrames = null;
   }
 
   dispose(): void {
@@ -237,6 +266,7 @@ export class TrackingScheduler {
     this.poseMs.clear();
     this.loopMs.clear();
     this.cameraRate.clear();
+    this.acceptedCameraRate.clear();
     this.faceRate.clear();
     this.poseRate.clear();
   }
@@ -269,7 +299,7 @@ export class TrackingScheduler {
     if (!this.running || this.disposed || !this.video) return;
 
     const video = this.video as HTMLVideoElement & {
-      requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number }) => void) => number;
+      requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number; presentedFrames?: number }) => void) => number;
     };
 
     if (typeof video.requestVideoFrameCallback === "function") {
@@ -278,7 +308,13 @@ export class TrackingScheduler {
         this.frameHandle = null;
         // `mediaTime` is the frame's own presentation time, which is a truer
         // timestamp for inference than the wall clock.
-        this.onFrame(metadata?.mediaTime !== undefined ? metadata.mediaTime * 1000 : this.now());
+        this.cameraTimestampMs = metadata?.mediaTime !== undefined ? metadata.mediaTime * 1000 : null;
+        const presented = metadata?.presentedFrames;
+        const frameDelta = presented !== undefined && this.lastPresentedFrames !== null
+          ? Math.max(1, presented - this.lastPresentedFrames)
+          : 1;
+        if (presented !== undefined) this.lastPresentedFrames = presented;
+        this.onFrame(metadata?.mediaTime !== undefined ? metadata.mediaTime * 1000 : this.now(), frameDelta);
       });
       return;
     }
@@ -286,16 +322,19 @@ export class TrackingScheduler {
     this.usingVideoFrameCallback = false;
     this.rafHandle = requestAnimationFrame(() => {
       this.rafHandle = null;
-      this.onFrame(this.now());
+      this.cameraTimestampMs = null;
+      this.onFrame(this.now(), 1);
     });
   }
 
-  private onFrame(timestampMs: number): void {
+  private onFrame(timestampMs: number, presentedFrames = 1): void {
     if (!this.running || this.disposed) return;
 
     const loopStart = this.now();
-    this.counts.cameraFrames += 1;
-    this.cameraRate.mark(loopStart);
+    this.counts.cameraCallbacks += 1;
+    this.counts.cameraFrames += presentedFrames;
+    this.cameraRate.mark(loopStart, presentedFrames);
+    if (presentedFrames > 1) this.counts.droppedInputFrames += presentedFrames - 1;
 
     /*
      * The drop.
@@ -307,6 +346,7 @@ export class TrackingScheduler {
      */
     if (this.busy) {
       this.counts.droppedFrames += 1;
+      this.counts.droppedTrackingFrames += 1;
       // Deliberately does NOT re-arm: `busy` can only be true while an earlier
       // frame is still inside `onFrame`, and that frame's `finally` schedules
       // the next one. Scheduling here as well would leave two callbacks
@@ -328,8 +368,11 @@ export class TrackingScheduler {
 
       if (this.options.face.ready && this.frameIndex % this.cadence.faceInterval === 0) {
         const started = this.now();
+        this.faceStartMs = started;
         this.lastFace = this.options.face.detect(frame, timestampMs);
-        this.faceMs.add(this.now() - started);
+        this.faceEndMs = this.now();
+        this.cameraToFaceMs = this.faceEndMs - loopStart;
+        this.faceMs.add(this.faceEndMs - started);
         this.counts.faceInferences += 1;
         this.faceRate.mark(started);
         ranSomething = true;
@@ -337,8 +380,10 @@ export class TrackingScheduler {
 
       if (this.options.pose.ready && this.frameIndex % this.cadence.poseInterval === 0) {
         const started = this.now();
+        this.poseStartMs = started;
         this.lastPose = this.options.pose.detect(frame, timestampMs);
-        this.poseMs.add(this.now() - started);
+        this.poseEndMs = this.now();
+        this.poseMs.add(this.poseEndMs - started);
         this.counts.poseInferences += 1;
         this.poseRate.mark(started);
         ranSomething = true;
@@ -346,6 +391,7 @@ export class TrackingScheduler {
 
       if (ranSomething) {
         this.counts.trackingFrames += 1;
+        this.acceptedCameraRate.mark(loopStart);
         this.loopMs.add(this.now() - loopStart);
       }
 

@@ -4,6 +4,10 @@ import { expect, test } from "@playwright/test";
 test("loads Three only for the renderer, draws a fixed source mesh, and disposes it", async ({ page }) => {
   await page.goto("/");
   const report = await page.evaluate(async () => {
+    // The default resource-timing buffer holds 250 entries, and the dev server
+    // loads every module as its own resource: the app alone reaches ~245, so
+    // the Three chunk's entry was silently dropped. Room first, then measure.
+    performance.setResourceTimingBufferSize(10_000);
     const hasThreeResource = () => performance.getEntriesByType("resource").some((entry) => /three/i.test(entry.name));
     const threeBefore = hasThreeResource();
     const { FaceRenderer } = await import("/src/features/transformation/engine/rendering/FaceRenderer.ts");

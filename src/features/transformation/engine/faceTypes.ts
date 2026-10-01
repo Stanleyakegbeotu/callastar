@@ -54,7 +54,7 @@ export interface DerivedFaceGeometry {
   scale: number;
   /** Radians. Positive yaw is the head turning to the subject's left. */
   yaw: number;
-  /** Radians. Positive pitch is the head tilting back. */
+  /** Radians. Positive pitch is looking DOWN (measured; see `rigidFaceMotion.ts`). */
   pitch: number;
   /** Radians. Positive roll is the head tilting to the subject's right. */
   roll: number;

@@ -1,3 +1,4 @@
+﻿import { selectNeutralCandidate } from "./referenceFrames";
 import { describe, expect, it } from "vitest";
 
 import type { DerivedFaceGeometry } from "../engine/faceTypes";
@@ -92,10 +93,11 @@ describe("angle classification", () => {
     expect(classifyAngle(face({ yaw: -0.35 }))).toBe("slight-right");
   });
 
-  it("maps positive pitch to looking up", () => {
-    // Positive pitch is the head tilted back.
-    expect(classifyAngle(face({ pitch: 0.25 }))).toBe("slight-up");
-    expect(classifyAngle(face({ pitch: -0.25 }))).toBe("slight-down");
+  it("maps negative MediaPipe pitch to looking up", () => {
+    // MediaPipe pitch is positive looking DOWN — measured by rendering the face
+    // nose-up and reading it back (transformation-m83-roundtrip).
+    expect(classifyAngle(face({ pitch: -0.25 }))).toBe("slight-up");
+    expect(classifyAngle(face({ pitch: 0.25 }))).toBe("slight-down");
   });
 
   it("prefers the turn when a head is both turned and tilted", () => {
@@ -134,8 +136,8 @@ describe("angle classification", () => {
     });
 
     it("treats the vertical threshold as inclusive", () => {
-      expect(classifyAngle(face({ pitch: CLASSIFICATION.minVerticalPitch }))).toBe("slight-up");
-      expect(classifyAngle(face({ pitch: -CLASSIFICATION.minVerticalPitch }))).toBe("slight-down");
+      expect(classifyAngle(face({ pitch: -CLASSIFICATION.minVerticalPitch }))).toBe("slight-up");
+      expect(classifyAngle(face({ pitch: CLASSIFICATION.minVerticalPitch }))).toBe("slight-down");
     });
 
     it("keeps a frame just inside the usable limit", () => {
@@ -335,4 +337,10 @@ describe("coverage", () => {
   it("reports nothing for an empty bank", () => {
     expect(coveredAngles([]).count).toBe(0);
   });
+});
+
+it('selects a neutral frontal base rather than the first or most expressive candidate',()=>{
+ const base={center:{x:.5,y:.5,z:0},scale:.15,yaw:0,pitch:0,roll:0,eyeOpenness:.8,eyeOpennessLeft:.8,eyeOpennessRight:.8,mouthOpenness:.02,bounds:{minX:.2,minY:.2,maxX:.8,maxY:.8}};
+ const frames=[{timestampSeconds:0,face:{...base,yaw:.3},pose:null},{timestampSeconds:2,face:{...base,yaw:-.3},pose:null},{timestampSeconds:4,face:{...base,pitch:.22},pose:null},{timestampSeconds:6,face:{...base,mouthOpenness:.9},pose:null},{timestampSeconds:12.42,face:base,pose:null}];
+ expect(selectNeutralCandidate(frames)?.timestampSeconds).toBe(12.42);
 });

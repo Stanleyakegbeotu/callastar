@@ -115,8 +115,9 @@ const HARNESS = `async (drawSource, moves) => {
 const MOVES = [
   { name: "turn_right", motion: { yawDelta: -0.35 } },
   { name: "turn_left", motion: { yawDelta: 0.35 } },
-  { name: "look_up", motion: { pitchDelta: 0.25 } },
-  { name: "look_down", motion: { pitchDelta: -0.25 } },
+  // MediaPipe reports looking UP as NEGATIVE pitch (measured: transformation-m83-roundtrip).
+  { name: "look_up", motion: { pitchDelta: -0.25 } },
+  { name: "look_down", motion: { pitchDelta: 0.25 } },
   { name: "tilt_right", motion: { rollDelta: 0.2 } },
   { name: "tilt_left", motion: { rollDelta: -0.2 } },
 ];

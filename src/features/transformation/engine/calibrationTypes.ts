@@ -73,6 +73,12 @@ export type CalibrationFailure =
   | "pose-unavailable"
   /** The operator never held still long enough. */
   | "unstable"
+  /**
+   * The operator held still, but outside the neutral envelope for most of the
+   * window — tilted, turned, too close. `failureRejection` says which. Reported
+   * as "unstable" before, which sent a steady, tilted person hunting a jitter.
+   */
+  | "out-of-position"
   /** Ran out of time before a usable window appeared. */
   | "timeout"
   /** The operator stopped it. */
@@ -86,6 +92,8 @@ export type FrameRejection =
   | "too-far"
   | "too-close"
   | "head-angled"
+  | "head-pitched"
+  | "head-tilted"
   | "face-near-edge"
   | "no-pose"
   | "partial-pose";
@@ -108,7 +116,16 @@ export interface CalibrationFaceBaseline {
    * expression through live. See `relativeMotion.ts`.
    */
   neutralEyeOpenness: number;
+  neutralEyeOpennessLeft?: number;
+  neutralEyeOpennessRight?: number;
+  neutralSmileLeft?: number;
+  neutralSmileRight?: number;
+  neutralBrowHeights?: [number, number, number];
   neutralMouthOpenness: number;
+  /** Neutral chin-to-nose proportion, used to separate jaw drop from pose. */
+  neutralJawDisplacement?: number;
+  /** Per-eye iris centre in canonical eye-local units. No landmarks are retained. */
+  neutralEyeGaze?: { left: { x: number; y: number }; right: { x: number; y: number } };
   /** Compact median scores from the neutral capture. No landmarks or frames persist. */
   expressionNeutral?: {
     blinkLeft: number;
@@ -165,7 +182,7 @@ export interface CalibrationQualityReport {
  * rules — a yaw that meant one thing and now means another is exactly the class
  * of bug that took a milestone to find at the tracker layer.
  */
-export const CALIBRATION_PROFILE_VERSION = 2;
+export const CALIBRATION_PROFILE_VERSION = 3;
 
 /**
  * PRIVACY. This is the whole of what calibration keeps.

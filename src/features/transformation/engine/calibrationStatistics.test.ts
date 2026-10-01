@@ -213,8 +213,17 @@ describe("acceptance envelope", () => {
      * perfectly forward head would refuse to calibrate most people, which is a
      * worse outcome than a baseline taken at four degrees of yaw.
      */
-    expect(ACCEPTANCE_ENVELOPE.maxYaw).toBeGreaterThan(0.26);
-    expect(ACCEPTANCE_ENVELOPE.maxPitch).toBeGreaterThan(0.17);
+    const fourDegrees = (4 * Math.PI) / 180;
+    expect(ACCEPTANCE_ENVELOPE.maxYaw).toBeGreaterThan(fourDegrees);
+    expect(ACCEPTANCE_ENVELOPE.maxPitch).toBeGreaterThan(fourDegrees);
+    expect(ACCEPTANCE_ENVELOPE.maxRoll).toBeGreaterThan(fourDegrees);
+  });
+
+  it("refuses the eleven-degree pitch a phone once accepted as neutral", () => {
+    const elevenDegrees = (11 * Math.PI) / 180;
+    expect(ACCEPTANCE_ENVELOPE.maxPitch).toBeLessThan(elevenDegrees);
+    expect(ACCEPTANCE_ENVELOPE.maxYaw).toBeLessThan(elevenDegrees);
+    expect(ACCEPTANCE_ENVELOPE.maxRoll).toBeLessThan(elevenDegrees);
   });
 
   it("brackets a plausible face size", () => {

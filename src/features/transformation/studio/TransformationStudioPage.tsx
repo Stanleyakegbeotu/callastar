@@ -15,7 +15,10 @@ import { StudioStepRail } from "./components/StudioStepRail";
 import { deriveStudioSteps } from "./studioSteps";
 import { useSourceSelection } from "./useSourceSelection";
 import { useStudioRuntime } from "./useStudioRuntime";
+import { usePreviewExpansion } from "./usePreviewExpansion";
 import type { FaceRendererStats } from "../engine/rendering/FaceRenderer";
+import type { FaceRenderFraming } from "../engine/rendering/faceFraming";
+import { NEUTRAL_FACE_RENDER_POSE, type FaceRenderPose } from '../engine/rendering/faceRendererMath';
 import { EXPRESSION_KEYS, NEUTRAL_EXPRESSION, describeBlendshapeCoverage, type ExpressionKey, type ExpressionMotion, type ExpressionValues } from "../engine/expressionMotion";
 import { avatarMotionFromTracking, restrictToCapabilities } from "../avatar/avatarMotion";
 import type { AvatarMotion } from "../avatar/avatarTypes";
@@ -55,12 +58,32 @@ export function TransformationStudioPage() {
   const avatarRendererRef = useRef<ThreeAvatarRenderer | null>(null);
   const [showMesh, setShowMesh] = useState(false);
   const [wireframe, setWireframe] = useState(false);
+  const [liveMouthEnabled, setLiveMouthEnabled] = useState(false);
+  const liveMouthEnabledRef = useRef(false);
+  liveMouthEnabledRef.current = liveMouthEnabled;
   const [manualEnabled, setManualEnabled] = useState(false);
   const [manualValues, setManualValues] = useState<ExpressionValues>({ ...NEUTRAL_EXPRESSION });
   const manualExpressionRef = useRef<ExpressionMotion | null>(null);
+  const [manualHeadEnabled, setManualHeadEnabled] = useState(false);
+  const [manualHead, setManualHead] = useState<FaceRenderPose>({ ...NEUTRAL_FACE_RENDER_POSE });
+  const manualHeadRef = useRef<FaceRenderPose | null>(null);
+  manualHeadRef.current = import.meta.env.DEV && manualHeadEnabled ? manualHead : null;
   const rendererCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
   const rendererRef = useRef<import("../engine/rendering/FaceRenderer").FaceRenderer | null>(null);
+  const stageRef = useRef<HTMLElement | null>(null);
+  const framingRef = useRef<FaceRenderFraming | null>(null);
+  const calibrationProfile = runtime.calibration.profile;
+  // Read by the renderer every frame; a recalibration moves the face with it.
+  framingRef.current = calibrationProfile
+    ? {
+        neutralCenter: calibrationProfile.face.center,
+        neutralEyeSpan: calibrationProfile.face.scale,
+        trackingWidth: calibrationProfile.trackingSpace.width,
+        trackingHeight: calibrationProfile.trackingSpace.height,
+      }
+    : null;
+  const preview = usePreviewExpansion(stageRef);
 
   const [searchParams] = useSearchParams();
   const profiles = useProfiles();
@@ -138,10 +161,16 @@ export function TransformationStudioPage() {
         asset: rendererSource,
         profile: rendererProfile,
         sourceVideoRef,
+        liveMouthVideoRef: runtime.videoRef,
+        liveMouthEnabled: liveMouthEnabledRef,
         motion: runtime.motionRef,
         expression: runtime.expressionRef,
         manualExpression: manualExpressionRef,
+        manualPose: manualHeadRef,
         paused: runtime.renderPausedRef,
+        framing: framingRef,
+        // Matches the camera preview's own mirror, so the two stay comparable.
+        mirror: runtime.facing === "user" ? "selfie" : "faithful",
         onStats: setRendererStats,
       });
       rendererRef.current = renderer;
@@ -171,7 +200,7 @@ export function TransformationStudioPage() {
       cleanupResize();
       disposeCurrent();
     };
-  }, [previewMode, canRenderFace, source.asset, source.profile, runtime.motionRef, runtime.expressionRef, runtime.renderPausedRef]);
+  }, [previewMode, canRenderFace, source.asset, source.profile, runtime.motionRef, runtime.expressionRef, runtime.renderPausedRef, runtime.facing]);
 
   /*
    * Read-through refs, so the avatar renderer needs no loop of its own.
@@ -345,6 +374,16 @@ export function TransformationStudioPage() {
   const isPaused = state.phase === "paused";
   const hasFailed = state.phase === "failed";
   const isIdle = state.phase === "idle" || state.phase === "disposed";
+  /*
+   * What owns the main surface.
+   *
+   * Raw is the operator's LIVE CAMERA; the uploaded source is a reference and
+   * only fills the stage while no camera is running. Face and avatar output
+   * take the main surface with the live camera as a comparison PiP. A renderer
+   * that failed falls back to the raw layout rather than a blank canvas.
+   */
+  const outputLayout = (previewMode === "face" && rendererStats?.status !== "failed") || previewMode === "avatar";
+  const sourceLayout = outputLayout ? "is-decoder" : isLive ? "is-thumbnail" : "is-full";
 
   return (
     <div className="studio-page">
@@ -356,8 +395,11 @@ export function TransformationStudioPage() {
       <StudioStepRail steps={steps} />
 
       <div className="studio-layout">
-        <section className="studio-stage" aria-label="Camera preview">
-          <div className={`studio-viewport ${runtime.facing === "user" ? "is-mirrored" : ""} ${previewMode === "face" ? "is-face-render-preview" : ""}`}>
+        <section ref={stageRef} className={`studio-stage ${preview.expanded ? "is-expanded" : ""}`} aria-label="Camera preview">
+          <div
+            className={`studio-viewport ${runtime.facing === "user" ? "is-mirrored" : ""} ${previewMode === "face" ? "is-face-render-preview" : ""} ${outputLayout && isLive ? "is-output-preview" : ""}`}
+            data-layout={outputLayout ? "output" : "camera"}
+          >
             <video
               ref={runtime.videoRef}
               className="studio-video"
@@ -370,24 +412,23 @@ export function TransformationStudioPage() {
             <canvas ref={runtime.overlayRef} className="studio-overlay" aria-hidden="true" />
 
             {/*
-              * The source, shown large.
+              * The source, as a REFERENCE.
               *
-              * Prominent rather than tucked into a card: the operator is
-              * judging whether this is the right face, and a thumbnail in a
-              * sidebar does not let them. Sits under the idle placeholder so
-              * starting a camera replaces it.
+              * Large only while no camera runs, so the operator can judge the
+              * face before starting. Once live it becomes a thumbnail, and under
+              * face or avatar output it is only the hidden frame decoder. One
+              * element throughout: a mode switch restyles it rather than
+              * remounting a video the renderer may be reading.
               */}
-            {source.previewUrl && (previewMode === "raw" || rendererStats?.status === "failed") && (
-              <div className="studio-source-preview">
+            {source.previewUrl && (source.asset?.kind === "video" || sourceLayout !== "is-decoder") && (
+              <div className={`studio-source-preview ${sourceLayout}`} data-testid="studio-source-reference">
                 {source.asset?.kind === "video" ? (
                   <video ref={sourceVideoRef} src={source.previewUrl} playsInline muted preload="metadata" />
                 ) : (
                   <img src={source.previewUrl} alt={`Source: ${source.asset?.fileName ?? "selected file"}`} />
                 )}
+                {sourceLayout === "is-thumbnail" && <span className="studio-source-label">Source</span>}
               </div>
-            )}
-            {source.previewUrl && source.asset?.kind === "video" && previewMode === "face" && (
-              <video ref={sourceVideoRef} src={source.previewUrl} className="studio-source-decoder" playsInline muted preload="metadata" />
             )}
             <canvas ref={rendererCanvasRef} className={`studio-face-renderer ${previewMode === "face" ? "is-visible" : ""}`} aria-label="Experimental face renderer preview" />
             <canvas
@@ -448,6 +489,25 @@ export function TransformationStudioPage() {
               </div>
             )}
 
+            <div className="studio-viewport-tools">
+              <button
+                type="button"
+                className="studio-viewport-button"
+                aria-label={preview.expanded ? "Minimize preview" : "Expand preview"}
+                aria-pressed={preview.expanded}
+                onClick={preview.expanded ? preview.minimize : preview.expand}
+              >
+                <Icon name={preview.expanded ? "minimize" : "maximize"} className="size-5" />
+              </button>
+              {/* The mode card sits below the stage and is hidden while expanded. */}
+              {preview.expanded && (
+                <div className="studio-viewport-modes" role="group" aria-label="Expanded preview mode">
+                  <button type="button" aria-pressed={previewMode === "raw"} onClick={() => setPreviewMode("raw")}>Camera</button>
+                  <button type="button" aria-pressed={previewMode === "face"} onClick={() => setPreviewMode("face")} disabled={!canRenderFace}>Face</button>
+                </div>
+              )}
+            </div>
+
             {isLive && !calibrating && (
               <div className={`studio-status is-${summary.guidance.quality}`} role="status">
                 <span className="studio-status-dot" aria-hidden="true" />
@@ -507,7 +567,7 @@ export function TransformationStudioPage() {
               </div>
             )}
             <div className="studio-preview-modes" role="group" aria-label="Preview mode">
-              <button type="button" aria-pressed={previewMode === "raw"} onClick={() => setPreviewMode("raw")}>Raw source</button>
+              <button type="button" aria-pressed={previewMode === "raw"} onClick={() => setPreviewMode("raw")}>Raw camera</button>
               <button type="button" aria-pressed={previewMode === "face"} onClick={() => setPreviewMode("face")} disabled={!canRenderFace}>Face render</button>
               {/* Offered only for a 3D source, so it cannot be pressed with nothing to show. */}
               <button
@@ -582,6 +642,9 @@ export function TransformationStudioPage() {
               <div className="studio-render-diagnostics" aria-live="polite">
                 <span>Renderer {rendererStats.fps?.toFixed(1) ?? "—"} fps</span>
                 <span>{rendererStats.renderMs?.toFixed(1) ?? "—"} ms</span>
+                <span data-metric="display-input-age">Input → display {rendererStats.displayInputAgeMs?.toFixed(1) ?? "—"} ms</span>
+                <span data-metric="display-frame">Display frame {rendererStats.displayFrameAtMs?.toFixed(1) ?? "—"} ms</span>
+                <span data-metric="render-interval">Render {rendererStats.renderStartMs?.toFixed(1) ?? "—"} → {rendererStats.renderEndMs?.toFixed(1) ?? "—"} ms</span>
                 <span>{rendererStats.droppedFrames} dropped</span>
                 <span>Clamped: {rendererStats.clamped.join(", ") || "none"}</span>
                 <details>
@@ -701,7 +764,28 @@ export function TransformationStudioPage() {
               {previewMode === "face" && rendererStats && (
                 <div className="studio-expression-diagnostics">
                   <h3>Expressions {manualEnabled ? "· Manual DEV" : "· Live"}</h3>
-                  <p>Calculation {rendererStats.expressionMs?.toFixed(2) ?? "—"} ms · Deformation {rendererStats.deformationMs?.toFixed(2) ?? "—"} ms</p>
+                  <label className="studio-live-mouth-toggle">
+                    <input type="checkbox" checked={liveMouthEnabled} onChange={event => setLiveMouthEnabled(event.target.checked)} />
+                    Live mouth interior (experimental)
+                  </label>
+                  <p>Only pixels inside the live inner-lip mask are sampled. Frames stay in memory for the current preview.</p>
+                  <p data-metric="live-mouth">Mouth feed {rendererStats.mouthFeedOpacity && rendererStats.mouthFeedOpacity > 0.01 ? "active" : "off"} · opacity {(rendererStats.mouthFeedOpacity ?? 0).toFixed(2)}</p>
+                  <p>Mesh {rendererStats.meshVertices ?? 0} vertices / {rendererStats.meshTriangles ?? 0} triangles · depth {rendererStats.depthRange?.toFixed(3)} · DPR {rendererStats.dpr?.toFixed(1)} · WebGL {rendererStats.status} · context losses {rendererStats.contextLossCount ?? 0}</p>
+                  {import.meta.env.DEV && <p>Expression leakage: {rendererStats.expressionLeakage ? 'pitch / brow mismatch detected' : 'not detected'} (diagnostic only)</p>}
+                  {source.profile && <p>Source pose: yaw {(source.profile.primaryFace.yaw * 180 / Math.PI).toFixed(1)}°, pitch {(source.profile.primaryFace.pitch * 180 / Math.PI).toFixed(1)}°, roll {(source.profile.primaryFace.roll * 180 / Math.PI).toFixed(1)}° — removed before deformation.
+                    {source.profile.baseFrameTime !== undefined && <> Base frame: {source.profile.baseFrameTime.toFixed(2)}s · score {source.profile.baseFrameScore?.toFixed(3)}</>}
+                  </p>}
+                  <p>Expression {rendererStats.expressionMs?.toFixed(2) ?? "—"} ms · Deformation {rendererStats.deformationMs?.toFixed(2) ?? "—"} ms · Mouth compositor {rendererStats.mouthCompositorMs?.toFixed(2) ?? "—"} ms</p>
+                  <p data-metric="mouth-mesh-aperture">
+                    Mesh mouth aperture {rendererStats.mouthMeshAperturePx?.neutral.toFixed(1) ?? "—"} → {rendererStats.mouthMeshAperturePx?.applied.toFixed(1) ?? "—"} px
+                    · chin moved {rendererStats.jawChinMovementPx?.toFixed(1) ?? "—"} px
+                  </p>
+                  {rendererStats.eyes && (
+                    <p data-metric="eyes">
+                      Eyes · aperture L {rendererStats.eyes.aperture?.left?.toFixed(2) ?? "—"} / R {rendererStats.eyes.aperture?.right?.toFixed(2) ?? "—"}
+                      {rendererStats.eyes.state && <> · measured L {rendererStats.eyes.state.measuredLeft.toFixed(2)} / R {rendererStats.eyes.state.measuredRight.toFixed(2)} · state L {rendererStats.eyes.state.left} / R {rendererStats.eyes.state.right}</>}
+                    </p>
+                  )}
                   {/*
                     * Mesh movement, in pixels, beside the face it moves.
                     *
@@ -726,6 +810,7 @@ export function TransformationStudioPage() {
                   <div className="studio-expression-row studio-expression-head">
                     <span>expression</span>
                     <span>raw</span>
+                    <span>geom</span>
                     <span>neutral</span>
                     <span>norm</span>
                     <span>src max</span>
@@ -738,6 +823,7 @@ export function TransformationStudioPage() {
                       <div className="studio-expression-row" key={key}>
                         <span>{key}</span>
                         <span>{trace?.blendshape === null || trace === undefined ? "—" : trace.blendshape.toFixed(2)}</span>
+                        <span>{trace?.geometry == null ? '—' : trace.geometry.toFixed(2)}</span>
                         <span>{trace ? trace.neutral.toFixed(2) : "—"}</span>
                         <span>{trace ? trace.normalized.toFixed(2) : (rendererStats.expressionRequested?.[key] ?? 0).toFixed(2)}</span>
                         <span>{(rendererStats.expressionLimits?.[key] ?? 1).toFixed(2)}</span>
@@ -748,6 +834,12 @@ export function TransformationStudioPage() {
                     );
                   })}
                   {import.meta.env.DEV && <div className="studio-expression-manual">
+                    <label><input type="checkbox" checked={manualHeadEnabled} onChange={event => setManualHeadEnabled(event.target.checked)} /> Manual head override</label>
+                    {manualHeadEnabled && (['yaw', 'pitch', 'roll', 'x', 'y', 'scale'] as const).map(key => <label key={key}>
+                      {key} {manualHead[key].toFixed(2)}
+                      <input type="range" min={key === 'scale' ? .78 : -.28} max={key === 'scale' ? 1.28 : .28} step="0.01" value={manualHead[key]}
+                        onChange={event => setManualHead(current => ({ ...current, [key]: Number(event.target.value) }))} />
+                    </label>)}
                     <label><input type="checkbox" checked={manualEnabled} onChange={(event) => setManualEnabled(event.target.checked)} /> Manual expression override</label>
                     {manualEnabled && EXPRESSION_KEYS.map((key) => <label key={key}>
                       {key} {manualValues[key].toFixed(2)}

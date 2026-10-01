@@ -44,8 +44,20 @@ export const LOW_FACE_CONFIDENCE = 0.4;
 /** Interocular distance below which the operator is too far from the camera. */
 export const MIN_FACE_SCALE = 0.045;
 
-/** And above which they are close enough to be cropped by any head movement. */
-export const MAX_FACE_SCALE = 0.22;
+/**
+ * Framing advice, not a tracking limit. Nothing stops when it is crossed.
+ *
+ * Eye span as a fraction of frame width. An ordinary head-and-shoulders phone
+ * call measured 0.23 — and the old 0.22 called that "too close", which is
+ * the phone complaint. With the eye span about 0.65 of face width and the face
+ * about 1.35 times as tall as wide, 0.45 is a face filling ~70% of a portrait
+ * frame's width with its chin and forehead still in. Past that, a small lean
+ * crops it. Geometric, not yet a measured phone range.
+ */
+export const MAX_FACE_SCALE = 0.45;
+
+/** Bounds this close to the top or bottom edge are already cropping the face. */
+export const FRAME_EDGE_MARGIN = 0.01;
 
 /** Radians. Beyond this a profile view loses the far side of the mesh. */
 export const MAX_COMFORTABLE_YAW = 0.6;
@@ -99,8 +111,9 @@ export function describeTracking(
       return { quality: "fair", label: "Too far", detail: "Move a little closer to the camera." };
     }
 
-    if (derived.scale > MAX_FACE_SCALE) {
-      return { quality: "fair", label: "Too close", detail: "Move back slightly so your head is fully in frame." };
+    const cropped = derived.bounds.minY < FRAME_EDGE_MARGIN || derived.bounds.maxY > 1 - FRAME_EDGE_MARGIN;
+    if (derived.scale > MAX_FACE_SCALE || cropped) {
+      return { quality: "fair", label: "Too close", detail: "Move back slightly for the best framing. Tracking continues." };
     }
 
     if (Math.abs(derived.yaw) > MAX_COMFORTABLE_YAW) {

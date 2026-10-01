@@ -78,11 +78,12 @@ describe("physical head movement drives the avatar", () => {
   });
 
   it("lookUp → avatar looks up", () => {
-    expect(seen(head({ pitchDelta: STRONG })).nose.y).toBeGreaterThan(0.2);
+    // MediaPipe reports looking up as NEGATIVE pitch (measured, M8.3 round trip).
+    expect(seen(head({ pitchDelta: -STRONG })).nose.y).toBeGreaterThan(0.2);
   });
 
   it("lookDown → avatar looks down", () => {
-    expect(seen(head({ pitchDelta: -STRONG })).nose.y).toBeLessThan(-0.2);
+    expect(seen(head({ pitchDelta: STRONG })).nose.y).toBeLessThan(-0.2);
   });
 
   it("tiltRight → avatar tilts right", () => {

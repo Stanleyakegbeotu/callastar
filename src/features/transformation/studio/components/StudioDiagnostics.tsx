@@ -191,6 +191,17 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
           <Row metric="pose-inferences" label="Pose inferences" value={count(stats?.poseInferences)} />
           <Row metric="dropped-frames" label="Dropped frames" value={count(stats?.droppedFrames)} />
           <Row metric="camera-fps" label="Camera rate" value={fps(stats?.cameraFps)} />
+          <Row metric="accepted-camera-fps" label="Accepted frame rate" value={fps(stats?.acceptedCameraFps)} />
+          <Row metric="face-fps" label="Face tracking rate" value={fps(stats?.faceFps)} />
+          <Row metric="pose-fps" label="Pose tracking rate" value={fps(stats?.poseFps)} />
+          <Row metric="dropped-input-frames" label="Input frames skipped" value={count(stats?.droppedInputFrames)} />
+          <Row metric="dropped-tracking-frames" label="Tracking frames dropped" value={count(stats?.droppedTrackingFrames)} />
+          <Row metric="camera-face-latency" label="Camera callback → face result" value={ms(stats?.cameraToFaceMs)} />
+          <Row metric="camera-frame-timestamp" label="Camera media timestamp" value={ms(stats?.cameraTimestampMs)} />
+          <Row metric="face-stage-start" label="Face tracking start" value={ms(stats?.faceStartMs)} />
+          <Row metric="face-stage-end" label="Face tracking end" value={ms(stats?.faceEndMs)} />
+          <Row metric="pose-stage-start" label="Pose tracking start" value={ms(stats?.poseStartMs)} />
+          <Row metric="pose-stage-end" label="Pose tracking end" value={ms(stats?.poseEndMs)} />
           <Row metric="face-ms" label="Face inference" value={ms(stats?.faceAverageMs)} />
           <Row metric="pose-ms" label="Pose inference" value={ms(stats?.poseAverageMs)} />
           <Row metric="loop-ms" label="Loop" value={ms(stats?.loopAverageMs)} />
@@ -226,6 +237,34 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
           <Row metric="face-eyes" label="Eye openness" value={ratio(derivedFace?.eyeOpenness, 2)} />
           <Row metric="face-mouth" label="Mouth openness" value={ratio(derivedFace?.mouthOpenness, 2)} />
           <Row metric="face-scale" label="Face scale" value={ratio(derivedFace?.scale)} />
+          <Row metric="expression-complete" label="Expression complete" value={ms(summary.expression?.updatedAtMs)} />
+          <Row metric="expression-calc-ms" label="Expression processing" value={ms(summary.expression?.calculationMs)} />
+        </dl>
+      </section>
+
+      <section>
+        <h3>Eye gaze</h3>
+        <dl>
+          <Row metric="gaze-iris-left" label="Iris L x / y" value={summary.expression?.eyeGaze?.raw
+            ? `${signed(summary.expression.eyeGaze.raw.left.x, 3)} / ${signed(summary.expression.eyeGaze.raw.left.y, 3)}` : MISSING} />
+          <Row metric="gaze-iris-right" label="Iris R x / y" value={summary.expression?.eyeGaze?.raw
+            ? `${signed(summary.expression.eyeGaze.raw.right.x, 3)} / ${signed(summary.expression.eyeGaze.raw.right.y, 3)}` : MISSING} />
+          <Row metric="gaze-neutral-left" label="Neutral L x / y" value={summary.expression?.eyeGaze?.neutral
+            ? `${ratio(summary.expression.eyeGaze.neutral.left.x)} / ${ratio(summary.expression.eyeGaze.neutral.left.y)}` : "calibrate with iris tracking"} />
+          <Row metric="gaze-neutral-right" label="Neutral R x / y" value={summary.expression?.eyeGaze?.neutral
+            ? `${ratio(summary.expression.eyeGaze.neutral.right.x)} / ${ratio(summary.expression.eyeGaze.neutral.right.y)}` : "calibrate with iris tracking"} />
+          <Row metric="gaze-normalized-left" label="Normalized L x / y" value={summary.expression?.eyeGaze?.normalized
+            ? `${signed(summary.expression.eyeGaze.normalized.left.x)} / ${signed(summary.expression.eyeGaze.normalized.left.y)}` : MISSING} />
+          <Row metric="gaze-normalized-right" label="Normalized R x / y" value={summary.expression?.eyeGaze?.normalized
+            ? `${signed(summary.expression.eyeGaze.normalized.right.x)} / ${signed(summary.expression.eyeGaze.normalized.right.y)}` : MISSING} />
+          <Row metric="gaze-applied-left" label="Applied L x / y" value={summary.expression?.eyeGaze?.applied
+            ? `${signed(summary.expression.eyeGaze.applied.left.x)} / ${signed(summary.expression.eyeGaze.applied.left.y)}` : MISSING} />
+          <Row metric="gaze-applied-right" label="Applied R x / y" value={summary.expression?.eyeGaze?.applied
+            ? `${signed(summary.expression.eyeGaze.applied.right.x)} / ${signed(summary.expression.eyeGaze.applied.right.y)}` : MISSING} />
+          <Row metric="gaze-clamped" label="Clamped" value={summary.expression?.eyeGaze?.normalized
+            ? String(summary.expression.eyeGaze.normalized.clamped) : MISSING} plain />
+          <Row metric="gaze-quality" label="Tracking quality L / R" value={summary.expression?.eyeGaze?.quality
+            ? `${ratio(summary.expression.eyeGaze.quality.left, 2)} / ${ratio(summary.expression.eyeGaze.quality.right, 2)}` : MISSING} />
         </dl>
       </section>
 

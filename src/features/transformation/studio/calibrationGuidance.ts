@@ -47,6 +47,7 @@ export function describeCalibration(state: CalibrationCollectorState): Calibrati
       return describeWaiting(state);
 
     case "collecting":
+      if (state.rejection) return describeWaiting(state);
       // Past two thirds it is worth saying it is nearly over, so nobody moves
       // at the last moment.
       return state.progress > 0.66
@@ -80,7 +81,11 @@ function describeWaiting(state: CalibrationCollectorState): CalibrationGuidance 
       return { message: "Move back slightly", detail: null, actionable: true };
 
     case "head-angled":
-      return { message: "Face the camera directly", detail: null, actionable: true };
+      return { message: "Face the camera", detail: null, actionable: true };
+    case "head-pitched":
+      return { message: "Keep your head level", detail: null, actionable: true };
+    case "head-tilted":
+      return { message: "Straighten your head", detail: null, actionable: true };
 
     case "face-near-edge":
       return { message: "Center your face", detail: null, actionable: true };
@@ -116,6 +121,12 @@ function describeFailure(state: CalibrationCollectorState): CalibrationGuidance 
         detail: "Move back so your shoulders are in frame, or calibrate your face only.",
         actionable: true,
       };
+
+    case "out-of-position": {
+      // The same words the operator saw while it was waiting, now as a reason.
+      const position = describeWaiting({ ...state, rejection: state.failureRejection ?? null });
+      return { message: position.message, detail: "Then try again.", actionable: true };
+    }
 
     case "unstable":
       return {

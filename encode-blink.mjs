@@ -1,0 +1,13 @@
+﻿import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require=createRequire(import.meta.url),root='artifacts/onboarding';
+const {PNG}=require('./artifacts/onboarding/.gifbuild/node_modules/pngjs');
+const {GIFEncoder,quantize,applyPalette}=require('./artifacts/onboarding/.gifbuild/node_modules/gifenc');
+const images={};for(const state of ['open','half','closed'])images[state]=PNG.sync.read(fs.readFileSync(`${root}/girl-blink-${state}.png`));
+const {width,height}=images.open;for(const image of Object.values(images))if(image.width!==width||image.height!==height)throw Error('frame size mismatch');
+const palette=quantize(images.open.data,256,{format:'rgb565'});
+const indexed=Object.fromEntries(Object.entries(images).map(([name,image])=>[name,applyPalette(image.data,palette)]));
+const gif=GIFEncoder();
+for(const [state,delay] of [['open',3200],['half',80],['closed',160],['half',80],['open',440]])gif.writeFrame(indexed[state],width,height,{palette,delay,repeat:0,dispose:1});
+gif.finish();const target=`${root}/girl-blinking.gif`;fs.writeFileSync(target,gif.bytes());
+console.log(JSON.stringify({target,width,height,bytes:fs.statSync(target).size,cycleMs:3960}));

@@ -4,6 +4,9 @@ import type { PoseDerivedGeometry } from "../engine/poseTypes";
 
 import {
   coveredAngles,
+  selectNeutralCandidate,
+  scoreNeutralCandidate,
+  classifyAngle,
   selectReferenceFrames,
   type CandidateInput,
   type CandidateRejection,
@@ -468,8 +471,12 @@ export class SourceAnalyzer {
      * facing the camera, not whichever moment the sampler happened to reach
      * first. Where there is no front frame, the best-scoring one stands in.
      */
-    const front = selection.frames.find((frame) => frame.angle === "front");
-    const primary = front ?? [...selection.frames].sort((a, b) => b.score - a.score)[0]!;
+    const best = selectNeutralCandidate(candidates)!;
+    const primary = this.buildReferenceFrame(best, classifyAngle(best.face)!, scoreNeutralCandidate(best), geometry);
+    const preparedCanvas = await reader.frameAt(best.timestampSeconds);
+    const preparedFrame = await new Promise<Blob>((resolve, reject) => preparedCanvas.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error('Unable to prepare the neutral source frame')), 'image/png'));
+    if (stale()) return this.fail('cancelled', report);
     const angles = coveredAngles(selection.frames);
     const primaryDerived = candidates.find((candidate) => candidate.timestampSeconds === primary.timestampSeconds)!;
 
@@ -494,6 +501,9 @@ export class SourceAnalyzer {
         analysisVersion: SOURCE_ANALYSIS_VERSION,
         createdAt: Date.now(),
         sourceKind: "video",
+        preparedFrame,
+        baseFrameTime: best.timestampSeconds,
+        baseFrameScore: scoreNeutralCandidate(best),
         asset: options.asset.assetId
           ? {
               origin: "stored",

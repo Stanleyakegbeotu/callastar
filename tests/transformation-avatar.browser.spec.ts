@@ -240,8 +240,9 @@ test.describe("avatar rendering", () => {
         const neutral = await probe({});
         const turnRight = await probe({ yawDelta: -0.35 });
         const turnLeft = await probe({ yawDelta: 0.35 });
-        const lookUp = await probe({ pitchDelta: 0.25 });
-        const lookDown = await probe({ pitchDelta: -0.25 });
+        // MediaPipe reports looking UP as NEGATIVE pitch (transformation-m83-roundtrip).
+        const lookUp = await probe({ pitchDelta: -0.25 });
+        const lookDown = await probe({ pitchDelta: 0.25 });
         const tiltRight = await probe({ rollDelta: 0.2 });
         const closer = await probe({ scaleDelta: 1.2 });
 
@@ -324,8 +325,8 @@ test.describe("avatar rendering", () => {
     const applied = (probe: typeof report.neutral) => probe.applied as Record<string, number> | undefined;
     expect(applied(report.turnRight)!.yaw).toBeLessThan(-0.05);
     expect(applied(report.turnLeft)!.yaw).toBeGreaterThan(0.05);
-    // Pitch is inverted exactly once, upstream, so a physical look up is negative
-    // rotation.x — see `rendererMotion.ts`.
+    // A physical look up reaches the model as negative rotation.x (nose up)
+    // — MediaPipe -> physical in rigidFaceMotion.ts, physical -> Three in rendererMotion.ts.
     expect(applied(report.lookUp)!.pitch).toBeLessThan(-0.05);
     expect(applied(report.lookDown)!.pitch).toBeGreaterThan(0.05);
     expect(applied(report.tiltRight)!.roll).toBeGreaterThan(0.05);
@@ -458,7 +459,7 @@ test.describe("the Studio 3D source path", () => {
 
     // Switching back to the raw source tears the avatar renderer down, and the
     // image and video paths are untouched by any of this.
-    await page.getByRole("button", { name: "Raw source" }).click();
+    await page.getByRole("button", { name: "Raw camera" }).click();
     await expect(page.getByRole("button", { name: "Change source" })).toBeVisible();
   });
 });
