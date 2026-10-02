@@ -8,11 +8,11 @@ describe("source face mesh", () => {
   it("keeps source UVs fixed and preserves ImageBitmap row orientation", () => {
     const landmarks = Array.from({ length: 478 }, (_, index) => ({ x: index / 500, y: 0.25, z: 0 }));
     const mesh = buildSourceFaceMesh(landmarks);
-    // 468 landmarks, then the 21-vertex mouth fill and the 21-vertex cavity.
-    expect(mesh.positions).toHaveLength((468 + 21 + 21) * 3);
+    // Original face/mouth vertices plus 258 eye-only interior subdivisions.
+    expect(mesh.positions).toHaveLength((468 + 21 + 21 + 258) * 3);
     expect(mesh.uvs[1]).toBeCloseTo(0.25);
-    // 852 tessellation + 28 eye-fan + 20 fill + 20 cavity triangles.
-    expect(mesh.indices.length).toBe(920 * 3);
+    // 852 unchanged face triangles + 448 eye triangles + unchanged mouth fans.
+    expect(mesh.indices.length).toBe(1340 * 3);
     expect(mesh.uvs.length).toBe(mesh.positions.length / 3 * 2);
   });
 });

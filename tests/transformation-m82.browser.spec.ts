@@ -18,8 +18,8 @@ test('M8.2 real source: visual states, one owner, source switching and context r
   (window as any).__m82={renderer,options,motion,expression,getStats:()=>stats,FaceRenderer};
   return {status:stats.status,vertices:stats.meshVertices,triangles:stats.meshTriangles,depth:stats.depthRange};
  });
- expect(init.status).toBe('ready');// 468 landmarks + 21-vertex mouth fill + 21-vertex cavity; 852 tessellation + 28 eye + 40 mouth triangles.
- expect(init.vertices).toBe(510);expect(init.triangles).toBe(920);expect(init.depth).toBeGreaterThan(.02);
+ expect(init.status).toBe('ready');// 468 landmarks + 42 mouth + 258 eye interiors; 852 face + 40 mouth + 448 eye triangles.
+ expect(init.vertices).toBe(768);expect(init.triangles).toBe(1340);expect(init.depth).toBeGreaterThan(.02);
  for(const [name,head,expr] of [
   ['neutral',{},{}],['yaw-right',{yawDelta:-.25},{}],['yaw-left',{yawDelta:.25},{}],['pitch-up',{pitchDelta:-.2},{}],['pitch-down',{pitchDelta:.2},{}],['roll',{rollDelta:.2},{}],['blink',{}, {blinkLeft:1,blinkRight:1}],['jaw',{}, {jawOpen:1}],
  ] as const){
@@ -32,7 +32,7 @@ test('M8.2 real source: visual states, one owner, source switching and context r
   if(name==='yaw-left')expect(probe.nose.x).toBeLessThan(0);
   if(name==='pitch-up')expect(probe.nose.y).toBeGreaterThan(0);
   if(name==='pitch-down')expect(probe.nose.y).toBeLessThan(0);
-  const shot=await page.locator('[data-testid="m82-face"]').screenshot({path:`artifacts/m82/${name}.png`});
+  const shot=await page.locator('[data-testid="m82-face"]').screenshot({path:test.info().outputPath(`${name}.png`)});
   if(name==='neutral'||name==='jaw'){
    // Nothing inside the rendered inner-lip ring may be the canvas clear colour
    // (#0f172a): the tessellation leaves that ring open, and it used to show.

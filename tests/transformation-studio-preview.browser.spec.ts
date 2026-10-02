@@ -80,7 +80,7 @@ test("raw is the live camera, face render keeps it as a PiP, and expanding resty
   expect(area(raw.source!) / area(raw.viewport)).toBeLessThan(0.12);
   expect(raw.renderer).toBeNull();
   await expect(page.getByRole("button", { name: "Raw camera" })).toHaveAttribute("aria-pressed", "true");
-  await page.locator(".studio-stage").screenshot({ path: "artifacts/m83/phase1-raw.png" });
+  await page.locator(".studio-stage").screenshot({ path: test.info().outputPath("phase1-raw.png") });
   await assertNoOverflowAtEveryWidth(page, "raw");
 
   // FACE RENDER: output owns the stage, the live camera is a comparison PiP.
@@ -99,7 +99,7 @@ test("raw is the live camera, face render keeps it as a PiP, and expanding resty
   });
   expect(pip.visible).toBe(true);
   await page.waitForTimeout(600);
-  await page.locator(".studio-stage").screenshot({ path: "artifacts/m83/phase1-face-render.png" });
+  await page.locator(".studio-stage").screenshot({ path: test.info().outputPath("phase1-face-render.png") });
   await assertNoOverflowAtEveryWidth(page, "face render");
 
   // EXPAND, where the Fullscreen API exists: same camera element, same stream,
@@ -137,7 +137,7 @@ test("raw is the live camera, face render keeps it as a PiP, and expanding resty
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(400);
-  await page.screenshot({ path: "artifacts/m83/phase1-expanded.png" });
+  await page.screenshot({ path: test.info().outputPath("phase1-expanded.png") });
   await assertNoOverflowAtEveryWidth(page, "expanded");
   expect(await sameLiveElements(page)).toMatchObject({ sameVideo: true, sameStream: true, streamLive: true, advancing: true, sameRenderer: true, cameraRequests: 1 });
 

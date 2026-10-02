@@ -20,6 +20,9 @@ importers:
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
+      facefilter:
+        specifier: 3.4.3
+        version: 3.4.3
       i18next:
         specifier: ^26.4.2
         version: 26.4.2(typescript@5.9.3)
@@ -846,6 +849,9 @@ packages:
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
+
+  facefilter@3.4.3:
+    resolution: {integrity: sha512-kekHDtRbz+QLL1ri8XaJ8AR9m9+P0nl/XpWlzADFSTNEB6+Aoqsqlqwt9j1v+FNhBXM7gB9grXWIS4CjBNixhw==}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -1818,6 +1824,8 @@ snapshots:
       '@types/estree': 1.0.9
 
   expect-type@1.4.0: {}
+
+  facefilter@3.4.3: {}
 
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:

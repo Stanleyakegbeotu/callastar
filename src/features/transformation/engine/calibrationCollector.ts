@@ -22,6 +22,10 @@ import type { CameraFacing } from "./studioCamera";
 import { canonicalFaceLandmarks, localBrowHeights } from './faceLocalGeometry';
 import { eyeOpenness, jawDisplacement, mouthOpenness, mouthCornerLift } from './faceGeometry';
 import { measureBinocularGaze } from './eyeGaze';
+import { measureEyeGeometry, type EyeGeometry } from './eyeControls';
+import { measureMouthGeometry, MOUTH_SHAPES, type MouthGeometry } from './mouthControls';
+import { measureNoseGeometry } from './noseControls';
+import { mouthNoseLocalLandmarks } from './mouthNoseLocalGeometry';
 
 /**
  * Capturing a neutral baseline.
@@ -76,6 +80,9 @@ export const COLLECTION = {
 
 /** One admitted frame. Held only until the baseline is computed, then dropped. */
 interface Sample {
+  mouthLocal: MouthGeometry | null;
+  noseLocal: {left:number;right:number} | null;
+  regionShapes: Partial<Record<string,number>>;
   timestampMs: number;
   faceCenter: Point3;
   faceScale: number;
@@ -85,6 +92,7 @@ interface Sample {
   eyeOpenness: number;
   eyeLeft: number;
   eyeRight: number;
+  eyes: { left: EyeGeometry | null; right: EyeGeometry | null };
   smileLeft: number;
   smileRight: number;
   browHeights: [number, number, number] | null;
@@ -357,9 +365,13 @@ export class CalibrationCollector {
     const local = canonicalFaceLandmarks(face.landmarks, derived,
       this.context!.trackingWidth / this.context!.trackingHeight);
     const hasMesh = local.length >= 468;
+    const regionLocal=hasMesh?mouthNoseLocalLandmarks(face,this.context!.trackingWidth / this.context!.trackingHeight):[];
 
     return {
       timestampMs: nowMs,
+      mouthLocal: hasMesh ? measureMouthGeometry(regionLocal) : null,
+      noseLocal: hasMesh ? measureNoseGeometry(regionLocal) : null,
+      regionShapes: Object.fromEntries([...MOUTH_SHAPES,'noseSneerLeft','noseSneerRight'].filter(k=>typeof face.blendshapes[k]==='number').map(k=>[k,face.blendshapes[k]!])),
       faceCenter: derived.center,
       faceScale: derived.scale,
       yaw: derived.yaw,
@@ -368,6 +380,7 @@ export class CalibrationCollector {
       eyeOpenness: derived.eyeOpenness,
       eyeLeft: hasMesh ? eyeOpenness(local, 'left') : derived.eyeOpennessLeft,
       eyeRight: hasMesh ? eyeOpenness(local, 'right') : derived.eyeOpennessRight,
+      eyes: { left: hasMesh ? measureEyeGeometry(local, 'left') : null, right: hasMesh ? measureEyeGeometry(local, 'right') : null },
       smileLeft: hasMesh ? mouthCornerLift(local, 'left') : 0,
       smileRight: hasMesh ? mouthCornerLift(local, 'right') : 0,
       browHeights: localBrowHeights(local),
@@ -375,8 +388,8 @@ export class CalibrationCollector {
       jawDisplacement: hasMesh ? jawDisplacement(local) : 0,
       eyeGaze: hasMesh ? measureBinocularGaze(local) : null,
       expression: {
-        blinkLeft: face.blendshapes.eyeBlinkLeft ?? 1 - derived.eyeOpennessLeft,
-        blinkRight: face.blendshapes.eyeBlinkRight ?? 1 - derived.eyeOpennessRight,
+        blinkLeft: (hasMesh ? face.blendshapes.eyeBlinkRight : face.blendshapes.eyeBlinkLeft) ?? 1 - derived.eyeOpennessLeft,
+        blinkRight: (hasMesh ? face.blendshapes.eyeBlinkLeft : face.blendshapes.eyeBlinkRight) ?? 1 - derived.eyeOpennessRight,
         jawOpen: face.blendshapes.jawOpen ?? derived.mouthOpenness,
         smileLeft: face.blendshapes.mouthSmileLeft ?? 0,
         smileRight: face.blendshapes.mouthSmileRight ?? 0,
@@ -482,6 +495,21 @@ export class CalibrationCollector {
       mode: this.mode,
       cameraFacing: context.cameraFacing,
       face: {
+        mouth: samples.every(s=>s.mouthLocal) ? {
+          geometry: Object.fromEntries(Object.keys(samples[0]!.mouthLocal!).map(k=>[k,median(samples.map(s=>s.mouthLocal![k as keyof MouthGeometry]))??0])) as unknown as MouthGeometry,
+          shapes: Object.fromEntries(MOUTH_SHAPES.filter(k=>samples.some(s=>typeof s.regionShapes[k]==='number')).map(k=>[k,median(samples.filter(s=>typeof s.regionShapes[k]==='number').map(s=>s.regionShapes[k]!))??0])),
+        } : undefined,
+        nose: samples.every(s=>s.noseLocal) ? {
+          left:median(samples.map(s=>s.noseLocal!.left))??0,right:median(samples.map(s=>s.noseLocal!.right))??0,
+          shapes:{left:median(samples.map(s=>s.regionShapes.noseSneerLeft??0))??0,right:median(samples.map(s=>s.regionShapes.noseSneerRight??0))??0},
+        } : undefined,
+        eyes: samples.every(s => s.eyes.left && s.eyes.right) ? Object.fromEntries(['left', 'right'].map(side => {
+          const key = side as 'left' | 'right';
+          return [key, Object.fromEntries(['width', 'height', 'aperture', 'upper', 'lower', 'irisX', 'irisY'].map(field => {
+            const values = samples.map(s => s.eyes[key]![field as keyof EyeGeometry]).filter((v): v is number => v !== null);
+            return [field, values.length ? median(values) : null];
+          }))];
+        })) as unknown as NonNullable<TransformationCalibrationProfile['face']['eyes']> : undefined,
         center: faceCenter,
         scale: faceScale,
         yaw,

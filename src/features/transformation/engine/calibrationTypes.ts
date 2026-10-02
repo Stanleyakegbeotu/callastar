@@ -99,6 +99,10 @@ export type FrameRejection =
   | "partial-pose";
 
 export interface CalibrationFaceBaseline {
+  mouth?: import('./mouthControls').MouthCalibration;
+  nose?: import('./noseControls').NoseCalibration;
+  /** Independently measured neutral eye geometry, medians from the existing capture. */
+  eyes?: { left: import("./eyeControls").EyeCalibration; right: import("./eyeControls").EyeCalibration };
   /** Neutral face centre, normalised in tracking space. */
   center: Point3;
   /** Neutral interocular distance. The unit every translation is divided by. */
@@ -182,7 +186,7 @@ export interface CalibrationQualityReport {
  * rules — a yaw that meant one thing and now means another is exactly the class
  * of bug that took a milestone to find at the tracker layer.
  */
-export const CALIBRATION_PROFILE_VERSION = 3;
+export const CALIBRATION_PROFILE_VERSION = 4;
 
 /**
  * PRIVACY. This is the whole of what calibration keeps.

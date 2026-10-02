@@ -49,8 +49,9 @@ describe('M8.2 face-local isolation',()=>{
  it('keeps the source nose in front of cheeks without attenuating measured depth',()=>{
   const m=buildSourceFaceMesh(fixture());
   expect(m.positions[1*3+2]! - m.positions[234*3+2]!).toBeCloseTo(.09);
-  // 468 landmarks plus the two 21-vertex mouth fans; every vertex is used.
-  expect(new Set(m.indices).size).toBe(468 + 42);
+  // Face/mouth vertices and the eye-only interior subdivisions are all used.
+  expect(new Set(m.indices).size).toBe(m.positions.length / 3);
+  expect(m.eyeInterior).toEqual({ start: 510, count: 258 });
  });
  it('closes left/right independently without lid crossing or brow movement',()=>{
   const p=fixture(),mesh=buildSourceFaceMesh(p),d=new ExpressionDeformer(mesh,p);

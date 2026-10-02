@@ -34,6 +34,8 @@ import { DEFAULT_OVERLAY_STYLE, drawTrackingOverlay } from "./overlayDrawing";
 import { describeTracking, type TrackingGuidance } from "./trackingGuidance";
 import { BlinkStateMachine } from "../engine/blinkState";
 import { GazeSmoother } from "../engine/eyeGaze";
+import { EyeControlFilter, EYE_RENDER_CHANNELS } from "../engine/eyeControls";
+import { HybridCoordinator } from "../tracking/hybridCoordinator";
 
 /**
  * Everything the live Studio owns.
@@ -159,6 +161,7 @@ interface Runtime {
   /** Where each camera frame is downscaled before inference. */
   trackingCanvas: HTMLCanvasElement;
   trackingContext: CanvasRenderingContext2D;
+  oralFrame: HTMLCanvasElement;
   gazeSmoother: GazeSmoother;
   blinkState: BlinkStateMachine;
 }
@@ -179,6 +182,7 @@ export interface StudioRuntime {
   /** Latest motion from the existing scheduler. The renderer reads it without a React render. */
   motionRef: React.MutableRefObject<CalibrationMotion>;
   expressionRef: React.MutableRefObject<ExpressionMotion | null>;
+  oralFrameEnabledRef: React.MutableRefObject<boolean>;
   /** Camera flips deliberately freeze the rendered source until a new baseline exists. */
   renderPausedRef: React.MutableRefObject<boolean>;
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -194,6 +198,9 @@ export interface StudioRuntime {
   startCalibration: (mode?: CalibrationMode) => void;
   cancelCalibration: () => void;
   clearCalibration: () => void;
+  /** Developer lab borrows the face task with all normal face/pose inference suspended. */
+  suspendForTrackerLab: () => () => void;
+  getFaceTracker: () => FaceTracker | null;
 }
 
 const IDLE_CALIBRATION: CalibrationCollectorState = new CalibrationCollector().getState();
@@ -215,6 +222,27 @@ export function useStudioRuntime(): StudioRuntime {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
+  const trackerLabLeases = useRef(0);
+  const resumeAfterLab = useRef(false);
+
+  const getFaceTracker = useCallback(() => runtimeRef.current?.face ?? null, []);
+  const suspendForTrackerLab = useCallback(() => {
+    const owned = runtimeRef.current;
+    if (!owned) return () => {};
+    if (trackerLabLeases.current === 0) resumeAfterLab.current = owned.scheduler.isRunning;
+    trackerLabLeases.current++;
+    owned.scheduler.pause();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      trackerLabLeases.current = Math.max(0, trackerLabLeases.current - 1);
+      if (trackerLabLeases.current === 0 && resumeAfterLab.current && runtimeRef.current === owned && !document.hidden) {
+        owned.scheduler.resume();
+        resumeAfterLab.current = false;
+      }
+    };
+  }, []);
 
   /** The video element's laid-out size, cached so the draw does not force layout. */
   const displaySizeRef = useRef({ width: 0, height: 0 });
@@ -228,6 +256,7 @@ export function useStudioRuntime(): StudioRuntime {
   const lastCalibrationPhaseRef = useRef<CalibrationCollectorState["phase"]>("idle");
   const motionRef = useRef<CalibrationMotion>(NO_MOTION);
   const expressionRef = useRef<ExpressionMotion | null>(null);
+  const oralFrameEnabledRef = useRef(false);
   const renderPausedRef = useRef(false);
   const startCalibrationRef = useRef<((mode?: CalibrationMode) => void) | null>(null);
 
@@ -251,6 +280,7 @@ export function useStudioRuntime(): StudioRuntime {
     runtime.camera.dispose();
     runtime.face.dispose();
     runtime.pose.dispose();
+    runtime.oralFrame.width=0;runtime.oralFrame.height=0;
 
     const video = videoRef.current;
     if (video) video.srcObject = null;
@@ -301,6 +331,8 @@ export function useStudioRuntime(): StudioRuntime {
     // through the GPU path, and forcing a software surface would slow every
     // frame down for nobody's benefit.
     const trackingContext = trackingCanvas.getContext("2d");
+    const oralFrame = document.createElement('canvas');
+    const oralContext = oralFrame.getContext('2d');
     if (!trackingContext) {
       dispatch({ type: "FAIL", code: "webgl_unavailable", error: "This browser could not create a drawing surface." });
       return;
@@ -315,6 +347,10 @@ export function useStudioRuntime(): StudioRuntime {
     // One per runtime: it advances once per TRACKER update, never per render.
     const blinkState = new BlinkStateMachine();
     const gazeSmoother = new GazeSmoother();
+    const eyeFilter = new EyeControlFilter();
+    const hybridCoordinator = new HybridCoordinator();
+    let lastExpressionTimestamp = Number.NaN;
+    let lastEyeProfile: unknown = null;
 
     let lastObservedFaceTimestamp = Number.NaN;
     let trackingLostAt: number | null = null;
@@ -386,16 +422,52 @@ export function useStudioRuntime(): StudioRuntime {
         // tracker update without a second inference loop or 60 renders/sec.
         const currentMotion = computeRelativeMotion(calibrationCollector.getState().profile, faceResult, poseResult);
         motionRef.current = currentMotion;
-        const expression = blinkState.apply(computeExpressionMotion(faceResult, calibrationCollector.getState().profile), now);
+        const eyeProfile = calibrationCollector.getState().profile;
+        if (lastEyeProfile !== eyeProfile) { eyeFilter.reset(); blinkState.reset(); gazeSmoother.reset(); lastEyeProfile = eyeProfile; lastExpressionTimestamp = Number.NaN; }
+        // Pose-only updates may contain the same face result. They must not
+        // advance blink velocity or adaptive eye filters a second time.
+        if (faceResult?.timestampMs !== lastExpressionTimestamp) {
+        lastExpressionTimestamp = faceResult?.timestampMs ?? Number.NaN;
+        const expression = blinkState.apply(computeExpressionMotion(faceResult, eyeProfile), now);
         if (expression?.eyeGaze) {
           expression.eyeGaze.applied = gazeSmoother.update(
             expression.eyeGaze.normalized,
-            expression.eyeGaze.quality,
+            expression.eyeGaze.quality ? { left: expression.eyeGaze.quality.left * (faceResult?.confidence ?? 0), right: expression.eyeGaze.quality.right * (faceResult?.confidence ?? 0) } : null,
             now,
             { left: expression.blinkLeft >= 0.5, right: expression.blinkRight >= 0.5 },
+            { left: (expression.eyes?.[EYE_RENDER_CHANNELS.left].confidence ?? 0) >= 0.35, right: (expression.eyes?.[EYE_RENDER_CHANNELS.right].confidence ?? 0) >= 0.35 },
           );
         }
+        if (expression?.eyes) {
+          for (const side of ['left', 'right'] as const) {
+            const channel = EYE_RENDER_CHANNELS[side];
+            expression.eyes[side].blink = channel === 'left' ? expression.blinkLeft : expression.blinkRight;
+            expression.eyes[side].openness = (1 - expression.eyes[side].blink) * (1 + 0.4 * expression.eyes[side].wideOpen);
+            expression.eyes[side].gazeX = expression.eyeGaze?.applied?.[channel].x ?? 0;
+            expression.eyes[side].gazeY = expression.eyeGaze?.applied?.[channel].y ?? 0;
+          }
+          // Gaze has already been filtered by its iris-quality-aware path.
+          const filtered = eyeFilter.update(expression.eyes, now);
+          for (const side of ['left', 'right'] as const) {
+            filtered[side].gazeX = expression.eyes[side].gazeX;
+            filtered[side].gazeY = expression.eyes[side].gazeY;
+          }
+          expression.eyes = filtered;
+          expression.eyes = hybridCoordinator.resolve({ eyes: filtered, pose: null, detected: faceResult?.detected ?? false, confidence: faceResult?.confidence ?? 0 }, now).eyes ?? filtered;
+          expression.blinkLeft = filtered[EYE_RENDER_CHANNELS.left].blink;
+          expression.blinkRight = filtered[EYE_RENDER_CHANNELS.right].blink;
+        } else eyeFilter.update(null, now);
+        // Snapshot only for a visible live oral preview, once per NEW face
+        // result. The inference pixels and lip polygon now describe the same
+        // frame, even when video decoding advances during model inference.
+        // One reusable buffer, no queue, camera/tracker/eye inputs unchanged.
+        if(expression?.liveMouth && oralFrameEnabledRef.current && oralContext){
+          if(oralFrame.width!==trackingCanvas.width || oralFrame.height!==trackingCanvas.height){oralFrame.width=trackingCanvas.width;oralFrame.height=trackingCanvas.height;}
+          oralContext.drawImage(trackingCanvas,0,0);
+          expression.liveMouth.sourceFrame=oralFrame;
+        } else if(oralFrame.width>0){oralContext?.clearRect(0,0,oralFrame.width,oralFrame.height);}
         expressionRef.current = expression;
+        }
         if (calibrationCollector.getState().phase === "ready") renderPausedRef.current = false;
 
         // React sees the rest a few times a second, not every frame.
@@ -428,6 +500,7 @@ export function useStudioRuntime(): StudioRuntime {
       calibration: calibrationCollector,
       trackingCanvas,
       trackingContext,
+      oralFrame,
       gazeSmoother,
       blinkState,
     };
@@ -516,6 +589,7 @@ export function useStudioRuntime(): StudioRuntime {
       dispatch({ type: "CAMERA_LIVE" });
       dispatch({ type: "START_RUNNING" });
       scheduler.start(video);
+      if (trackerLabLeases.current > 0) scheduler.pause();
     })();
   }, [geometry, quality]);
 
@@ -538,6 +612,7 @@ export function useStudioRuntime(): StudioRuntime {
    * camera flip / sustained tracking loss changes the active controller.
    */
   const startCalibration = useCallback((mode: CalibrationMode = "full") => {
+    if (trackerLabLeases.current > 0) return;
     const runtime = runtimeRef.current;
     if (!runtime || runtime.camera.state.stream === null) return;
 
@@ -591,6 +666,7 @@ export function useStudioRuntime(): StudioRuntime {
   }, []);
 
   const togglePause = useCallback(() => {
+    if (trackerLabLeases.current > 0) return;
     const runtime = runtimeRef.current;
     if (!runtime) return;
 
@@ -742,14 +818,16 @@ export function useStudioRuntime(): StudioRuntime {
     const onVisibilityChange = () => {
       const scheduler = runtimeRef.current?.scheduler;
       if (!scheduler) return;
+      if (trackerLabLeases.current > 0) return;
 
       if (document.hidden) {
         if (!scheduler.isRunning) return;
         scheduler.pause();
         pausedByVisibility = true;
         dispatch({ type: "PAUSE" });
-      } else if (pausedByVisibility) {
+      } else if (pausedByVisibility || resumeAfterLab.current) {
         pausedByVisibility = false;
+        resumeAfterLab.current = false;
         scheduler.resume();
         dispatch({ type: "RESUME" });
       }
@@ -773,6 +851,7 @@ export function useStudioRuntime(): StudioRuntime {
       calibrationInvalidation,
       motionRef,
       expressionRef,
+      oralFrameEnabledRef,
       renderPausedRef,
       videoRef,
       overlayRef,
@@ -787,6 +866,8 @@ export function useStudioRuntime(): StudioRuntime {
       startCalibration,
       cancelCalibration,
       clearCalibration,
+      suspendForTrackerLab,
+      getFaceTracker,
     }),
     [
       state,

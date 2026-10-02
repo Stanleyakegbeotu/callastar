@@ -1,6 +1,10 @@
 param([ValidateRange(1, 65535)][int]$Port = 8443)
 
 $cloudflaredExe = Join-Path $env:LOCALAPPDATA "Programs\cloudflared\cloudflared.exe"
+if (-not (Test-Path -LiteralPath $cloudflaredExe)) {
+  $installedCloudflared = Get-Command cloudflared.exe -ErrorAction SilentlyContinue
+  if ($installedCloudflared) { $cloudflaredExe = $installedCloudflared.Source }
+}
 $statePath = Join-Path $env:TEMP "callastar-mobile-tunnel.json"
 
 if (-not (Test-Path -LiteralPath $cloudflaredExe)) {

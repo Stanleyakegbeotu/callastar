@@ -5,9 +5,14 @@ import type { SourceExpressionProfile, SourceFaceGeometry } from "../source/sour
 import { canonicalFaceLandmarks, localBrowHeights } from './faceLocalGeometry';
 import type { Point3 } from './faceTypes';
 import { measureBinocularGaze, normalizeBinocularGaze, type NormalizedGaze } from './eyeGaze';
+import { measureEyeGeometry, eyeStateFromGeometry, EYE_RENDER_CHANNELS, type EyeControlFrame } from './eyeControls';
+import { measureMouthControls, measureMouthGeometry, smoothMouth, type MouthControlFrame } from './mouthControls';
+import { noseControls, type NoseControlFrame } from './noseControls';
+import { mouthNoseLocalLandmarks } from './mouthNoseLocalGeometry';
 
 const BROW_FULL_RAISE = 0.085;
 const localScratch: Point3[] = [];
+const regionScratch: Point3[] = [];
 const previousBrow = new WeakMap<TransformationCalibrationProfile, { pitch: number; shape: number; height: number }>();
 
 /** Only the eight expressions the face renderer currently supports. */
@@ -16,7 +21,7 @@ export const EXPRESSION_KEYS = [
   "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
 ] as const;
 export type ExpressionKey = (typeof EXPRESSION_KEYS)[number];
-export type ExpressionValues = Record<ExpressionKey, number>;
+export type ExpressionValues = Record<ExpressionKey, number> & { eyes?: EyeControlFrame; mouth?: MouthControlFrame; nose?: NoseControlFrame };
 /** Which input won for one expression, and the numbers behind it. */
 export interface ExpressionTraceEntry {
   /** The blendshape score, or null when this build did not report that name. */
@@ -57,7 +62,7 @@ export interface ExpressionMotion extends ExpressionValues {
   /** Local inner-lip aperture and chin drop, retained for jaw diagnostics. */
   mouthAperture?: { ratio: number | null; jawDrop: number | null };
   /** Ephemeral landmarks only; consumed in-memory by the optional compositor. */
-  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[] };
+  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[]; sourceFrame?: HTMLCanvasElement };
   /** Per-eye blink state and the closure measured before it shaped the value. */
   blinkState?: {
     left: "open" | "closing" | "closed" | "opening";
@@ -228,10 +233,10 @@ export function computeExpressionMotion(
     return normalized;
   };
 
-  return {
+  const result: ExpressionMotion = {
     // Eyelid aspect ratio, against the operator's own calibrated opening.
-    blinkLeft: fuse("blinkLeft", "eyeBlinkLeft", lidClosure(eyeL, calibration.face.neutralEyeOpennessLeft ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkLeft ?? 0),
-    blinkRight: fuse("blinkRight", "eyeBlinkRight", lidClosure(eyeR, calibration.face.neutralEyeOpennessRight ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkRight ?? 0),
+    blinkLeft: fuse("blinkLeft", hasMesh ? "eyeBlinkRight" : "eyeBlinkLeft", lidClosure(eyeL, calibration.face.neutralEyeOpennessLeft ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkLeft ?? 0),
+    blinkRight: fuse("blinkRight", hasMesh ? "eyeBlinkLeft" : "eyeBlinkRight", lidClosure(eyeR, calibration.face.neutralEyeOpennessRight ?? calibration.face.neutralEyeOpenness), 0, neutral?.blinkRight ?? 0),
     // Lip separation, normalised by mouth width.
     jawOpen: fuse("jawOpen", "jawOpen", mouthGeometry, mouthBase, neutral?.jawOpen ?? mouthBase, jawDropSignal),
     /*
@@ -272,6 +277,21 @@ export function computeExpressionMotion(
       ring: LIVE_INNER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
     } : undefined,
   };
+  result.eyes = Object.fromEntries((['left', 'right'] as const).map(side => {
+    const channel = EYE_RENDER_CHANNELS[side];
+    return [side, eyeStateFromGeometry(hasMesh ? measureEyeGeometry(local, side) : null, calibration.face.eyes?.[side], channel === 'left' ? result.blinkLeft : result.blinkRight, face.confidence, eyeGaze.applied?.[channel] ?? null)];
+  })) as unknown as EyeControlFrame;
+  if (hasMesh && calibration.face.mouth) {
+    const regionLocal=mouthNoseLocalLandmarks(face,calibration.trackingSpace ? calibration.trackingSpace.width / calibration.trackingSpace.height : 1, regionScratch);
+    const geometry=measureMouthGeometry(regionLocal),base=calibration.face.mouth.geometry;
+    const apertureSignal=geometry?relative(geometry.aperture,base.aperture):0;
+    const jawSignal=geometry?Math.min(unit((geometry.jaw-base.jaw)/.08),apertureSignal+.15):0;
+    const jaw=Math.max(relativeShape(shapes.jawOpen??0,calibration.face.mouth.shapes.jawOpen??0,shapeDeadZone),apertureSignal,jawSignal);
+    result.mouth = measureMouthControls(regionLocal, shapes, calibration.face.mouth, jaw, face.confidence, face.timestampMs, rotated) ?? undefined;
+    result.nose = noseControls(regionLocal, shapes, calibration.face.nose, face.confidence, rotated);
+  }
+  result.calculationMs = performance.now() - started;
+  return result;
 }
 
 /**
@@ -383,6 +403,11 @@ export function clampExpressionInto(
   applied: ExpressionValues,
   clamped: ExpressionKey[],
 ): void {
+  applied.eyes = requested.eyes;
+  // A cavity makes a closed photograph openable. The canonical jaw retains
+  // its full progressive range; the original legacy slider envelope remains.
+  applied.mouth = requested.mouth;
+  applied.nose = requested.nose;
   clamped.length = 0;
   for (const key of EXPRESSION_KEYS) {
     applied[key] = Math.min(unit(requested[key]), envelope[key]);
@@ -404,8 +429,13 @@ export function smoothExpressionInto(
   elapsedMs: number,
   result: ExpressionValues,
 ): void {
+  // Eye controls are already filtered once per fresh tracker sample. Do not
+  // add a second renderer-frame filter to gaze, wide aperture or lid travel.
+  result.eyes = target.eyes;
+  result.mouth = smoothMouth(previous.mouth, target.mouth, elapsedMs);
+  result.nose = target.nose;
   for (const key of EXPRESSION_KEYS) {
-    const tau = key.startsWith("blink") ? (target[key] > previous[key] ? 28 : 55)
+    const tau = key.startsWith("blink") ? (target.eyes ? 8 : target[key] > previous[key] ? 28 : 55)
       : key === "jawOpen" ? 45 : 75;
     const alpha = 1 - Math.exp(-Math.min(80, Math.max(0, elapsedMs)) / tau);
     result[key] = previous[key] + (target[key] - previous[key]) * alpha;

@@ -1232,3 +1232,24 @@ body:has(.studio-stage.is-expanded) {
   letter-spacing: 0.02em;
   color: rgb(100 116 139);
 }
+/* Developer tracker lab: the processing canvas stays sized with its own context. */
+.tracker-lab { min-width: 0; padding-bottom: max(16px, var(--safe-bottom)); }
+.tracker-lab-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
+.tracker-lab label { display: grid; gap: 6px; margin-block: 12px; }
+.tracker-lab select { width: 100%; min-width: 0; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; color: #17203a; }
+.tracker-lab-processing { position: fixed; left: -10000px; top: 0; width: 480px; height: 270px; pointer-events: none; }
+.tracker-lab details { margin-top: 14px; min-width: 0; }
+.tracker-lab summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.tracker-lab dl { margin-block: 12px; }
+.tracker-lab-metric { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding-block: 5px; font-size: 12px; border-bottom: 1px solid #e2e8f0; }
+.tracker-lab-metric dt, .tracker-lab-metric dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tracker-lab-metric dd { text-align: right; font-variant-numeric: tabular-nums; }
+.tracker-lab-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block: 10px; }
+.tracker-lab-actions button { white-space: normal; text-align: left; max-width: 100%; }
+.tracker-lab ol { padding-left: 20px; font-size: 13px; }
+.tracker-lab li { margin-bottom: 8px; }
+
+/* Closed oral disclosures must release their cached text boxes when a phone
+   narrows. Long pixel bounds wrap inside the panel when it is open. */
+.mouth-nose-diagnostics details:not([open]) > :not(summary) { display: none; }
+.mouth-nose-diagnostics .studio-note { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }

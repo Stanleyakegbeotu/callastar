@@ -1,4 +1,5 @@
 import type { ExpressionMotion } from "./expressionMotion";
+import { EYE_RENDER_CHANNELS } from './eyeControls';
 
 export type EyeState = "open" | "closing" | "closed" | "opening";
 
@@ -48,8 +49,9 @@ class EyeMachine {
   state: EyeState = "open";
   private last: number | null = null;
   private lastAt = 0;
+  private closedPeak = 0;
 
-  update(closure: number, other: number, nowMs: number): number {
+  update(closure: number, other: number, nowMs: number, continuous = false): number {
     const t = BLINK_THRESHOLDS;
     const dt = this.last === null ? 0 : (nowMs - this.lastAt) / 1000;
     const rate = this.last !== null && dt > 0 ? (closure - this.last) / dt : 0;
@@ -61,24 +63,30 @@ class EyeMachine {
       case "closing":
       case "opening":
         if (
-          closure >= t.CLOSE_AT
+          closure >= (continuous ? 0.92 : t.CLOSE_AT)
           || (closure >= t.FAST_CLOSE_AT && rate >= t.FAST_RATE)
-          || (closure >= t.WINK_AT && other < t.OPEN_BELOW && closure - other >= t.WINK_MARGIN)
-        ) this.state = "closed";
+          || (!continuous && closure >= t.WINK_AT && other < t.OPEN_BELOW && closure - other >= t.WINK_MARGIN)
+        ) { this.state = "closed"; this.closedPeak = closure; }
         else if (closure < t.OPEN_BELOW) this.state = "open";
         else if (this.state === "open") this.state = "closing";
         break;
       case "closed":
-        if (closure < t.REOPEN_BELOW) this.state = closure < t.OPEN_BELOW ? "open" : "opening";
+        this.closedPeak = Math.max(this.closedPeak, closure);
+        // A fast blink can peak at only 0.4–0.5 in real MediaPipe output under
+        // yaw. Keep that measured closure latched, while a deep/slow closure
+        // still starts reopening promptly as its aperture increases.
+        if (closure < (continuous ? Math.max(t.OPEN_BELOW, Math.min(0.78, this.closedPeak - 0.14)) : t.REOPEN_BELOW)) this.state = closure < t.OPEN_BELOW ? "open" : "opening";
         break;
     }
     if (this.state === "closed") return 1;
+    if (continuous) return Math.max(0, Math.min(1, closure));
     return Math.max(0, closure - t.OPEN_BELOW) / (1 - t.OPEN_BELOW);
   }
 
   reset(): void {
     this.state = "open";
     this.last = null;
+    this.closedPeak = 0;
   }
 }
 
@@ -92,8 +100,8 @@ export class BlinkStateMachine {
       this.reset();
       return null;
     }
-    const blinkLeft = this.left.update(expression.blinkLeft, expression.blinkRight, nowMs);
-    const blinkRight = this.right.update(expression.blinkRight, expression.blinkLeft, nowMs);
+    const blinkLeft = this.left.update(expression.blinkLeft, expression.blinkRight, nowMs, (expression.eyes?.[EYE_RENDER_CHANNELS.left].confidence ?? 0) >= 0.35);
+    const blinkRight = this.right.update(expression.blinkRight, expression.blinkLeft, nowMs, (expression.eyes?.[EYE_RENDER_CHANNELS.right].confidence ?? 0) >= 0.35);
     return {
       ...expression,
       blinkLeft,

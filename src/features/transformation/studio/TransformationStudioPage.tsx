@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Icon } from "@/components/ui/Icon";
@@ -11,12 +11,15 @@ import { describeCalibration } from "./calibrationGuidance";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import { SourcePanel } from "./components/SourcePanel";
 import { StudioDiagnostics } from "./components/StudioDiagnostics";
+import EyeDiagnostics from "./components/EyeDiagnostics";
+import MouthNoseDiagnostics from './components/MouthNoseDiagnostics';
 import { StudioStepRail } from "./components/StudioStepRail";
 import { deriveStudioSteps } from "./studioSteps";
 import { useSourceSelection } from "./useSourceSelection";
 import { useStudioRuntime } from "./useStudioRuntime";
 import { usePreviewExpansion } from "./usePreviewExpansion";
 import type { FaceRendererStats } from "../engine/rendering/FaceRenderer";
+import type { OralInteriorMode } from '../engine/rendering/liveMouthCompositor';
 import type { FaceRenderFraming } from "../engine/rendering/faceFraming";
 import { NEUTRAL_FACE_RENDER_POSE, type FaceRenderPose } from '../engine/rendering/faceRendererMath';
 import { EXPRESSION_KEYS, NEUTRAL_EXPRESSION, describeBlendshapeCoverage, type ExpressionKey, type ExpressionMotion, type ExpressionValues } from "../engine/expressionMotion";
@@ -27,6 +30,7 @@ import { AvatarPanel } from "./components/AvatarPanel";
 
 /** `avatar` is the experimental 3D path; `face` is the existing M7/M8 renderer. */
 type PreviewMode = "raw" | "face" | "avatar";
+const TrackerLab = lazy(() => import('../tracking/TrackerLab'));
 
 /**
  * Transformation Studio — live tracking and experimental face rendering.
@@ -48,6 +52,11 @@ const QUALITY_MODES: { id: QualityMode; label: string; hint: string }[] = [
 
 export function TransformationStudioPage() {
   const runtime = useStudioRuntime();
+  const [trackerLabOpen, setTrackerLabOpen] = useState(false);
+  const trackerLabOverlayRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    if (runtime.state.camera !== 'live' && runtime.state.camera !== 'switching') setTrackerLabOpen(false);
+  }, [runtime.state.camera]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("raw");
   const [rendererStats, setRendererStats] = useState<FaceRendererStats | null>(null);
@@ -58,12 +67,16 @@ export function TransformationStudioPage() {
   const avatarRendererRef = useRef<ThreeAvatarRenderer | null>(null);
   const [showMesh, setShowMesh] = useState(false);
   const [wireframe, setWireframe] = useState(false);
-  const [liveMouthEnabled, setLiveMouthEnabled] = useState(false);
-  const liveMouthEnabledRef = useRef(false);
+  const [oralInteriorMode, setOralInteriorMode] = useState<OralInteriorMode>('auto');
+  const oralInteriorModeRef = useRef<OralInteriorMode>('auto');
+  oralInteriorModeRef.current = oralInteriorMode;
+  const liveMouthEnabled = oralInteriorMode !== 'source';
+  const liveMouthEnabledRef = useRef(true);
   liveMouthEnabledRef.current = liveMouthEnabled;
   const [manualEnabled, setManualEnabled] = useState(false);
   const [manualValues, setManualValues] = useState<ExpressionValues>({ ...NEUTRAL_EXPRESSION });
   const manualExpressionRef = useRef<ExpressionMotion | null>(null);
+  runtime.oralFrameEnabledRef.current = previewMode === 'face' && liveMouthEnabled && !manualEnabled;
   const [manualHeadEnabled, setManualHeadEnabled] = useState(false);
   const [manualHead, setManualHead] = useState<FaceRenderPose>({ ...NEUTRAL_FACE_RENDER_POSE });
   const manualHeadRef = useRef<FaceRenderPose | null>(null);
@@ -134,7 +147,7 @@ export function TransformationStudioPage() {
     rendererRef.current?.setDiagnostics({ showMesh, wireframe });
   }, [showMesh, wireframe]);
 
-  const canRenderFace = source.stage === "ready" && !!source.profile && !!source.asset &&
+  const canRenderFace = !trackerLabOpen && source.stage === "ready" && !!source.profile && !!source.asset &&
     (runtime.calibration.phase === "ready" || (previewMode === "face" && rendererRef.current !== null));
 
   // The Three chunk and WebGL context are loaded only after the operator opens
@@ -163,6 +176,7 @@ export function TransformationStudioPage() {
         sourceVideoRef,
         liveMouthVideoRef: runtime.videoRef,
         liveMouthEnabled: liveMouthEnabledRef,
+        oralInteriorMode: oralInteriorModeRef,
         motion: runtime.motionRef,
         expression: runtime.expressionRef,
         manualExpression: manualExpressionRef,
@@ -409,7 +423,8 @@ export function TransformationStudioPage() {
               // plays audio.
               autoPlay
             />
-            <canvas ref={runtime.overlayRef} className="studio-overlay" aria-hidden="true" />
+            <canvas ref={runtime.overlayRef} className="studio-overlay" aria-hidden="true" style={trackerLabOpen ? { visibility: 'hidden' } : undefined} />
+            {trackerLabOpen && <canvas ref={trackerLabOverlayRef} className="studio-overlay" aria-hidden="true" />}
 
             {/*
               * The source, as a REFERENCE.
@@ -508,7 +523,7 @@ export function TransformationStudioPage() {
               )}
             </div>
 
-            {isLive && !calibrating && (
+            {isLive && !calibrating && !trackerLabOpen && (
               <div className={`studio-status is-${summary.guidance.quality}`} role="status">
                 <span className="studio-status-dot" aria-hidden="true" />
                 <strong>{summary.guidance.label}</strong>
@@ -535,7 +550,7 @@ export function TransformationStudioPage() {
 
           {isLive && (
             <div className="studio-controls">
-              <button type="button" className="studio-control" onClick={runtime.togglePause}>
+              <button type="button" className="studio-control" onClick={runtime.togglePause} disabled={trackerLabOpen}>
                 <Icon name={isPaused ? "video" : "cameraOff"} className="size-5" />
                 <span>{isPaused ? "Resume tracking" : "Pause tracking"}</span>
               </button>
@@ -574,7 +589,7 @@ export function TransformationStudioPage() {
                 type="button"
                 aria-pressed={previewMode === "avatar"}
                 onClick={() => setPreviewMode("avatar")}
-                disabled={!source.avatar}
+                disabled={!source.avatar || trackerLabOpen}
               >
                 3D Avatar
               </button>
@@ -638,6 +653,16 @@ export function TransformationStudioPage() {
               </div>
             )}
 
+            {previewMode === 'face' && (
+              <div className="studio-render-controls">
+                <label className="studio-live-mouth-toggle">Mouth interior
+                  <select aria-label="Mouth interior" value={oralInteriorMode} onChange={event => setOralInteriorMode(event.target.value as OralInteriorMode)}>
+                    <option value="auto">AUTO</option><option value="source">SOURCE</option><option value="live">LIVE</option>
+                  </select>
+                </label>
+                <span>AUTO keeps the source at rest and uses live teeth/tongue as the mouth opens.</span>
+              </div>
+            )}
             {previewMode === "face" && rendererStats?.status === "ready" && (
               <div className="studio-render-diagnostics" aria-live="polite">
                 <span>Renderer {rendererStats.fps?.toFixed(1) ?? "—"} fps</span>
@@ -658,6 +683,20 @@ export function TransformationStudioPage() {
         </section>
 
         <aside className="studio-panel" aria-label="Tracking settings">
+          {import.meta.env.DEV && (trackerLabOpen ? (
+            <Suspense fallback={<section className="studio-card" role="status">Loading Tracker Lab…</section>}>
+              <TrackerLab runtime={runtime} overlayRef={trackerLabOverlayRef} onClose={() => setTrackerLabOpen(false)} />
+            </Suspense>
+          ) : (
+            <section className="studio-card">
+              <h2>Tracker Lab · Developer</h2>
+              <p className="studio-note">Compare MediaPipe and Jeeliz on the live camera, one face tracker at a time.</p>
+              <button type="button" className="studio-control" disabled={!isLive || calibrating || source.stage === 'analyzing'} onClick={() => { setPreviewMode('raw'); setTrackerLabOpen(true); }}>Open Tracker Lab</button>
+            </section>
+          ))}
+          {!trackerLabOpen && <>
+          {import.meta.env.DEV && <EyeDiagnostics runtime={runtime} rendererFps={rendererStats?.fps ?? null} />}
+          {import.meta.env.DEV && <MouthNoseDiagnostics runtime={runtime} stats={rendererStats} liveInterior={liveMouthEnabled} />}
           {source.avatar && (
             <AvatarPanel
               model={source.avatar}
@@ -685,7 +724,7 @@ export function TransformationStudioPage() {
           <CalibrationPanel
             calibration={calibration}
             invalidation={runtime.calibrationInvalidation}
-            cameraLive={isLive}
+            cameraLive={isLive && !trackerLabOpen}
             onStart={runtime.startCalibration}
             onCancel={runtime.cancelCalibration}
             onRecalibrate={runtime.clearCalibration}
@@ -764,11 +803,8 @@ export function TransformationStudioPage() {
               {previewMode === "face" && rendererStats && (
                 <div className="studio-expression-diagnostics">
                   <h3>Expressions {manualEnabled ? "· Manual DEV" : "· Live"}</h3>
-                  <label className="studio-live-mouth-toggle">
-                    <input type="checkbox" checked={liveMouthEnabled} onChange={event => setLiveMouthEnabled(event.target.checked)} />
-                    Live mouth interior (experimental)
-                  </label>
                   <p>Only pixels inside the live inner-lip mask are sampled. Frames stay in memory for the current preview.</p>
+                  <p>AUTO preserves the source interior at rest and reveals live teeth and tongue when the aperture opens beyond it. LIVE always uses the camera interior while open; SOURCE keeps the photograph.</p>
                   <p data-metric="live-mouth">Mouth feed {rendererStats.mouthFeedOpacity && rendererStats.mouthFeedOpacity > 0.01 ? "active" : "off"} · opacity {(rendererStats.mouthFeedOpacity ?? 0).toFixed(2)}</p>
                   <p>Mesh {rendererStats.meshVertices ?? 0} vertices / {rendererStats.meshTriangles ?? 0} triangles · depth {rendererStats.depthRange?.toFixed(3)} · DPR {rendererStats.dpr?.toFixed(1)} · WebGL {rendererStats.status} · context losses {rendererStats.contextLossCount ?? 0}</p>
                   {import.meta.env.DEV && <p>Expression leakage: {rendererStats.expressionLeakage ? 'pitch / brow mismatch detected' : 'not detected'} (diagnostic only)</p>}
@@ -859,6 +895,7 @@ export function TransformationStudioPage() {
               never stored, logged or sent anywhere.
             </span>
           </p>
+          </>}
         </aside>
       </div>
     </div>

@@ -1,0 +1,4 @@
+# Reproducible copies of the locked official npm package, prepared before dev/build.
+NN_*.json
+LICENSE
+manifest.json

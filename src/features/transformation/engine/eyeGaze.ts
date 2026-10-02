@@ -72,7 +72,9 @@ export function measureBinocularGaze(points: readonly Point3[]): BinocularGaze |
     const dx = iris.x - center.x;
     const dy = iris.y - center.y;
     const x = (dx * u.x + dy * u.y) / eyeWidth;
-    const y = (dx * v.x + dy * v.y) / eyeHeight;
+    // Fixed width-derived reference, not the moving lid aperture. Closure and
+    // wide eyes cannot amplify vertical gaze by changing its denominator.
+    const y = (dx * v.x + dy * v.y) / (eyeWidth * 0.45);
     if (![x, y].every(Number.isFinite)) return null;
 
     // A centre outside the eye or a collapsed aperture is low quality. Retain
@@ -105,18 +107,21 @@ export class GazeSmoother {
     quality: { left: number; right: number } | null,
     nowMs: number,
     blinking: { left: boolean; right: boolean } = { left: false, right: false },
+    trustedLids: { left: boolean; right: boolean } = { left: true, right: true },
   ): NormalizedGaze {
     const dt = this.lastAt === null ? 1 / 30 : Math.max(0, Math.min(0.1, (nowMs - this.lastAt) / 1000));
     this.lastAt = nowMs;
     const blendEye = (side: "left" | "right"): EyeGazePoint => {
       const valid = !!gaze && !!quality && quality[side] >= 0.2 && !blinking[side];
-      if (valid || blinking[side]) this.lastValidAt[side] = nowMs;
-      const holdMs = blinking[side] ? 300 : 80;
+      const trustedBlink = blinking[side] && trustedLids[side];
+      if (valid || trustedBlink) this.lastValidAt[side] = nowMs;
+      const holdMs = trustedBlink ? 300 : 80;
       const hold = this.lastValidAt[side] !== null && nowMs - this.lastValidAt[side]! <= holdMs;
       const target = valid ? gaze![side] : hold ? this.applied[side] : { x: 0, y: 0 };
       // Eye motion responds quickly (~35ms); a lost iris relaxes after a short
       // hold (~90ms). Blink deliberately holds gaze until the lid reopens.
-      const tau = valid ? 0.035 : hold ? Number.POSITIVE_INFINITY : 0.09;
+      const movement = Math.hypot(target.x - this.applied[side].x, target.y - this.applied[side].y);
+      const tau = valid ? (movement > 0.12 ? 0.008 : movement > 0.025 ? 0.022 : 0.065) : hold ? Number.POSITIVE_INFINITY : 0.09;
       const alpha = Number.isFinite(tau) ? 1 - Math.exp(-dt / tau) : 0;
       return {
         x: this.applied[side].x + (target.x - this.applied[side].x) * alpha,

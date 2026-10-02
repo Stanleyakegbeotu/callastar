@@ -96,7 +96,7 @@ async function eyeCrop(page: Page, path: string): Promise<void> {
     const canvas = document.querySelector("canvas")!.getBoundingClientRect();
     return { x: canvas.x + nose.x - eyeSpanPx * 0.75, y: canvas.y + nose.y - eyeSpanPx * 0.75, width: eyeSpanPx * 1.5, height: eyeSpanPx * 0.45 };
   });
-  await page.screenshot({ path, clip: box });
+  await page.screenshot({ path: test.info().outputPath(path.split('/').pop()!), clip: box });
 }
 
 test("a rendered blink, and each wink, read as closed eyes to the tracker", async ({ page }) => {

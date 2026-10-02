@@ -40,6 +40,8 @@ export interface SourceFaceMeshData {
   indices: Uint16Array;
   localLandmarks?: readonly Point3[];
   mouth?: SourceMouthParts;
+  /** Eye-only interior vertices; no outer-face layers or new head geometry. */
+  eyeInterior?: { start: number; count: number };
 }
 
 /** Measured source depth, with fixed topology and original source UVs.
@@ -99,10 +101,11 @@ export function buildSourceFaceMesh(
     uvs.set([landmarks[i]!.x, landmarks[i]!.y], i * 2);
   }
   const indices = DENSE_FACE_TRIANGLES.flatMap(t => [...t]);
+  const eyeTriangles: number[][] = [];
   for (const ring of [
     [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
     [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466],
-  ]) for (let i = 1; i < ring.length - 1; i++) indices.push(ring[0]!, ring[i]!, ring[i + 1]!);
+  ]) for (let i = 1; i < ring.length - 1; i++) eyeTriangles.push([ring[0]!, ring[i]!, ring[i + 1]!]);
 
   // Each mouth part copies its ring, sets it back, and fans from its centroid.
   // A centroid fan stays valid for the concave-ish ring of a smile, where a
@@ -129,14 +132,35 @@ export function buildSourceFaceMesh(
   const fillIndexCount = indices.length - fillIndexStart;
   const cavityIndexStart = indices.length;
   addFan(OUTER_LIP_RING, cavityStart, MOUTH_CAVITY_DEPTH);
+  const cavityIndexCount = indices.length - cavityIndexStart;
+  // Interior texture motion needs interior UVs. Subdivide only the existing
+  // eye fans twice; every aperture boundary and all other geometry are kept.
+  const eyePositions = Array.from(positions), eyeUvs = Array.from(uvs);
+  const midpoints = new Map<string, number>();
+  const midpoint = (a: number, b: number) => {
+    const key = a < b ? `${a}/${b}` : `${b}/${a}`;
+    const existing = midpoints.get(key);
+    if (existing !== undefined) return existing;
+    const index = eyePositions.length / 3;
+    for (let d = 0; d < 3; d++) eyePositions.push((eyePositions[a * 3 + d]! + eyePositions[b * 3 + d]!) / 2);
+    for (let d = 0; d < 2; d++) eyeUvs.push((eyeUvs[a * 2 + d]! + eyeUvs[b * 2 + d]!) / 2);
+    midpoints.set(key, index); return index;
+  };
+  let triangles = eyeTriangles;
+  for (let pass = 0; pass < 2; pass++) triangles = triangles.flatMap(([a, b, c]) => {
+    const ab = midpoint(a!, b!), bc = midpoint(b!, c!), ca = midpoint(c!, a!);
+    return [[a!, ab, ca], [ab, b!, bc], [ca, bc, c!], [ab, bc, ca]];
+  });
+  for (const triangle of triangles) indices.push(...triangle);
   return {
-    positions,
-    uvs,
+    positions: new Float32Array(eyePositions),
+    uvs: new Float32Array(eyeUvs),
     indices: new Uint16Array(indices),
     localLandmarks,
     mouth: {
       fillStart, fillCount, fillIndexStart, fillIndexCount, cavityStart, cavityCount,
-      cavityIndexStart, cavityIndexCount: indices.length - cavityIndexStart,
+      cavityIndexStart, cavityIndexCount,
     },
+    eyeInterior: { start: vertexCount, count: eyePositions.length / 3 - vertexCount },
   };
 }

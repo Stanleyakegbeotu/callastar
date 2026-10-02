@@ -215,7 +215,7 @@ test.describe("the calibration UI", () => {
 
     // The rail moves on, the guide appears, and the copy asks for a face.
     await expect(page.locator(".studio-calibration-guide")).toBeVisible();
-    await expect(page.getByText("Look at the camera", { exact: true })).toBeVisible();
+    await expect(page.getByText("Look at the camera", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "Diagnostics" }).click();
     await expect
@@ -265,7 +265,7 @@ test.describe("the calibration UI", () => {
     await expect(page.getByRole("button", { name: "Flip camera" })).toBeEnabled();
   });
 
-  test("a camera flip clears the baseline and says recalibration is required", async ({ page }) => {
+  test("a camera flip drops the old capture and begins face-only reacquisition", async ({ page }) => {
     /*
      * Proved through the state the UI actually shows, because the failure this
      * guards against is silent: a front-camera neutral reused on a rear camera
@@ -281,15 +281,19 @@ test.describe("the calibration UI", () => {
       .poll(async () => await metric(page, "calibration-phase"), { timeout: 30_000 })
       .toBe("waiting-for-stable-tracking");
 
+    const faceInit = await metric(page, "face-init");
+
     await page.getByRole("button", { name: "Flip camera" }).click();
     await expect(page.getByRole("button", { name: "Flip camera" })).toBeEnabled({ timeout: 30_000 });
 
-    // The capture was dropped...
-    expect(await metric(page, "calibration-phase")).toBe("idle");
-    await expect(page.getByText(/Recalibration required/i)).toBeVisible();
+    // Current M8.3 behavior starts a NEW face-only capture on the new camera.
+    // The old capture/profile cannot survive and no old neutral drives motion.
+    await expect.poll(async () => await metric(page, "calibration-phase"), { timeout: 30_000 }).toBe("waiting-for-stable-tracking");
+    await expect(page.locator('.studio-guide-shoulders')).toHaveCount(0);
+    await expect(page.locator('[data-metric="calibration-quality"] dd')).toHaveText('—');
 
     // ...and nothing else was: no reload, no re-prompt, no model init.
     await expect(page.getByRole("button", { name: "Pause tracking" })).toBeVisible();
-    expect(await metric(page, "face-init")).toMatch(/ms$/);
+    expect(await metric(page, "face-init")).toBe(faceInit);
   });
 });

@@ -1,6 +1,9 @@
 import type { Point3 } from "../faceTypes";
 import type { ExpressionValues } from "../expressionMotion";
+import { EYE_RENDER_CHANNELS, type CanonicalEyeState } from "../eyeControls";
 import type { SourceFaceMeshData } from "./sourceMesh";
+import { MouthRegionDeformer } from './mouthRegionDeformer';
+import { NoseRegionDeformer } from './noseRegionDeformer';
 
 /** MediaPipe Face Mesh landmark anchors. Left/right follow model names in
  * unmirrored image space. These are anatomical regions, never live vertex targets. */
@@ -92,12 +95,12 @@ function curveY(curve: [number, number][], x: number): number {
  * across the lids. At the corners the opening narrows to nothing, so motion
  * fades out there with no boundary.
  */
-function lidDisplacement(x: number, y: number, lid: LidModel): number {
+function lidDisplacement(x: number, y: number, lid: LidModel, lowerFraction = LOWER_LID_RISE): number {
   const xc = Math.min(lid.xMax, Math.max(lid.xMin, x));
   const yu = curveY(lid.upper, xc);
   const yl = curveY(lid.lower, xc);
   const gap = Math.max(0, yl - yu);
-  const closure = yl - LOWER_LID_RISE * gap;
+  const closure = yl - lowerFraction * gap;
   // Beyond the corners, fade within half an eye width rather than stop dead.
   const beyond = Math.max(lid.xMin - x, x - lid.xMax, 0);
   const across = smoothFade(beyond / Math.max(0.002, (lid.xMax - lid.xMin) * 0.5));
@@ -112,6 +115,9 @@ function lidDisplacement(x: number, y: number, lid: LidModel): number {
  * UVs and triangle indices are never written here.
  */
 export class ExpressionDeformer {
+  private readonly mouthRegion:MouthRegionDeformer;
+  private readonly noseRegion:NoseRegionDeformer;
+  private readonly eyeFields: Float32Array;
   private readonly base: Float32Array;
   private readonly weights: Float32Array;
   readonly positions: Float32Array;
@@ -125,10 +131,13 @@ export class ExpressionDeformer {
 
   constructor(mesh: SourceFaceMeshData, landmarks: readonly Point3[]) {
     landmarks = mesh.localLandmarks ?? landmarks;
+    this.mouthRegion = new MouthRegionDeformer(mesh, landmarks);
+    this.noseRegion = new NoseRegionDeformer(mesh, landmarks);
     this.base = mesh.positions;
     this.basePositions = mesh.positions;
     this.positions = mesh.positions.slice();
     this.weights = new Float32Array((mesh.positions.length / 3) * 16);
+    this.eyeFields = new Float32Array((mesh.positions.length / 3) * 4);
     const p = (index: number) => landmarks[index] ?? landmarks[1] ?? { x: 0.5, y: 0.5, z: 0 };
     const left = EXPRESSION_LANDMARKS.leftEye;
     const right = EXPRESSION_LANDMARKS.rightEye;
@@ -167,6 +176,18 @@ export class ExpressionDeformer {
       // nose, brows and the other eye are untouched.
       this.weights[w] = lidDisplacement(x, y, lidLeft);
       this.weights[w + 1] = lidDisplacement(x, y, lidRight);
+      // Linear difference between the two closure endpoints lets measured lid
+      // travel select the meeting line without rebuilding fields each frame.
+      for (const [eyeIndex, lid] of [lidLeft, lidRight].entries()) {
+        this.eyeFields[i * 4 + eyeIndex] = lidDisplacement(x, y, lid, 1) - lidDisplacement(x, y, lid, 0);
+        const xc = Math.min(lid.xMax, Math.max(lid.xMin, x));
+        const yu = curveY(lid.upper, xc), yl = curveY(lid.lower, xc);
+        const middle = (yu + yl) / 2;
+        const orbital = x >= lid.xMin && x <= lid.xMax ? smoothFade(Math.max(0, Math.abs(y - middle) - (yl - yu) / 2) / (lid.gapMax * 0.65)) : 0;
+        // Expand around the existing aperture centre, bounded to 25% of its
+        // gap. This moves source lids/lashes; it never scales the iris.
+        this.eyeFields[i * 4 + 2 + eyeIndex] = (y - middle) * 0.25 * orbital;
+      }
       this.weights[w + 2] = falloff(x, y, mx, my, this.mouthWidth * 0.85, this.mouthWidth * 0.5)
         * Math.max(-0.2, Math.min(1, (y - my) / Math.max(0.006, this.mouthWidth * 0.12)));
       this.weights[w + 3] = falloff(x, y, p(mouth.chin).x, p(mouth.chin).y, this.faceWidth * 0.45, this.faceWidth * 0.45);
@@ -241,11 +262,17 @@ export class ExpressionDeformer {
   update(expression: ExpressionValues): Float32Array {
     const e = expression;
     const a = ExpressionDeformer.AMPLITUDE;
+    const lidFraction = (eye: CanonicalEyeState | undefined) => {
+      if (!eye) return LOWER_LID_RISE; // compatibility for legacy/manual controls
+      const upper = Math.max(0, eye.upperLid), lower = Math.max(0, eye.lowerLid);
+      return upper + lower > 0.06 ? Math.max(0.05, Math.min(0.45, lower / (upper + lower))) : LOWER_LID_RISE;
+    };
+    const lowerL = lidFraction(e.eyes?.[EYE_RENDER_CHANNELS.left]), lowerR = lidFraction(e.eyes?.[EYE_RENDER_CHANNELS.right]);
     for (let i = 0; i < this.positions.length / 3; i++) {
       const p = i * 3;
       const w = i * 16;
-      const smileL = this.weights[w + 4]! * e.smileLeft;
-      const smileR = this.weights[w + 5]! * e.smileRight;
+      const smileL = this.weights[w + 4]! * (e.mouth ? 0 : e.smileLeft);
+      const smileR = this.weights[w + 5]! * (e.mouth ? 0 : e.smileRight);
       const cheekL = this.weights[w + 10]! * e.smileLeft;
       const cheekR = this.weights[w + 11]! * e.smileRight;
       const foldL = this.weights[w + 12]! * e.smileLeft;
@@ -258,9 +285,13 @@ export class ExpressionDeformer {
         // Weights are image-down displacements; world y grows up.
         - this.weights[w]! * clamp(e.blinkLeft) * a.blink
         - this.weights[w + 1]! * clamp(e.blinkRight) * a.blink
-        - this.weights[w + 2]! * e.jawOpen * this.mouthWidth * a.jawLip
-        - this.weights[w + 3]! * e.jawOpen * this.faceWidth * a.jawChin
-        - this.weights[w + 9]! * e.jawOpen * this.faceWidth * a.jawCheek
+        - this.eyeFields[i * 4]! * (lowerL - LOWER_LID_RISE) * clamp(e.blinkLeft)
+        - this.eyeFields[i * 4 + 1]! * (lowerR - LOWER_LID_RISE) * clamp(e.blinkRight)
+        - this.eyeFields[i * 4 + 2]! * clamp(e.eyes?.[EYE_RENDER_CHANNELS.left].wideOpen ?? 0) * (1 - clamp(e.blinkLeft))
+        - this.eyeFields[i * 4 + 3]! * clamp(e.eyes?.[EYE_RENDER_CHANNELS.right].wideOpen ?? 0) * (1 - clamp(e.blinkRight))
+        - this.weights[w + 2]! * (e.mouth ? 0 : e.jawOpen) * this.mouthWidth * a.jawLip
+        - this.weights[w + 3]! * (e.mouth ? 0 : e.jawOpen) * this.faceWidth * a.jawChin
+        - this.weights[w + 9]! * (e.mouth ? 0 : e.jawOpen) * this.faceWidth * a.jawCheek
         + (smileL + smileR) * this.mouthWidth * a.smileVertical
         + (cheekL + cheekR) * this.faceWidth * a.smileCheek
         + (foldL + foldR) * this.faceWidth * a.smileFold
@@ -271,6 +302,8 @@ export class ExpressionDeformer {
         + this.weights[w + 8]! * e.browOuterUpRight * this.faceWidth * a.browOuter;
       this.positions[p + 2] = this.base[p + 2]!;
     }
+    if(e.mouth)this.mouthRegion.apply(this.positions,e.mouth);
+    if(e.nose)this.noseRegion.apply(this.positions,e.nose);
     return this.positions;
   }
 }

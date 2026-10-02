@@ -103,5 +103,5 @@ test("the rendered face goes where the operator's face goes, by as much", async 
   const back = await move(page, { rollDeg: LEVEL_PORTRAIT_ROLL_DEG });
   expect(Math.abs(back.pivot.x - neutral.pivot.x)).toBeLessThan(expectedX * 0.25);
   expect(Math.abs(back.pivot.y - neutral.pivot.y)).toBeLessThan(expectedY * 0.25);
-  await page.locator(".studio-stage").screenshot({ path: "artifacts/m83/phase2-glued.png" });
+  await page.locator(".studio-stage").screenshot({ path: test.info().outputPath("phase2-glued.png") });
 });

@@ -28,9 +28,11 @@ import { faceWorldTransform, meshEyeSpan, type FaceRenderFraming } from "./faceF
 import { ExpressionDeformer } from "./expressionDeformer";
 import { faceWebGLContext, FACE_WEBGL_UNAVAILABLE } from './webglPreflight';
 import { VideoFrameReader } from '../../source/videoFrameReader';
-import { drawWarpedMouth, type MouthPoint } from './liveMouthCompositor';
+import { drawWarpedMouth, mouthTextureTarget, mouthMaskMetrics, oralFrameFresh, oralFeedAllowed, oralContentFit, type MouthPoint, type OralInteriorMode } from './liveMouthCompositor';
 import { INNER_LIP_RING } from './sourceMesh';
 import { EyeGazeWarper } from "./eyeGazeWarper";
+import { EYE_RENDER_CHANNELS, eyeGazeForRenderer } from '../eyeControls';
+import { noseCavityData, nostrilVisibility } from './noseCavities';
 
 export type FaceRendererStatus = "loading" | "ready" | "lost" | "failed" | "disposed";
 
@@ -67,6 +69,9 @@ export interface FaceRendererStats {
   expressionMs: number | null;
   deformationMs: number | null;
   mouthCompositorMs?: number | null;
+  mouthMaskStatus?: 'disabled'|'closed'|'unavailable'|'stale'|'invalid'|'ready';
+  oral?: OralDiagnostics;
+  nosePerspective?: {depth:number;visibility:number;requestedPitch:number;appliedPitch:number};
   /**
    * How far the current expression actually moved the mesh.
    *
@@ -84,6 +89,29 @@ export interface FaceRendererStats {
   mouthFeedOpacity?: number;
   mouthMeshAperturePx?: { neutral: number; applied: number } | null;
   jawChinMovementPx?: number | null;
+}
+
+export interface OralDiagnostics {
+  mode: OralInteriorMode;
+  active: boolean;
+  frameAvailable: boolean;
+  polygonValid: boolean;
+  maskAreaPx: number;
+  warpedPixels: number;
+  averageLuminance: number | null;
+  teethVisibleEstimate: number | null;
+  cropBounds: NonNullable<ReturnType<typeof mouthMaskMetrics>>['bounds'] | null;
+  maskBounds: {minX:number;maxX:number;minY:number;maxY:number} | null;
+  frameAgeMs: number | null;
+  cameraTimestampMs: number | null;
+  faceResultTimestampMs: number | null;
+  controlsTimestampMs: number | null;
+  oralSourceTimestampMs: number | null;
+  renderTimestampMs: number | null;
+  droppedFrames: number;
+  tongueMaskActive: boolean;
+  tongueConfidence: number | null;
+  extendedMaskActive: boolean;
 }
 
 export interface FaceScreenProbe {
@@ -105,6 +133,7 @@ export interface FaceRendererOptions {
   liveMouthVideoRef?: { current: HTMLVideoElement | null };
   /** Experimental live-interior switch, read through a ref without restarting. */
   liveMouthEnabled?: { current: boolean };
+  oralInteriorMode?: { current: OralInteriorMode };
   /** The tracking loop owns writes to this ref. Rendering never starts inference. */
   motion: { current: CalibrationMotion };
   expression?: { current: ExpressionMotion | null };
@@ -175,6 +204,7 @@ export class FaceRenderer {
   private liveMouthHasFrame = false;
   private liveMouthOpacity = 0;
   private liveMouthActive = false;
+  private mouthMaskStatus:NonNullable<FaceRendererStats['mouthMaskStatus']>='disabled';
   private texture: import("three").Texture | null = null;
   private meshEdges: import("three").LineSegments | null = null;
   private edgeGeometry: import("three").EdgesGeometry | null = null;
@@ -183,6 +213,7 @@ export class FaceRenderer {
   private showMesh = false;
   private deformer: ExpressionDeformer | null = null;
   private gazeWarper: EyeGazeWarper | null = null;
+  private lastEyeGaze: import('../eyeGaze').NormalizedGaze | null = null;
   private meshEyeSpan = 0;
   private worldTransform: { x: number; y: number; scale: number; eyeSpanWorld: number } | null = null;
   private expressionEnvelope: ExpressionEnvelope | null = null;
@@ -194,6 +225,13 @@ export class FaceRenderer {
   private expressionMs: number | null = null;
   private deformationMs: number | null = null;
   private mouthCompositorMs: number | null = null;
+  private oralDiagnostics: OralDiagnostics = {mode:'live',active:false,frameAvailable:false,polygonValid:false,maskAreaPx:0,warpedPixels:0,averageLuminance:null,teethVisibleEstimate:null,cropBounds:null,maskBounds:null,frameAgeMs:null,cameraTimestampMs:null,faceResultTimestampMs:null,controlsTimestampMs:null,oralSourceTimestampMs:null,renderTimestampMs:null,droppedFrames:0,tongueMaskActive:false,tongueConfidence:null,extendedMaskActive:false};
+  private oralDiagnosticsAt = -Infinity;
+  private oralDroppedTimestamp = -1;
+  private nostrilMesh: import('three').Mesh | null = null;
+  private nostrilGeometry: import('three').BufferGeometry | null = null;
+  private nostrilMaterial: import('three').MeshBasicMaterial | null = null;
+  private noseDepth = 0;
   private displayInputAgeMs: number | null = null;
   private displayFrameAtMs: number | null = null;
   private renderStartMs: number | null = null;
@@ -281,6 +319,9 @@ export class FaceRenderer {
     this.material?.dispose();
     this.cavityMaterial?.dispose();
     this.fillMaterial?.dispose();
+    this.nostrilGeometry?.dispose();
+    this.nostrilMaterial?.dispose();
+    this.nostrilGeometry=null;this.nostrilMaterial=null;this.nostrilMesh=null;
     this.liveMouthMaterial?.dispose();
     this.liveMouthTexture?.dispose();
     this.liveMouthGeometry?.dispose();
@@ -311,6 +352,7 @@ export class FaceRenderer {
     this.textureBitmap = null;
     this.deformer = null;
     this.gazeWarper = null;
+    this.lastEyeGaze = null;
     this.expressionEnvelope = null;
     this.mesh = null;
     this.meshEdges = null;
@@ -338,7 +380,7 @@ export class FaceRenderer {
     const meshData = buildSourceFaceMesh(this.options.profile.primaryFace.landmarks,
       this.options.profile.primaryFace, this.options.profile.dimensions?.aspectRatio ?? 1);
     this.deformer = new ExpressionDeformer(meshData, this.options.profile.primaryFace.landmarks);
-    this.gazeWarper = new EyeGazeWarper(meshData.uvs, this.options.profile.primaryFace.landmarks);
+    this.gazeWarper = new EyeGazeWarper(meshData.uvs, this.options.profile.primaryFace.landmarks, meshData.eyeInterior);
     this.meshEyeSpan = meshEyeSpan(meshData.positions);
     this.expressionEnvelope = deriveExpressionEnvelope(
       this.options.profile.expression ?? deriveSourceExpression(this.options.profile.primaryFace),
@@ -358,6 +400,7 @@ export class FaceRenderer {
       geometry.addGroup(0, mouth.fillIndexStart, 0);
       geometry.addGroup(mouth.cavityIndexStart, mouth.cavityIndexCount, 1);
       geometry.addGroup(mouth.fillIndexStart, mouth.fillIndexCount, 2);
+      geometry.addGroup(mouth.cavityIndexStart + mouth.cavityIndexCount, meshData.indices.length - mouth.cavityIndexStart - mouth.cavityIndexCount, 0);
     }
     geometry.computeVertexNormals();
     const texture = new three.Texture(this.textureBitmap!);
@@ -384,10 +427,17 @@ export class FaceRenderer {
     this.cavityMaterial = cavityMaterial;
     this.fillMaterial = fillMaterial;
     this.mesh = mesh;
+    const nose=noseCavityData(meshData.positions);
+    if(nose){
+      const g=new three.BufferGeometry();g.setAttribute('position',new three.BufferAttribute(nose.positions,3));g.setAttribute('color',new three.BufferAttribute(nose.colors,3));g.setIndex(new three.BufferAttribute(nose.indices,1));
+      const m=new three.MeshBasicMaterial({color:0x361b1b,vertexColors:true,transparent:true,opacity:0,depthWrite:false,side:three.DoubleSide});
+      const recess=new three.Mesh(g,m);recess.renderOrder=1;scene.add(recess);
+      this.nostrilGeometry=g;this.nostrilMaterial=m;this.nostrilMesh=recess;this.noseDepth=nose.depth;
+    }
     if (mouth && fillMaterial) {
       const canvas = document.createElement('canvas');
       canvas.width = 256;
-      canvas.height = 128;
+      canvas.height = 192;
       const context2d = canvas.getContext('2d');
       if (context2d) {
         const liveTexture = new three.CanvasTexture(canvas);
@@ -451,11 +501,15 @@ export class FaceRenderer {
     const expression = this.options.manualExpression?.current ?? this.options.expression?.current ?? null;
     this.displayInputAgeMs = expression?.updatedAtMs === undefined ? null : Math.max(0, performance.now() - expression.updatedAtMs);
     if (this.options.paused?.current) {
+      if (this.nostrilMaterial) this.nostrilMaterial.opacity = 0;
       smoothExpressionInto(this.expressionState, NEUTRAL_EXPRESSION, elapsed, this.expressionState);
       this.expressionApplied = this.expressionState;
       this.deformer?.update(this.expressionState);
       const position = this.geometry?.getAttribute("position") as import("three").BufferAttribute | undefined;
       if (position) position.needsUpdate = true;
+      const uv = this.geometry?.getAttribute('uv') as import('three').BufferAttribute | undefined;
+      if (uv && this.gazeWarper) { uv.array.set(this.gazeWarper.update(null)); uv.needsUpdate = true; }
+      this.lastEyeGaze = null;
       this.updateLiveMouth(elapsed, true);
       this.renderStartMs = performance.now();
       this.renderer?.render(this.scene!, this.camera!);
@@ -494,15 +548,16 @@ export class FaceRenderer {
       this.deformer?.update(this.expressionState);
       const position = this.geometry?.getAttribute("position") as import("three").BufferAttribute | undefined;
       if (position) position.needsUpdate = true;
-      const pausedUv = this.geometry?.getAttribute("uv") as import("three").BufferAttribute | undefined;
-      if (pausedUv && this.gazeWarper) {
-        pausedUv.array.set(this.gazeWarper.update(null));
-        pausedUv.needsUpdate = true;
-      }
       this.deformationMs = performance.now() - deformationStarted;
       const uv = this.geometry?.getAttribute("uv") as import("three").BufferAttribute | undefined;
       if (uv && this.gazeWarper) {
-        uv.array.set(this.gazeWarper.update(expression?.eyeGaze?.applied ?? null));
+        const measuredGaze = expression?.eyeGaze?.applied ?? (expression?.eyes ? { ...eyeGazeForRenderer(expression.eyes), clamped: false } : null);
+        if (expression) this.lastEyeGaze = measuredGaze;
+        else if (expressionLost && this.lastEyeGaze) {
+          const alpha = Math.exp(-Math.min(100, elapsed) / 90);
+          this.lastEyeGaze = { left: { x: this.lastEyeGaze.left.x * alpha, y: this.lastEyeGaze.left.y * alpha }, right: { x: this.lastEyeGaze.right.x * alpha, y: this.lastEyeGaze.right.y * alpha }, clamped: false };
+        }
+        uv.array.set(this.gazeWarper.update(this.lastEyeGaze, { left: this.expressionState.eyes?.[EYE_RENDER_CHANNELS.left].wideOpen ?? 0, right: this.expressionState.eyes?.[EYE_RENDER_CHANNELS.right].wideOpen ?? 0 }));
         uv.needsUpdate = true;
       }
       this.updateLiveMouth(elapsed, false);
@@ -531,6 +586,10 @@ export class FaceRenderer {
       this.mesh.position.set(world.x, world.y, 0);
       this.mesh.scale.setScalar(world.scale);
       this.mesh.rotation.set(rendered.rotationX, rendered.rotationY, rendered.rotationZ, "XYZ");
+      if(this.nostrilMesh && this.nostrilMaterial){
+        this.nostrilMesh.position.copy(this.mesh.position);this.nostrilMesh.scale.copy(this.mesh.scale);this.nostrilMesh.rotation.copy(this.mesh.rotation);
+        this.nostrilMaterial.opacity=nostrilVisibility(this.pose.pitch)*(this.material?.opacity ?? 1);
+      }
       if (this.liveMouthMesh) {
         this.liveMouthMesh.position.copy(this.mesh.position);
         this.liveMouthMesh.scale.copy(this.mesh.scale);
@@ -606,6 +665,9 @@ export class FaceRenderer {
       faceWidthPx: probe.faceWidthPx,
       expressionTrace: this.expressionTrace,
       mouthFeedOpacity: this.liveMouthOpacity,
+      mouthMaskStatus: this.mouthMaskStatus,
+      oral: {...this.oralDiagnostics},
+      nosePerspective:{depth:this.noseDepth,visibility:nostrilVisibility(this.pose.pitch),requestedPitch:this.options.manualPose?.current?.pitch ?? this.motionResult(this.options.motion.current).requested.pitch,appliedPitch:this.pose.pitch},
       ...this.mouthGeometryMetrics(),
     });
   }
@@ -627,8 +689,12 @@ export class FaceRenderer {
   /** The renderer's existing RAF owns this transient warp; there is no extra loop. */
   private updateLiveMouth(elapsedMs: number, suppress: boolean): void {
     const enabled = !suppress && this.options.liveMouthEnabled?.current === true;
+    const mode = this.options.oralInteriorMode?.current ?? 'live';
+    this.oralDiagnostics.mode = mode;
     if (!enabled && this.liveMouthOpacity === 0 && !this.liveMouthHasFrame) {
       this.liveMouthActive = false;
+      this.oralDiagnostics.active = false;
+      this.mouthMaskStatus='disabled';
       this.mouthCompositorMs = 0;
       return;
     }
@@ -636,21 +702,62 @@ export class FaceRenderer {
     const expression = this.options.expression?.current;
     const video = this.options.liveMouthVideoRef?.current ?? null;
     const mouth = expression?.liveMouth;
-    const opening = this.expressionApplied?.jawOpen ?? 0;
+    const sourceFrame=mouth?.sourceFrame ?? video;
+    const sourceWidth=mouth?.sourceFrame?.width ?? video?.videoWidth ?? 0;
+    const sourceHeight=mouth?.sourceFrame?.height ?? video?.videoHeight ?? 0;
+    const opening = Math.max(this.expressionApplied?.mouth?.jaw.open ?? this.expressionApplied?.jawOpen ?? 0,
+      (this.expressionApplied?.mouth?.lips.funnel ?? 0)*.4);
     const canvas = this.liveMouthCanvas;
+    const base=this.deformer?.basePositions, current=this.deformer?.positions;
+    const sourceGap=base ? Math.abs(base[13*3+1]!-base[14*3+1]!) : 0;
+    const renderedGap=current ? Math.abs(current[13*3+1]!-current[14*3+1]!) : 0;
+    const feedAllowed=oralFeedAllowed(mode,sourceGap,renderedGap,this.liveMouthWidth);
     if (!enabled || !mouth || !video || video.readyState < 2) this.liveMouthActive = false;
     else if (this.liveMouthActive ? opening <= 0.06 : opening >= 0.12) this.liveMouthActive = !this.liveMouthActive;
-    const wantsFeed = enabled && this.liveMouthActive && !!mouth && !!video && video.readyState >= 2;
+    // Legacy unclocked scalar fixtures remain supported; production canonical
+    // controls always carry completion time and expire after a bounded hold.
+    const fresh = !!mouth && (oralFrameFresh(expression?.updatedAtMs,performance.now()) || (expression?.updatedAtMs===undefined && !expression?.mouth));
+    const trustworthy = !expression?.mouth || expression.mouth.confidence >= .35;
+    const wantsFeed = enabled && feedAllowed && trustworthy && this.liveMouthActive && fresh && !!mouth && !!video && video.readyState >= 2;
+    const metrics=mouth && sourceFrame ? mouthMaskMetrics(mouth.ring,sourceWidth,sourceHeight) : null;
+    this.oralDiagnostics.frameAvailable=!!video && video.readyState>=2;
+    this.oralDiagnostics.polygonValid=metrics?.valid ?? false;
+    this.oralDiagnostics.maskAreaPx=metrics?.area ?? 0;
+    this.oralDiagnostics.cropBounds=metrics?.bounds ?? null;
+    this.oralDiagnostics.frameAgeMs=expression?.updatedAtMs===undefined ? null : Math.max(0,performance.now()-expression.updatedAtMs);
+    this.oralDiagnostics.cameraTimestampMs=mouth?.sourceFrame ? mouth.timestampMs : video ? video.currentTime*1000 : null;
+    this.oralDiagnostics.faceResultTimestampMs=mouth?.timestampMs ?? null;
+    this.oralDiagnostics.controlsTimestampMs=expression?.mouth?.timestampMs ?? null;
+    this.oralDiagnostics.renderTimestampMs=performance.now();
+    if(!fresh && mouth && this.oralDroppedTimestamp!==mouth.timestampMs){this.oralDiagnostics.droppedFrames++;this.oralDroppedTimestamp=mouth.timestampMs;}
+    this.mouthMaskStatus=!enabled?'disabled':!mouth||!video||video.readyState<2?'unavailable':!fresh?'stale':!trustworthy?'invalid':!feedAllowed||!this.liveMouthActive?'closed':this.liveMouthHasFrame?'ready':'unavailable';
     if (wantsFeed && mouth && video && mouth.timestampMs !== this.liveMouthLastTimestamp && canvas) {
       const context = canvas.getContext('2d');
-      if (context && drawWarpedMouth(context, video, mouth.ring, this.liveMouthTarget,
-        canvas.width, canvas.height, video.videoWidth, video.videoHeight)) {
+      const target=mouthTextureTarget(mouth.ring,sourceWidth,sourceHeight,canvas.width,canvas.height);
+      if (context && sourceFrame && drawWarpedMouth(context, sourceFrame, mouth.ring, target,
+        canvas.width, canvas.height, sourceWidth, sourceHeight)) {
         this.liveMouthLastTimestamp = mouth.timestampMs;
         this.liveMouthHasFrame = true;
+        this.mouthMaskStatus='ready';
+        this.oralDiagnostics.oralSourceTimestampMs=mouth.timestampMs;
+        if(import.meta.env.DEV && performance.now()-this.oralDiagnosticsAt>=250){
+          this.oralDiagnosticsAt=performance.now();
+          const pixels=context.getImageData(0,0,canvas.width,canvas.height).data;
+          let count=0,luma=0,teeth=0,minX=canvas.width,maxX=0,minY=canvas.height,maxY=0;
+          for(let k=0;k<pixels.length;k+=4){if(pixels[k+3]!<128)continue;count++;const r=pixels[k]!,g=pixels[k+1]!,b=pixels[k+2]!;luma+=.2126*r+.7152*g+.0722*b;if(Math.min(r,g,b)>175 && Math.max(r,g,b)-Math.min(r,g,b)<45)teeth++;const i=k/4,x=i%canvas.width,y=Math.floor(i/canvas.width);minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+          this.oralDiagnostics.warpedPixels=count;
+          this.oralDiagnostics.averageLuminance=count ? luma/count : null;
+          this.oralDiagnostics.teethVisibleEstimate=count ? teeth/count : null;
+          this.oralDiagnostics.maskBounds=count ? {minX,maxX,minY,maxY} : null;
+        }
         if (this.liveMouthTexture) this.liveMouthTexture.needsUpdate = true;
+      }else{
+        this.liveMouthHasFrame=false;
+        this.mouthMaskStatus='invalid';
       }
     }
     const targetOpacity = wantsFeed && this.liveMouthHasFrame ? 1 : 0;
+    this.oralDiagnostics.active = targetOpacity === 1;
     const alpha = 1 - Math.exp(-Math.min(100, Math.max(0, elapsedMs)) / 85);
     this.liveMouthOpacity += (targetOpacity - this.liveMouthOpacity) * alpha;
     if (this.liveMouthOpacity < 0.005 && targetOpacity === 0) {
@@ -659,18 +766,37 @@ export class FaceRenderer {
         this.liveMouthCanvas.getContext('2d')?.clearRect(0, 0, this.liveMouthCanvas.width, this.liveMouthCanvas.height);
         this.liveMouthHasFrame = false;
         this.liveMouthLastTimestamp = -1;
+        this.oralDiagnostics.warpedPixels=0;
+        this.oralDiagnostics.averageLuminance=null;
+        this.oralDiagnostics.teethVisibleEstimate=null;
+        this.oralDiagnostics.maskBounds=null;
         if (this.liveMouthTexture) this.liveMouthTexture.needsUpdate = true;
       }
     }
-    if (this.liveMouthMaterial) this.liveMouthMaterial.opacity = this.liveMouthOpacity;
-    if (this.fillMaterial) this.fillMaterial.opacity = 1 - this.liveMouthOpacity;
+    if (this.liveMouthMaterial) this.liveMouthMaterial.opacity = this.liveMouthOpacity*(this.material?.opacity ?? 1);
+    if (this.fillMaterial) this.fillMaterial.opacity = (1 - this.liveMouthOpacity)*(this.material?.opacity ?? 1);
     const position = this.liveMouthGeometry?.getAttribute('position') as import('three').BufferAttribute | undefined;
-    if (position && this.liveMouthBasePositions) {
-      for (let i = 0; i < position.count; i++) {
-        const baseY = this.liveMouthBasePositions[i * 3 + 1]!;
-        const lower = Math.max(0, Math.min(1, (this.liveMouthMidY - baseY) / this.liveMouthHalfHeight));
-        position.setY(i, baseY - lower * opening * this.liveMouthWidth * 0.28);
+    if (position && this.liveMouthBasePositions && this.deformer) {
+      const vertices=this.deformer.positions;
+      const uv=this.liveMouthGeometry!.getAttribute('uv') as import('three').BufferAttribute;
+      const currentRing=INNER_LIP_RING.map(anchor=>({x:vertices[anchor*3]!,y:-vertices[anchor*3+1]!}));
+      const mapped=mouthTextureTarget(currentRing,1,1,canvas?.width ?? 256,canvas?.height ?? 192);
+      if(mouth && video){
+        const liveMapped=mouthTextureTarget(mouth.ring,sourceWidth,sourceHeight,canvas?.width ?? 256,canvas?.height ?? 192);
+        const fit=oralContentFit(liveMapped,mapped);
+        for(const p of mapped){p.x=.5+(p.x-.5)/fit;p.y=.15+(p.y-.15)/fit;}
       }
+      const centreUv=mapped.reduce((sum,p)=>({x:sum.x+p.x/mapped.length,y:sum.y+p.y/mapped.length}),{x:0,y:0});
+      let x=0,y=0,z=0;
+      for(const [i,anchor] of INNER_LIP_RING.entries()){
+        const px=vertices[anchor*3]!,py=vertices[anchor*3+1]!,pz=vertices[anchor*3+2]!-.005;
+        position.setXYZ(i,px,py,pz);x+=px;y+=py;z+=pz;
+        uv.setXY(i,mapped[i]!.x,1-mapped[i]!.y);
+      }
+      const n=INNER_LIP_RING.length;
+      position.setXYZ(n,x/n,y/n,z/n);
+      uv.setXY(n,centreUv.x,1-centreUv.y);
+      uv.needsUpdate=true;
       position.needsUpdate = true;
     }
     this.mouthCompositorMs = performance.now() - started;

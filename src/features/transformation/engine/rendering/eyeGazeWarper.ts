@@ -8,6 +8,7 @@ interface EyeField {
   width: number;
   height: number;
   irisRadius: number;
+  contour: { x: number; y: number }[];
 }
 
 function average(points: readonly Point3[]) {
@@ -45,7 +46,17 @@ function makeEyeField(points: readonly Point3[], side: "left" | "right"): EyeFie
   const height = Math.hypot(lower.x - upper.x, lower.y - upper.y);
   const irisRadius = irisRing.reduce((sum, point) => sum + Math.hypot(point.x - irisCenter.x, point.y - irisCenter.y), 0) / irisRing.length;
   if (height < 1e-5 || irisRadius < 1e-5) return null;
-  return { center: { x: (inner.x + outer.x) / 2, y: (inner.y + outer.y) / 2 }, u, v: { x: vx, y: vy }, width, height, irisRadius };
+  const ring = side === 'left' ? [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246] : [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
+  return { center: { x: (inner.x + outer.x) / 2, y: (inner.y + outer.y) / 2 }, u, v: { x: vx, y: vy }, width, height, irisRadius, contour: ring.map(i => points[i]!) };
+}
+
+function inside(x: number, y: number, ring: EyeField['contour']): boolean {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i]!, b = ring[j]!;
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) hit = !hit;
+  }
+  return hit;
 }
 
 /**
@@ -59,7 +70,7 @@ export class EyeGazeWarper {
   private readonly fields: { left: EyeField | null; right: EyeField | null };
   private readonly output: Float32Array;
 
-  constructor(baseUvs: Float32Array, sourceLandmarks: readonly Point3[]) {
+  constructor(baseUvs: Float32Array, sourceLandmarks: readonly Point3[], private readonly interior?: { start: number; count: number }) {
     this.base = baseUvs.slice();
     this.output = baseUvs.slice();
     this.fields = {
@@ -72,16 +83,20 @@ export class EyeGazeWarper {
     return { left: this.fields.left !== null, right: this.fields.right !== null };
   }
 
-  update(gaze: NormalizedGaze | null): Float32Array {
+  update(gaze: NormalizedGaze | null, wide?: { left: number; right: number }): Float32Array {
     this.output.set(this.base);
-    if (!gaze) return this.output;
-    const vertexCount = Math.min(468, this.base.length / 2);
-    for (let i = 0; i < vertexCount; i++) {
+    if (!gaze && !wide) return this.output;
+    // On production meshes only interior eye vertices may sample different
+    // pixels. Rim, lashes, glasses, and all original face UVs stay fixed.
+    const start = this.interior?.start ?? 0;
+    const end = this.interior ? start + this.interior.count : Math.min(468, this.base.length / 2);
+    for (let i = start; i < end; i++) {
       const x = this.base[i * 2]!;
       const y = this.base[i * 2 + 1]!;
       for (const side of ["left", "right"] as const) {
         const eye = this.fields[side];
         if (!eye) continue;
+        if (this.interior && !inside(x, y, eye.contour)) continue;
         const dx = x - eye.center.x;
         const dy = y - eye.center.y;
         const localX = (dx * eye.u.x + dy * eye.u.y) / (eye.width * 0.58);
@@ -90,12 +105,19 @@ export class EyeGazeWarper {
         if (radiusSquared >= 1) continue;
         const t = 1 - radiusSquared;
         const weight = t * t * (3 - 2 * t);
-        const motion = gaze[side];
+        const motion = gaze?.[side] ?? { x: 0, y: 0 };
         // Source iris follows the controller gaze: change the sampled source
         // pixel in the opposite direction within the current geometry point.
-        const travel = eye.irisRadius * 1.25 * weight;
-        this.output[i * 2] = x - (eye.u.x * motion.x + eye.v.x * motion.y) * travel;
-        this.output[i * 2 + 1] = y - (eye.u.y * motion.x + eye.v.y * motion.y) * travel;
+        const tx = Math.min(eye.irisRadius * 0.85, eye.width * 0.1) * weight;
+        const ty = Math.min(eye.irisRadius * 0.6, eye.height * 0.22) * weight;
+        const wideY = (dx * eye.v.x + dy * eye.v.y) * 0.25 * Math.max(0, Math.min(1, wide?.[side] ?? 0)) * weight;
+        let nx = x - eye.u.x * motion.x * tx - eye.v.x * motion.y * ty + eye.v.x * wideY;
+        let ny = y - eye.u.y * motion.x * tx - eye.v.y * motion.y * ty + eye.v.y * wideY;
+        // Never sample outside the source aperture. Reduce travel toward this
+        // original interior pixel rather than dragging eyelid/glasses pixels in.
+        if (this.interior) for (let step = 0; step < 8 && !inside(nx, ny, eye.contour); step++) { nx = (nx + x) / 2; ny = (ny + y) / 2; }
+        this.output[i * 2] = nx;
+        this.output[i * 2 + 1] = ny;
       }
     }
     return this.output;

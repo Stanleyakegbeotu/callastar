@@ -61,4 +61,13 @@ describe("iris gaze geometry", () => {
     expect(Math.abs(missing.left.x)).toBeLessThan(Math.abs(closed.left.x));
     expect(Math.abs(missing.right.x)).toBeLessThan(Math.abs(closed.right.x));
   });
+  it('a low-confidence apparent blink cannot freeze old gaze indefinitely', () => {
+    const smoother = new GazeSmoother();
+    const gaze = { left: { x: .8, y: .4 }, right: { x: .4, y: .2 }, clamped: false };
+    const initial = smoother.update(gaze,{left:1,right:1},0);
+    let out = initial;
+    for(let t=100;t<=1000;t+=100) out=smoother.update(null,{left:0,right:0},t,{left:true,right:true},{left:false,right:false});
+    expect(Math.abs(out.left.x)).toBeLessThan(.01);
+    expect(Math.abs(out.right.x)).toBeLessThan(.01);
+  });
 });
