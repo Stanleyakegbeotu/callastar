@@ -111,6 +111,8 @@ export interface CalibrationFaceBaseline {
   yaw: number;
   pitch: number;
   roll: number;
+  /** Median stable upper-face anchors; held in memory for this Studio visit only. */
+  stableAnchors?: readonly Point3[];
   /**
    * Resting expression, recorded but NOT subtracted.
    *
@@ -186,16 +188,16 @@ export interface CalibrationQualityReport {
  * rules — a yaw that meant one thing and now means another is exactly the class
  * of bug that took a milestone to find at the tracker layer.
  */
-export const CALIBRATION_PROFILE_VERSION = 4;
+export const CALIBRATION_PROFILE_VERSION = 5;
 
 /**
  * PRIVACY. This is the whole of what calibration keeps.
  *
- * Aggregated geometry and nothing else: no camera image, no frame-by-frame
- * landmark history, no pose history, no video, no identity embedding. The
- * samples that produced these numbers are discarded the moment the baseline is
- * computed, and nothing here is written to IndexedDB, localStorage, session
- * history or analytics — it lives in memory for the length of a Studio visit.
+ * Aggregated geometry and a small median set of stable upper-face anchors: no
+ * camera image, no frame-by-frame landmark history, no pose history, no video,
+ * no identity embedding. Calibration samples are discarded when the baseline
+ * is computed. This profile remains in memory for the Studio visit and is never
+ * written to IndexedDB, localStorage, session history or analytics.
  */
 export interface TransformationCalibrationProfile {
   version: number;

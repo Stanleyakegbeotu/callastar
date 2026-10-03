@@ -45,6 +45,32 @@ export interface DisplayPoint {
   y: number;
 }
 
+/** One frame's raw face geometry after the camera-to-preview transform. */
+export interface DisplayFacePlacement {
+  center: DisplayPoint;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Maps the face center and bounds through the exact transform used by landmarks. */
+export function mapFacePlacementToDisplay(
+  face: { center: { x: number; y: number }; bounds: { minX: number; minY: number; maxX: number; maxY: number } },
+  geometry: DisplayGeometry,
+): DisplayFacePlacement {
+  const center = mapNormalizedToDisplay(face.center, geometry);
+  const first = mapNormalizedToDisplay({ x: face.bounds.minX, y: face.bounds.minY }, geometry);
+  const second = mapNormalizedToDisplay({ x: face.bounds.maxX, y: face.bounds.maxY }, geometry);
+  return {
+    center,
+    left: Math.min(first.x, second.x),
+    top: Math.min(first.y, second.y),
+    width: Math.abs(second.x - first.x),
+    height: Math.abs(second.y - first.y),
+  };
+}
+
 /**
  * How the source frame is laid out inside the display box.
  *

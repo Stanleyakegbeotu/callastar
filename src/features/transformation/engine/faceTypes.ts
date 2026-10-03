@@ -77,6 +77,8 @@ export type FaceTrackingStatus =
   | "skipped";
 
 export interface FaceTrackingResult {
+  /** Camera-frame sequence assigned by TrackingScheduler. */
+  frameId?: number;
   timestampMs: number;
   status: FaceTrackingStatus;
   detected: boolean;

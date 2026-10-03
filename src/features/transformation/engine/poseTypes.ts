@@ -88,6 +88,8 @@ export interface SegmentationInfo {
 }
 
 export interface PoseTrackingResult {
+  /** Camera-frame sequence assigned by TrackingScheduler. */
+  frameId?: number;
   timestampMs: number;
   status: PoseTrackingStatus;
   detected: boolean;

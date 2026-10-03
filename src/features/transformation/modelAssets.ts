@@ -33,11 +33,11 @@ export interface TransformationModelAssets {
 
 export const transformationModelAssets: Readonly<TransformationModelAssets> = transformationModelPaths;
 
-/** Whether the models needed for tracking are present in this build. */
+/** Whether the active face-only runtime model is present in this build. */
 export function hasRequiredTransformationModels(
   assets: Readonly<TransformationModelAssets> = transformationModelAssets,
 ): boolean {
-  return assets.faceLandmarker !== null && assets.poseLandmarker !== null;
+  return assets.faceLandmarker !== null;
 }
 
 /** Generated from the installed package's exact version during predev/prebuild. */

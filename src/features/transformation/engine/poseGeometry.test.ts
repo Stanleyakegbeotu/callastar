@@ -235,4 +235,13 @@ describe("monotonic clock", () => {
     const forFace = shared.next(500);
     expect(shared.current).toBe(forFace);
   });
+
+  it("gives face and pose inference the exact same stamp for one camera frame", () => {
+    const shared = new MonotonicClock();
+    const face = shared.next(500, 17);
+    const pose = shared.next(500, 17);
+    const following = shared.next(533, 18);
+    expect(pose).toBe(face);
+    expect(following).toBeGreaterThan(face);
+  });
 });

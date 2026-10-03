@@ -18,7 +18,7 @@ export type TransformationPhase =
   | "idle"
   /** Pulling the MediaPipe/OpenCV/Three chunks in. */
   | "loading-dependencies"
-  /** Fetching and instantiating the face and pose models. */
+  /** Fetching and instantiating the face model. */
   | "loading-models"
   /** Runtime is up and waiting for a source. */
   | "source-selected"
@@ -163,7 +163,7 @@ export function transformationReducer(
       return { ...state, phase: "loading-dependencies", error: null, errorCode: null, loadingStage: "Loading vision engine" };
 
     case "LOAD_MODELS":
-      return { ...state, phase: "loading-models", loadingStage: "Loading face and pose models" };
+      return { ...state, phase: "loading-models", loadingStage: "Loading face model" };
 
     case "LOADING_STAGE":
       return { ...state, loadingStage: action.stage };

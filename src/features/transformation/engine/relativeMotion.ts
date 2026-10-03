@@ -1,6 +1,7 @@
 import type { TransformationCalibrationProfile } from "./calibrationTypes";
 import type { FaceTrackingResult } from "./faceTypes";
 import type { PoseTrackingResult } from "./poseTypes";
+import { fitStableHeadAnchors, stableHeadAnchors } from "./headLock";
 
 /**
  * Live tracking, expressed relative to the calibrated neutral.
@@ -212,9 +213,14 @@ function computeHeadMotion(
   if (!usable(derived.center.x) || !usable(derived.center.y) || !usable(derived.scale)) return null;
 
   const neutral = profile.face;
+  const fit = neutral.stableAnchors && face.landmarks.length
+    ? fitStableHeadAnchors(neutral.stableAnchors, stableHeadAnchors(face.landmarks) ?? [], neutral.center, aspect)
+    : null;
+  const currentCenter = fit?.center ?? derived.center;
+  const currentScale = fit?.scale ?? derived.scale;
   const { translationX, translationY } = normalizeTranslation(
-    derived.center.x - neutral.center.x,
-    derived.center.y - neutral.center.y,
+    currentCenter.x - neutral.center.x,
+    currentCenter.y - neutral.center.y,
     neutral.scale,
     aspect,
   );
@@ -222,12 +228,12 @@ function computeHeadMotion(
   return {
     translationX,
     translationY,
-    scaleDelta: scaleRatio(derived.scale, neutral.scale),
+    scaleDelta: scaleRatio(currentScale, neutral.scale),
     // Plain subtraction: these are angles about fixed axes, and the acceptance
     // envelope keeps them far from any wrap.
     yawDelta: derived.yaw - neutral.yaw,
     pitchDelta: derived.pitch - neutral.pitch,
-    rollDelta: derived.roll - neutral.roll,
+    rollDelta: fit?.roll ?? derived.roll - neutral.roll,
   };
 }
 

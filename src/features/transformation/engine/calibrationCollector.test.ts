@@ -5,6 +5,7 @@ import { CALIBRATION_PROFILE_VERSION } from "./calibrationTypes";
 import type { DerivedFaceGeometry, FaceTrackingResult } from "./faceTypes";
 import { ACCEPTANCE_ENVELOPE } from "./calibrationStatistics";
 import type { PoseDerivedGeometry, PoseTrackingResult } from "./poseTypes";
+import { STABLE_HEAD_ANCHOR_IDS } from "./headLock";
 
 /**
  * Capturing a baseline.
@@ -120,6 +121,23 @@ function runStillCalibration(collector: CalibrationCollector, frames = 40, stepM
 }
 
 describe("a steady operator", () => {
+  it("stores a per-anchor median from the multi-frame neutral window", () => {
+    const collector = new CalibrationCollector();
+    const landmarks = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+    STABLE_HEAD_ANCHOR_IDS.forEach((id, index) => {
+      landmarks[id] = { x: 0.35 + index * 0.01, y: 0.4 + index * 0.002, z: 0 };
+    });
+    collector.start("face-only", CONTEXT, 0);
+    feed(collector, 40, index => ({
+      face: face({ landmarks }, { center: { x: 0.5, y: 0.45, z: 0 } }),
+      pose: null,
+    }), { stepMs: 60 });
+    const anchors = collector.getState().profile?.face.stableAnchors;
+    expect(anchors).toHaveLength(STABLE_HEAD_ANCHOR_IDS.length);
+    expect(anchors?.[0]?.x).toBeCloseTo(0.35, 6);
+    expect(anchors?.[STABLE_HEAD_ANCHOR_IDS.length - 1]?.x).toBeCloseTo(0.35 + (STABLE_HEAD_ANCHOR_IDS.length - 1) * 0.01, 6);
+  });
+
   it("produces a baseline once both the frame count and the duration are met", () => {
     const collector = new CalibrationCollector();
     runStillCalibration(collector);

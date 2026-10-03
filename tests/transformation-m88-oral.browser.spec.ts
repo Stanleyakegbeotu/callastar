@@ -82,6 +82,79 @@ test('M8.8 real Studio uses AUTO and paired inference pixels; mode switches, sto
     FaceRenderer.prototype.initialize=function(){(window as any).__oralRenderer=this;const onStats=(this as any).options.onStats;(this as any).options.onStats=(s:any)=>{(window as any).__oralStats=s;onStats?.(s);};return initialize.call(this);};
   });
   await openFaceRender(page);
+  const composite=await page.locator('.studio-viewport').evaluate(element=>{
+    const video=element.querySelector('video.studio-video')!;
+    const canvas=element.querySelector('canvas.is-face-overlay')!;
+    const box=(node:Element)=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};};
+    const videoStyle=getComputedStyle(video),canvasStyle=getComputedStyle(canvas);
+    const stream=(video as HTMLVideoElement).srcObject as MediaStream|null;
+    return {
+      viewport:box(element),video:box(video),canvas:box(canvas),
+      videoFit:videoStyle.objectFit,videoVisibility:videoStyle.visibility,
+      canvasBackground:canvasStyle.backgroundColor,
+      activeVideoTracks:stream?.getVideoTracks().filter(track=>track.readyState==='live').length??0,
+      previewClasses:element.className,
+    };
+  });
+  expect(composite.videoFit).toBe('cover');
+  expect(composite.videoVisibility).toBe('visible');
+  expect(composite.activeVideoTracks).toBe(1);
+  expect(composite.canvasBackground).toBe('rgba(0, 0, 0, 0)');
+  for(const key of ['x','y','width','height'] as const){
+    expect(composite.video[key]).toBeCloseTo(composite.viewport[key],1);
+    expect(composite.canvas[key]).toBeCloseTo(composite.viewport[key],1);
+  }
+  expect(composite.previewClasses).toContain('is-face-render-preview');
+  const debugView=page.getByRole('combobox',{name:'Developer composite view',exact:true});
+  await debugView.selectOption('mask');
+  await expect.poll(()=>page.evaluate(()=>(window as any).__oralRenderer?.material?.map===null)).toBe(true);
+  await debugView.selectOption('overlay');
+  await expect.poll(()=>page.locator('.studio-video').evaluate(element=>getComputedStyle(element).visibility)).toBe('hidden');
+  await debugView.selectOption('final');
+  await expect.poll(()=>page.locator('.studio-video').evaluate(element=>getComputedStyle(element).visibility)).toBe('visible');
+  const rootPanel=page.locator('[data-testid="face-root-debug-panel"]');
+  await rootPanel.locator(':scope > summary').click();
+  await expect(rootPanel).toHaveAttribute('open','');
+  await expect(page.getByTestId('face-root-hud')).toBeVisible();
+  const rootMode=page.getByRole('combobox',{name:'Face root test mode',exact:true});
+  await expect.poll(()=>rootMode.getByRole('option',{name:/Raw Direct/}).evaluate(option=>(option as HTMLOptionElement).disabled)).toBe(false);
+  const rootProbe=page.locator('[data-face-root-world]');
+  await rootMode.selectOption('manual');
+  await expect(page.getByTestId('face-root-mode-indicator')).toContainText('ROOT MODE: MANUAL ROOT');
+  await expect(page.getByRole('status').filter({hasText:'Developer override active'})).toBeVisible();
+  await page.getByRole('slider',{name:'Manual face root X'}).press('End');
+  await page.getByRole('slider',{name:'Manual face root Y'}).press('End');
+  await expect.poll(async()=>Number(await rootProbe.getAttribute('data-root-x'))).toBeCloseTo(0.3,2);
+  await expect.poll(async()=>Number(await rootProbe.getAttribute('data-root-y'))).toBeCloseTo(0.3,2);
+  const manualUnitScale=Number(await rootProbe.getAttribute('data-root-scale-x'));
+  await page.getByRole('slider',{name:'Manual face root scale'}).press('End');
+  await expect.poll(async()=>Number(await rootProbe.getAttribute('data-root-scale-x'))).toBeGreaterThan(manualUnitScale*1.7);
+  await rootMode.selectOption('oscillator');
+  await expect(page.getByRole('status').filter({hasText:'Developer override active'})).toBeVisible();
+  await page.getByRole('button',{name:'RESET ROOT TEST',exact:true}).click();
+  await expect(rootMode).toHaveValue('tracking');
+  await expect(page.getByTestId('face-root-mode-indicator')).toContainText('ROOT MODE: LIVE TRACKING');
+  for(const [width,height] of [[1280,900],[768,800],[320,600]] as const){
+    await page.setViewportSize({width,height});
+    const layout=await page.evaluate(()=>{
+      const box=(element:Element)=>{const r=element.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
+      const panel=document.querySelector<HTMLElement>('[data-testid="face-root-debug-panel"]')!;
+      const viewport=document.querySelector('.studio-viewport')!;
+      const title=document.querySelector('.admin-page-header');
+      return {panel:box(panel),viewport:box(viewport),title:title?box(title):null,panelScrollHeight:panel.scrollHeight,panelClientHeight:panel.clientHeight};
+    });
+    expect(layout.panel.top).toBeGreaterThanOrEqual(layout.viewport.bottom-1);
+    if(layout.title)expect(layout.panel.top).toBeGreaterThanOrEqual(layout.title.bottom-1);
+    expect(layout.panel.width).toBeGreaterThan(0);
+    const overflow=await horizontalOverflow(page);
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth+1);
+    expect(overflow.offenders).toEqual([]);
+    if(width===320)expect(layout.panelScrollHeight).toBeGreaterThan(layout.panelClientHeight);
+  }
+  await rootMode.selectOption('manual');
+  await page.getByRole('slider',{name:'Manual face root X'}).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('slider',{name:'Manual face root X'})).toBeVisible();
+  await rootMode.selectOption('tracking');
   await expect(page.getByRole('combobox',{name:'Mouth interior',exact:true})).toHaveValue('auto');
   await expect.poll(()=>page.evaluate(()=>!!(window as any).__oralRenderer.options.expression.current?.liveMouth?.sourceFrame)).toBe(true);
   const capture=await page.evaluate(()=>{

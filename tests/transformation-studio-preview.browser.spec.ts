@@ -63,7 +63,7 @@ async function sameLiveElements(page: Page) {
   });
 }
 
-test("raw is the live camera, face render keeps it as a PiP, and expanding restyles the same elements", async ({ page }) => {
+test("raw is the live camera, face render shares its full-frame geometry, and expanding restyles the same elements", async ({ page }) => {
   test.setTimeout(420_000);
   await openStudioWithFaceCamera(page);
   await prepareSource(page);
@@ -83,15 +83,13 @@ test("raw is the live camera, face render keeps it as a PiP, and expanding resty
   await page.locator(".studio-stage").screenshot({ path: test.info().outputPath("phase1-raw.png") });
   await assertNoOverflowAtEveryWidth(page, "raw");
 
-  // FACE RENDER: output owns the stage, the live camera is a comparison PiP.
+  // FACE RENDER: the same live camera remains full-frame under the transparent
+  // renderer canvas, so both surfaces share identical cover-crop geometry.
   await openFaceRender(page);
   const face = await boxes(page);
   expect(area(face.renderer!) / area(face.viewport)).toBeGreaterThan(0.95);
-  expect(area(face.video) / area(face.viewport)).toBeLessThan(0.12);
-  expect(area(face.video)).toBeGreaterThan(0);
-  // Top-right, clear of the face at the centre of the output.
-  expect(face.video.x + face.video.width).toBeGreaterThan(face.viewport.x + face.viewport.width * 0.85);
-  expect(face.video.y + face.video.height).toBeLessThan(face.viewport.y + face.viewport.height * 0.35);
+  expect(area(face.video) / area(face.viewport)).toBeGreaterThan(0.95);
+  expect(face.video).toMatchObject({ x: face.viewport.x, y: face.viewport.y, width: face.viewport.width, height: face.viewport.height });
   const pip = await page.evaluate(() => {
     const video = document.querySelector<HTMLVideoElement>(".studio-video")!;
     const style = getComputedStyle(video);

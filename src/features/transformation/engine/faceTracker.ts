@@ -187,20 +187,20 @@ export class FaceTracker {
    * studio, and each returns a result saying which rather than an exception the
    * loop would have to catch.
    */
-  detect(frame: CanvasImageSource, timestampMs: number): FaceTrackingResult {
+  detect(frame: CanvasImageSource, timestampMs: number, frameId?: number): FaceTrackingResult {
     if (this.disposed || !this.task) {
-      return { ...NO_FACE_RESULT, status: "skipped", timestampMs };
+      return { ...NO_FACE_RESULT, status: "skipped", timestampMs, frameId };
     }
 
     // Dropping is correct here: queueing frames behind a slow inference builds
     // latency that never recovers, and the newest frame is the useful one.
     if (this.busy) {
-      return { ...NO_FACE_RESULT, status: "skipped", timestampMs };
+      return { ...NO_FACE_RESULT, status: "skipped", timestampMs, frameId };
     }
 
     // Strictly increasing, whatever the caller passed. A flip or a resume can
     // legitimately hand us a repeated or lower value.
-    const stamp = this.clock.next(timestampMs);
+    const stamp = this.clock.next(timestampMs, frameId);
 
     this.busy = true;
     const started = performance.now();
@@ -212,7 +212,7 @@ export class FaceTracker {
 
       const landmarks = raw.faceLandmarks?.[0];
       if (!landmarks || landmarks.length === 0) {
-        return { ...NO_FACE_RESULT, timestampMs: stamp };
+        return { ...NO_FACE_RESULT, timestampMs: stamp, frameId };
       }
 
       // Copied out of MediaPipe's reused buffers, for the same reason as the
@@ -224,6 +224,7 @@ export class FaceTracker {
 
       return {
         timestampMs: stamp,
+        frameId,
         status: "tracked",
         detected: true,
         confidence: estimateConfidence(points, derived),
@@ -235,7 +236,7 @@ export class FaceTracker {
     } catch {
       // A single bad frame must not stop the loop. The next one usually works,
       // and a persistent failure shows up as sustained `skipped`.
-      return { ...NO_FACE_RESULT, status: "skipped", timestampMs: stamp };
+      return { ...NO_FACE_RESULT, status: "skipped", timestampMs: stamp, frameId };
     } finally {
       this.busy = false;
     }

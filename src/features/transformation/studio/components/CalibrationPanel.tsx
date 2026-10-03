@@ -53,7 +53,7 @@ export function CalibrationPanel({
           <button
             type="button"
             className="studio-primary studio-primary-inline"
-            onClick={() => onStart("full")}
+            onClick={() => onStart("face-only")}
             disabled={!cameraLive}
           >
             Start calibration
@@ -93,15 +93,9 @@ export function CalibrationPanel({
             <strong>{describeCalibration(calibration).message}</strong>
             {describeCalibration(calibration).detail && <span>{describeCalibration(calibration).detail}</span>}
           </p>
-          <button type="button" className="studio-primary studio-primary-inline" onClick={() => onStart("full")}>
+          <button type="button" className="studio-primary studio-primary-inline" onClick={() => onStart("face-only")}>
             Try again
           </button>
-          {/* Offered only once we know the face tracks and the shoulders do not. */}
-          {calibration.faceOnlyAvailable && (
-            <button type="button" className="studio-control" onClick={() => onStart("face-only")}>
-              <span>Calibrate face only</span>
-            </button>
-          )}
         </div>
       )}
 

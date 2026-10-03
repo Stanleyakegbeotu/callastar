@@ -158,18 +158,16 @@ test.describe("live tracking", () => {
     // inside the loop, so it cannot be set without one running.
     expect(await metric(page, "camera-frame-size")).toMatch(/^\d+ × \d+$/);
 
-    // Both models ran. The fake camera contains no person, so a detection is
-    // neither expected nor asserted.
+    // Face-only mode runs the face model. The fake camera contains no person,
+    // so a detection is neither expected nor asserted; pose stays disabled.
     await expect
       .poll(async () => await metricNumber(page, "face-inferences"), { timeout: 60_000 })
       .toBeGreaterThan(0);
-    await expect
-      .poll(async () => await metricNumber(page, "pose-inferences"), { timeout: 60_000 })
-      .toBeGreaterThan(0);
+    expect(await metricNumber(page, "pose-inferences")).toBe(0);
 
     // Init was measured rather than defaulted.
     expect(await metric(page, "face-init")).toMatch(/ms$/);
-    expect(await metric(page, "pose-init")).toMatch(/ms$/);
+    await expect(page.locator('[data-metric="pose-init"]')).toHaveCount(0);
   });
 
   test("sizes the overlay canvas to the preview it draws on", async ({ page }) => {

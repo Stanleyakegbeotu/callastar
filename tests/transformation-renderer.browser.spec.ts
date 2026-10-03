@@ -64,13 +64,25 @@ test("loads Three only for the renderer, draws a fixed source mesh, and disposes
       },
     };
     const reports: { status: string; message: string | null }[] = [];
+    const faceFrame = { current: {
+      frameId: 7, timestampMs: 125, trackingTimestampMs: 210, landmarks,
+      rawGlobalTransform: { translationX: 0.12, translationY: -0.05, scaleDelta: 1.05, yawDelta: 0.12, pitchDelta: 0.03, rollDelta: -0.02 },
+      globalTransform: { translationX: 0.12, translationY: -0.05, scaleDelta: 1.05, yawDelta: 0.12, pitchDelta: 0.03, rollDelta: -0.02 },
+      globalCenter: { x: 0.62, y: 0.45, z: 0 }, referenceCenter: { x: 0.5, y: 0.5, z: 0 },
+      referenceScale: 0.1, rawFaceScale: 0.105, trackingAspect: 0.75, rawScaleRatio: 1.05, expressionState: null,
+      stableAnchors: [], referenceAnchors: [], projectedReferenceAnchors: [],
+    } };
+    const rootMotionDebug = { current: { mode: "tracking" as const, x: 0, y: 0, scale: 1, rollDeg: 0 } };
     const renderer = new FaceRenderer({
       canvas,
       asset: { kind: "image", blob, fileName: "fixture.png", mimeType: "image/png", assetId: null },
       profile: profile as never,
+      framing: { current: { neutralCenter: { x: 0.5, y: 0.5 }, neutralEyeSpan: 0.2, trackingWidth: 480, trackingHeight: 640 } },
       motion: { current: { tracked: true, expression: null, upperBody: null, head: {
         translationX: 0.12, translationY: -0.05, scaleDelta: 1.05, yawDelta: 0.12, pitchDelta: 0.03, rollDelta: -0.02,
       } } },
+      faceFrame,
+      rootMotionDebug,
       onStats: (stats) => {
         reports.push({ status: stats.status, message: stats.message });
         (window as unknown as { __faceRendererStatus?: string }).__faceRendererStatus = stats.status;
@@ -82,10 +94,57 @@ test("loads Three only for the renderer, draws a fixed source mesh, and disposes
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    renderer.setDiagnostics({ showMesh: false, wireframe: false, showBoundaries: true });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    renderer.setDiagnostics({ showMesh: false, wireframe: false, showWeights: true });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    renderer.setDiagnostics({ showMesh: false, wireframe: false, showFaceLockDebug: true });
+    const attachment = renderer.getAttachmentProbe();
+    faceFrame.current = {
+      ...faceFrame.current!,
+      frameId: 8,
+      rawGlobalTransform: { translationX: -0.15, translationY: 0.15, scaleDelta: 1.5, yawDelta: 0, pitchDelta: 0, rollDelta: 0 },
+      globalTransform: { translationX: -0.15, translationY: 0.15, scaleDelta: 1.5, yawDelta: 0, pitchDelta: 0, rollDelta: 0 },
+      globalCenter: { x: 0.35, y: 0.65, z: 0 },
+      rawFaceScale: 0.15,
+      rawScaleRatio: 1.5,
+    };
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const movedAttachment = renderer.getAttachmentProbe();
+    const gl = canvas.getContext("webgl2");
+    if (!gl) throw new Error("The face renderer WebGL context is unavailable.");
+    const trackedPixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, trackedPixels);
+    rootMotionDebug.current = { mode: "manual", x: -0.22, y: 0.18, scale: 1.3, rollDeg: 8 };
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const manualAttachment = renderer.getAttachmentProbe();
+    const manualPixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, manualPixels);
+    const manualPixelChanges = trackedPixels.reduce((count, value, index) => count + (value !== manualPixels[index] ? 1 : 0), 0);
+    rootMotionDebug.current = { ...rootMotionDebug.current, mode: "oscillator" };
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const oscillatorAttachment = renderer.getAttachmentProbe();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    renderer.setDiagnostics({ showMesh: false, wireframe: false });
     const threeAfterInitialize = hasThreeResource();
     const dimensions = { width: canvas.width, height: canvas.height };
+    const untouchedPixel = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, untouchedPixel);
     (window as unknown as { __faceRenderer?: InstanceType<typeof FaceRenderer> }).__faceRenderer = renderer;
-    return { threeBefore, threeAfterRendererModule, threeAfterInitialize, dimensions, status: reports[reports.length - 1] };
+    return {
+      threeBefore,
+      threeAfterRendererModule,
+      threeAfterInitialize,
+      dimensions,
+      contextHasAlpha: gl.getContextAttributes()?.alpha ?? false,
+      untouchedPixelAlpha: untouchedPixel[3],
+      attachment,
+      movedAttachment,
+      manualAttachment,
+      oscillatorAttachment,
+      manualPixelChanges,
+      status: reports[reports.length - 1],
+    };
   });
 
   expect(report.threeBefore).toBe(false);
@@ -93,6 +152,33 @@ test("loads Three only for the renderer, draws a fixed source mesh, and disposes
   expect(report.threeAfterInitialize).toBe(true);
   expect(report.dimensions.width).toBeGreaterThan(0);
   expect(report.dimensions.height).toBeGreaterThan(0);
+  expect(report.contextHasAlpha).toBe(true);
+  expect(report.untouchedPixelAlpha).toBe(0);
+  expect(report.attachment?.frameId).toBe(7);
+  expect(report.attachment?.rootMatrix).toHaveLength(16);
+  expect(report.attachment?.rootLocal?.matrixAutoUpdate).toBe(true);
+  expect(report.attachment?.skinIsRootChild).toBe(true);
+  expect(report.attachment?.eyePixelsShareRoot).toBe(true);
+  expect(report.attachment?.noseSharesRoot).toBe(true);
+  expect(report.attachment?.mouthSharesRoot).toBe(true);
+  expect(report.attachment?.maskSharesFaceGeometry).toBe(true);
+  expect(report.attachment?.featureLayersShareRoot).toBe(true);
+  expect(report.attachment?.debugContoursShareRoot).toBe(true);
+  expect(report.attachment?.rootPosition?.x).toBeGreaterThan(0);
+  expect(report.attachment?.rootPosition?.y).toBeGreaterThan(0);
+  expect(report.movedAttachment?.frameId).toBe(8);
+  expect(report.movedAttachment?.rootPosition?.x).toBeLessThan(report.attachment?.rootPosition?.x ?? 0);
+  expect(report.movedAttachment?.rootPosition?.y).toBeLessThan(report.attachment?.rootPosition?.y ?? 0);
+  expect(report.movedAttachment?.rootScale).toBeGreaterThan((report.attachment?.rootScale ?? 0) * 1.4);
+  expect(report.movedAttachment?.rootMatrix).not.toEqual(report.attachment?.rootMatrix);
+  expect(report.movedAttachment?.eyeWorldCenter?.x).not.toBeCloseTo(report.attachment?.eyeWorldCenter?.x ?? 0, 2);
+  expect(report.movedAttachment?.childWorldPosition?.x).not.toBeCloseTo(report.attachment?.childWorldPosition?.x ?? 0, 2);
+  expect(report.manualAttachment?.rootPosition?.x).toBeCloseTo(-0.22, 4);
+  expect(report.manualAttachment?.rootPosition?.y).toBeCloseTo(0.18, 4);
+  expect(report.manualAttachment?.rootScale).toBeGreaterThan((report.attachment?.rootScale ?? 0) * 1.2);
+  expect(report.manualAttachment?.rootLocal?.roll).toBeCloseTo(8 * Math.PI / 180, 4);
+  expect(report.manualPixelChanges).toBeGreaterThan(1000);
+  expect(report.oscillatorAttachment?.rootMatrix).not.toEqual(report.manualAttachment?.rootMatrix);
   expect(report.status?.status, report.status?.message ?? "renderer did not report a status").toBe("ready");
   await page.locator('[data-testid="face-renderer-output"]').screenshot({ path: "test-results/transformation-face-renderer.png" });
   const finalStatus = await page.evaluate(() => {

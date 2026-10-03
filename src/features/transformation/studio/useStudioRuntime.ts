@@ -6,14 +6,16 @@ import type { CalibrationInvalidation, CalibrationMode } from "../engine/calibra
 import {
   computeOverlayCanvasSize,
   computeTrackingSize,
+  mapFacePlacementToDisplay,
   type DisplayGeometry,
 } from "../engine/coordinateMapping";
 import { FaceTracker } from "../engine/faceTracker";
+import { fitStableHeadAnchors, stableHeadAnchors } from "../engine/headLock";
+import type { FaceFrameSnapshot } from "../engine/faceFrame";
 import { computeExpressionMotion, type ExpressionMotion } from "../engine/expressionMotion";
 import type { FaceTrackingResult } from "../engine/faceTypes";
 import { MonotonicClock } from "../engine/monotonicClock";
-import { PoseTracker } from "../engine/poseTracker";
-import type { PoseTrackingResult } from "../engine/poseTypes";
+import { NO_POSE_RESULT, type PoseTrackingResult } from "../engine/poseTypes";
 import { NO_MOTION, computeRelativeMotion, type CalibrationMotion } from "../engine/relativeMotion";
 import { StudioCamera, describeCameraError, type CameraFacing } from "../engine/studioCamera";
 import {
@@ -66,7 +68,6 @@ export interface StudioSummary {
   cameraWidth: number | null;
   cameraHeight: number | null;
   faceInitMs: number | null;
-  poseInitMs: number | null;
   /**
    * Live motion against the calibrated neutral.
    *
@@ -81,74 +82,23 @@ const EMPTY_SUMMARY: StudioSummary = {
   face: null,
   pose: null,
   stats: null,
-  guidance: describeTracking(null, null, { running: false }),
+      guidance: describeTracking(null, null, { running: false }),
   cameraWidth: null,
   cameraHeight: null,
   faceInitMs: null,
-  poseInitMs: null,
   motion: NO_MOTION,
   expression: null,
 };
 
-/**
- * A pose tracker that can be replaced underneath the scheduler.
- *
- * Segmentation is a task-creation option, so turning it on means building a new
- * task. The scheduler takes its trackers once, at construction, and that is the
- * right design — so the swap happens here instead, behind the same interface.
- */
-class SwappablePoseTracker implements SchedulableTracker<PoseTrackingResult> {
-  private inner: PoseTracker;
-
-  constructor(
-    private readonly clock: MonotonicClock,
-    private segmentation: boolean,
-  ) {
-    this.inner = new PoseTracker({ outputSegmentationMasks: segmentation }, clock);
-  }
-
-  get ready(): boolean {
-    return this.inner.ready;
-  }
-
-  get current(): PoseTracker {
-    return this.inner;
-  }
-
-  get segmentationEnabled(): boolean {
-    return this.segmentation;
-  }
-
-  detect(frame: CanvasImageSource, timestampMs: number): PoseTrackingResult {
-    return this.inner.detect(frame, timestampMs);
-  }
-
-  initialize(): Promise<void> {
-    return this.inner.initialize();
-  }
-
-  /** Builds the replacement first, so a failure leaves the working task in place. */
-  async setSegmentation(enabled: boolean): Promise<void> {
-    if (enabled === this.segmentation) return;
-
-    const replacement = new PoseTracker({ outputSegmentationMasks: enabled }, this.clock);
-    await replacement.initialize();
-
-    const previous = this.inner;
-    this.inner = replacement;
-    this.segmentation = enabled;
-    previous.dispose();
-  }
-
-  dispose(): void {
-    this.inner.dispose();
-  }
-}
+/** Satisfies the generic scheduler contract without constructing a Pose Landmarker. */
+const DISABLED_POSE_TRACKER: SchedulableTracker<PoseTrackingResult> = {
+  ready: false,
+  detect: (_frame, timestampMs, frameId) => ({ ...NO_POSE_RESULT, timestampMs, frameId }),
+};
 
 interface Runtime {
   clock: MonotonicClock;
   face: FaceTracker;
-  pose: SwappablePoseTracker;
   camera: StudioCamera;
   scheduler: TrackingScheduler;
   /**
@@ -172,16 +122,15 @@ export interface StudioRuntime {
   quality: QualityMode;
   facing: CameraFacing;
   showFace: boolean;
-  showPose: boolean;
-  segmentation: boolean;
-  /** True while the segmentation task is being rebuilt. */
-  segmentationBusy: boolean;
   calibration: CalibrationCollectorState;
   /** Why the last baseline was dropped, when one was. */
   calibrationInvalidation: CalibrationInvalidation | null;
   /** Latest motion from the existing scheduler. The renderer reads it without a React render. */
   motionRef: React.MutableRefObject<CalibrationMotion>;
   expressionRef: React.MutableRefObject<ExpressionMotion | null>;
+  /** Face transform and expressions captured atomically from one camera frame. */
+  faceFrameRef: React.MutableRefObject<FaceFrameSnapshot | null>;
+  faceLockDebugRef: React.MutableRefObject<boolean>;
   oralFrameEnabledRef: React.MutableRefObject<boolean>;
   /** Camera flips deliberately freeze the rendered source until a new baseline exists. */
   renderPausedRef: React.MutableRefObject<boolean>;
@@ -193,8 +142,6 @@ export interface StudioRuntime {
   flipCamera: () => void;
   setQuality: (mode: QualityMode) => void;
   setShowFace: (show: boolean) => void;
-  setShowPose: (show: boolean) => void;
-  setSegmentation: (enabled: boolean) => void;
   startCalibration: (mode?: CalibrationMode) => void;
   cancelCalibration: () => void;
   clearCalibration: () => void;
@@ -211,11 +158,6 @@ export function useStudioRuntime(): StudioRuntime {
   const [quality, setQualityState] = useState<QualityMode>("balanced");
   const [facing, setFacing] = useState<CameraFacing>("user");
   const [showFace, setShowFace] = useState(true);
-  const [showPose, setShowPose] = useState(true);
-  // Off by default: enabling it rebuilds the pose task and adds a mask to every
-  // inference, which is exactly the cost this toggle exists to measure.
-  const [segmentation, setSegmentationState] = useState(false);
-  const [segmentationBusy, setSegmentationBusy] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationCollectorState>(IDLE_CALIBRATION);
   const [calibrationInvalidation, setCalibrationInvalidation] = useState<CalibrationInvalidation | null>(null);
 
@@ -250,18 +192,18 @@ export function useStudioRuntime(): StudioRuntime {
   const mirroredRef = useRef(true);
   const trackingSizeRef = useRef(QUALITY_PRESETS.balanced.trackingSize);
   const showFaceRef = useRef(showFace);
-  const showPoseRef = useRef(showPose);
   const lastSummaryAtRef = useRef(0);
   const lastCalibrationAtRef = useRef(0);
   const lastCalibrationPhaseRef = useRef<CalibrationCollectorState["phase"]>("idle");
   const motionRef = useRef<CalibrationMotion>(NO_MOTION);
   const expressionRef = useRef<ExpressionMotion | null>(null);
+  const faceFrameRef = useRef<FaceFrameSnapshot | null>(null);
+  const faceLockDebugRef = useRef(false);
   const oralFrameEnabledRef = useRef(false);
   const renderPausedRef = useRef(false);
   const startCalibrationRef = useRef<((mode?: CalibrationMode) => void) | null>(null);
 
   showFaceRef.current = showFace;
-  showPoseRef.current = showPose;
   mirroredRef.current = facing === "user";
 
   /**
@@ -279,7 +221,6 @@ export function useStudioRuntime(): StudioRuntime {
     runtime.scheduler.dispose();
     runtime.camera.dispose();
     runtime.face.dispose();
-    runtime.pose.dispose();
     runtime.oralFrame.width=0;runtime.oralFrame.height=0;
 
     const video = videoRef.current;
@@ -321,7 +262,7 @@ export function useStudioRuntime(): StudioRuntime {
       dispatch({
         type: "FAIL",
         code: "model_load_failed",
-        error: "The face and pose models are not installed in this build. Run `pnpm assets:transformation`.",
+        error: "The face model is not installed in this build. Run `pnpm assets:transformation`.",
       });
       return;
     }
@@ -338,10 +279,9 @@ export function useStudioRuntime(): StudioRuntime {
       return;
     }
 
-    // One clock for both models, so they agree about when a frame was.
+    // One clock for the face model and scheduler frame IDs.
     const clock = new MonotonicClock();
     const face = new FaceTracker({ delegate: capabilities.webGl2 ? "GPU" : "CPU" }, clock);
-    const pose = new SwappablePoseTracker(clock, false);
     const camera = new StudioCamera();
     const calibrationCollector = new CalibrationCollector();
     // One per runtime: it advances once per TRACKER update, never per render.
@@ -351,12 +291,15 @@ export function useStudioRuntime(): StudioRuntime {
     const hybridCoordinator = new HybridCoordinator();
     let lastExpressionTimestamp = Number.NaN;
     let lastEyeProfile: unknown = null;
+    let lastPublishedFaceTimestamp = Number.NaN;
+    let lastPublishedProfile: unknown = null;
+    let nextFaceFrameId = 0;
 
     let lastObservedFaceTimestamp = Number.NaN;
     let trackingLostAt: number | null = null;
     const scheduler = new TrackingScheduler({
       face,
-      pose,
+      pose: DISABLED_POSE_TRACKER,
       cadence: QUALITY_PRESETS[quality],
       prepareFrame: (video) => {
         const width = video.videoWidth;
@@ -376,9 +319,7 @@ export function useStudioRuntime(): StudioRuntime {
         trackingContext.drawImage(video, 0, 0, size.width, size.height);
         return trackingCanvas;
       },
-      onUpdate: ({ face: faceResult, pose: poseResult, stats }) => {
-        drawFrame(faceResult, poseResult);
-
+      onUpdate: ({ face: faceResult, stats }) => {
         const now = performance.now();
 
         // The Face Landmarker is configured for one active controller. If it
@@ -408,7 +349,7 @@ export function useStudioRuntime(): StudioRuntime {
          * "Almost ready…" the moment it is true rather than up to 100ms later.
          */
         if (calibrationCollector.isRunning) {
-          calibrationCollector.accept(faceResult, poseResult, now);
+          calibrationCollector.accept(faceResult, null, now);
           const next = calibrationCollector.getState();
           if (next.phase !== lastCalibrationPhaseRef.current || now - lastCalibrationAtRef.current >= 100) {
             lastCalibrationPhaseRef.current = next.phase;
@@ -420,9 +361,10 @@ export function useStudioRuntime(): StudioRuntime {
         // This is pure arithmetic over results the scheduler already made. It
         // is intentionally outside React so a renderer can consume every
         // tracker update without a second inference loop or 60 renders/sec.
-        const currentMotion = computeRelativeMotion(calibrationCollector.getState().profile, faceResult, poseResult);
+        const profile = calibrationCollector.getState().profile;
+        const currentMotion = computeRelativeMotion(profile, faceResult, null);
         motionRef.current = currentMotion;
-        const eyeProfile = calibrationCollector.getState().profile;
+        const eyeProfile = profile;
         if (lastEyeProfile !== eyeProfile) { eyeFilter.reset(); blinkState.reset(); gazeSmoother.reset(); lastEyeProfile = eyeProfile; lastExpressionTimestamp = Number.NaN; }
         // Pose-only updates may contain the same face result. They must not
         // advance blink velocity or adaptive eye filters a second time.
@@ -470,19 +412,76 @@ export function useStudioRuntime(): StudioRuntime {
         }
         if (calibrationCollector.getState().phase === "ready") renderPausedRef.current = false;
 
+        if (faceResult && (faceResult.timestampMs !== lastPublishedFaceTimestamp || profile !== lastPublishedProfile)) {
+          lastPublishedFaceTimestamp = faceResult.timestampMs;
+          lastPublishedProfile = profile;
+          const trackedHead = faceResult.detected ? currentMotion.head : null;
+          const currentAnchors = faceResult.detected ? stableHeadAnchors(faceResult.landmarks) ?? [] : [];
+          const fit = profile?.face.stableAnchors && currentAnchors.length
+            ? fitStableHeadAnchors(profile.face.stableAnchors, currentAnchors, profile.face.center,
+              trackingCanvas.width / Math.max(1, trackingCanvas.height))
+            : null;
+          const rawScaleRatio = fit?.scale ?? currentMotion.head?.scaleDelta ?? null;
+          const frameId = faceResult.frameId ?? ++nextFaceFrameId;
+          const viewportTransform = geometry();
+          const viewportPlacement = faceResult.detected && faceResult.derived
+            ? mapFacePlacementToDisplay(faceResult.derived, viewportTransform)
+            : null;
+          faceFrameRef.current = {
+            frameId,
+            timestampMs: faceResult.timestampMs,
+            trackingTimestampMs: stats.faceEndMs ?? now,
+            landmarks: faceResult.landmarks,
+            rawGlobalTransform: currentMotion.head,
+            // Screen placement and scale come from this raw camera frame. The
+            // calibration fit remains available as a size reference only.
+            globalTransform: trackedHead,
+            globalCenter: faceResult.detected ? faceResult.derived?.center ?? null : null,
+            viewportPlacement,
+            referenceCenter: profile?.face.center ?? null,
+            referenceScale: profile?.face.scale ?? null,
+            rawFaceScale: profile?.face.scale !== undefined && rawScaleRatio !== null
+              ? profile.face.scale * rawScaleRatio
+              : null,
+            trackingAspect: profile && profile.trackingSpace.height > 0
+              ? profile.trackingSpace.width / profile.trackingSpace.height
+              : trackingCanvas.width / Math.max(1, trackingCanvas.height),
+            rawScaleRatio,
+            expressionState: expressionRef.current,
+            stableAnchors: currentAnchors,
+            referenceAnchors: profile?.face.stableAnchors ?? [],
+            projectedReferenceAnchors: fit?.projectedReference ?? [],
+            livePlacement: {
+              frameId,
+              timestampMs: faceResult.timestampMs,
+              center: faceResult.detected ? faceResult.derived?.center ?? null : null,
+              width: faceResult.detected && faceResult.derived ? faceResult.derived.bounds.maxX - faceResult.derived.bounds.minX : null,
+              height: faceResult.detected && faceResult.derived ? faceResult.derived.bounds.maxY - faceResult.derived.bounds.minY : null,
+              scale: faceResult.detected ? rawScaleRatio : null,
+              roll: trackedHead?.rollDelta ?? null,
+              yaw: trackedHead?.yawDelta ?? null,
+              pitch: trackedHead?.pitchDelta ?? null,
+              mirrored: viewportTransform.mirrored,
+              devicePixelRatio: window.devicePixelRatio || 1,
+              viewportTransform,
+              viewport: viewportPlacement,
+            },
+          };
+        }
+        drawFrame(faceResult);
+
         // React sees the rest a few times a second, not every frame.
         if (now - lastSummaryAtRef.current < SUMMARY_INTERVAL_MS) return;
         lastSummaryAtRef.current = now;
 
         setSummary({
           face: faceResult,
-          pose: poseResult,
+          pose: null,
           stats,
-          guidance: describeTracking(faceResult, poseResult, { running: true }),
+          guidance: describeTracking(faceResult, null, { running: true }),
           cameraWidth: cameraSizeRef.current.width,
           cameraHeight: cameraSizeRef.current.height,
           faceInitMs: face.getTimings().initMs,
-          poseInitMs: pose.current.getTimings().initMs,
           // Against whatever baseline exists right now. Null profile gives
           // `NO_MOTION`, which is absent rather than zero.
           motion: currentMotion,
@@ -494,7 +493,6 @@ export function useStudioRuntime(): StudioRuntime {
     const runtime: Runtime = {
       clock,
       face,
-      pose,
       camera,
       scheduler,
       calibration: calibrationCollector,
@@ -506,7 +504,7 @@ export function useStudioRuntime(): StudioRuntime {
     };
     runtimeRef.current = runtime;
 
-    function drawFrame(faceResult: FaceTrackingResult | null, poseResult: PoseTrackingResult | null) {
+    function drawFrame(faceResult: FaceTrackingResult | null) {
       const overlay = overlayRef.current;
       const context = overlay?.getContext("2d");
       if (!overlay || !context) return;
@@ -518,11 +516,13 @@ export function useStudioRuntime(): StudioRuntime {
         overlay.height = backing.height;
       }
 
-      drawTrackingOverlay(context, faceResult, poseResult, {
+      drawTrackingOverlay(context, faceResult, null, {
         geometry: geometry(),
         style: { ...DEFAULT_OVERLAY_STYLE, ratio: backing.ratio },
         showFace: showFaceRef.current,
-        showPose: showPoseRef.current,
+        showPose: false,
+        faceLockDebug: faceLockDebugRef.current ? faceFrameRef.current : null,
+        livePlacement: faceFrameRef.current?.livePlacement ?? null,
       });
     }
 
@@ -532,10 +532,6 @@ export function useStudioRuntime(): StudioRuntime {
         dispatch({ type: "LOAD_MODELS" });
         dispatch({ type: "LOADING_STAGE", stage: "Loading the face model" });
         await face.initialize();
-        if (runtimeRef.current !== runtime) return;
-
-        dispatch({ type: "LOADING_STAGE", stage: "Loading the pose model" });
-        await pose.initialize();
         if (runtimeRef.current !== runtime) return;
 
         dispatch({ type: "RUNTIME_READY" });
@@ -611,7 +607,7 @@ export function useStudioRuntime(): StudioRuntime {
    * Begins a face-neutral capture after an explicit operator request or when a
    * camera flip / sustained tracking loss changes the active controller.
    */
-  const startCalibration = useCallback((mode: CalibrationMode = "full") => {
+  const startCalibration = useCallback((mode: CalibrationMode = "face-only") => {
     if (trackerLabLeases.current > 0) return;
     const runtime = runtimeRef.current;
     if (!runtime || runtime.camera.state.stream === null) return;
@@ -677,7 +673,7 @@ export function useStudioRuntime(): StudioRuntime {
       dispatch({ type: "PAUSE" });
       setSummary((previous) => ({
         ...previous,
-        guidance: describeTracking(previous.face, previous.pose, { running: false }),
+        guidance: describeTracking(previous.face, null, { running: false }),
       }));
     } else {
       runtime.scheduler.resume();
@@ -765,32 +761,6 @@ export function useStudioRuntime(): StudioRuntime {
     runtimeRef.current?.scheduler.setCadence(QUALITY_PRESETS[mode]);
   }, []);
 
-  const setSegmentation = useCallback((enabled: boolean) => {
-    const runtime = runtimeRef.current;
-    if (!runtime) {
-      setSegmentationState(enabled);
-      return;
-    }
-
-    setSegmentationBusy(true);
-    void runtime.pose
-      .setSegmentation(enabled)
-      .then(() => {
-        if (runtimeRef.current !== runtime) return;
-        setSegmentationState(enabled);
-      })
-      .catch(() => {
-        // The previous task is still running, so the honest outcome is that the
-        // toggle did not move.
-        if (runtimeRef.current !== runtime) return;
-        setSegmentationState(runtime.pose.segmentationEnabled);
-      })
-      .finally(() => {
-        if (runtimeRef.current !== runtime) return;
-        setSegmentationBusy(false);
-      });
-  }, []);
-
   /** Keeps the cached display size current without measuring inside the loop. */
   useEffect(() => {
     const video = videoRef.current;
@@ -844,13 +814,12 @@ export function useStudioRuntime(): StudioRuntime {
       quality,
       facing,
       showFace,
-      showPose,
-      segmentation,
-      segmentationBusy,
       calibration,
       calibrationInvalidation,
       motionRef,
       expressionRef,
+      faceFrameRef,
+      faceLockDebugRef,
       oralFrameEnabledRef,
       renderPausedRef,
       videoRef,
@@ -861,8 +830,6 @@ export function useStudioRuntime(): StudioRuntime {
       flipCamera,
       setQuality,
       setShowFace,
-      setShowPose,
-      setSegmentation,
       startCalibration,
       cancelCalibration,
       clearCalibration,
@@ -875,20 +842,18 @@ export function useStudioRuntime(): StudioRuntime {
       quality,
       facing,
       showFace,
-      showPose,
-      segmentation,
-      segmentationBusy,
       calibration,
       calibrationInvalidation,
       motionRef,
       expressionRef,
+      faceFrameRef,
+      faceLockDebugRef,
       renderPausedRef,
       start,
       stop,
       togglePause,
       flipCamera,
       setQuality,
-      setSegmentation,
       startCalibration,
       cancelCalibration,
       clearCalibration,

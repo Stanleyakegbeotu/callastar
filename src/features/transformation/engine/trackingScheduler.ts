@@ -83,7 +83,7 @@ export interface TrackingSnapshot {
  */
 export interface SchedulableTracker<TResult> {
   readonly ready: boolean;
-  detect(frame: CanvasImageSource, timestampMs: number): TResult;
+  detect(frame: CanvasImageSource, timestampMs: number, frameId?: number): TResult;
 }
 
 export interface TrackingSchedulerOptions {
@@ -154,6 +154,7 @@ export class TrackingScheduler {
 
   private cadence: SchedulerCadence;
   private frameIndex = 0;
+  private cameraFrameId = 0;
 
   private lastFace: FaceTrackingResult | null = null;
   private lastPose: PoseTrackingResult | null = null;
@@ -362,6 +363,7 @@ export class TrackingScheduler {
 
     this.busy = true;
     this.frameIndex += 1;
+    const frameId = ++this.cameraFrameId;
 
     try {
       let ranSomething = false;
@@ -369,7 +371,7 @@ export class TrackingScheduler {
       if (this.options.face.ready && this.frameIndex % this.cadence.faceInterval === 0) {
         const started = this.now();
         this.faceStartMs = started;
-        this.lastFace = this.options.face.detect(frame, timestampMs);
+        this.lastFace = { ...this.options.face.detect(frame, timestampMs, frameId), frameId };
         this.faceEndMs = this.now();
         this.cameraToFaceMs = this.faceEndMs - loopStart;
         this.faceMs.add(this.faceEndMs - started);
@@ -381,7 +383,7 @@ export class TrackingScheduler {
       if (this.options.pose.ready && this.frameIndex % this.cadence.poseInterval === 0) {
         const started = this.now();
         this.poseStartMs = started;
-        this.lastPose = this.options.pose.detect(frame, timestampMs);
+        this.lastPose = { ...this.options.pose.detect(frame, timestampMs, frameId), frameId };
         this.poseEndMs = this.now();
         this.poseMs.add(this.poseEndMs - started);
         this.counts.poseInferences += 1;

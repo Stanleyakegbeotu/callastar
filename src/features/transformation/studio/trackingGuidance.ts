@@ -15,7 +15,7 @@ import type { PoseTrackingResult } from "../engine/poseTypes";
  */
 
 export type TrackingQuality =
-  /** Face and shoulders both solid. */
+  /** Face landmarks are stable. */
   | "good"
   /** Usable, but something is worth correcting. */
   | "fair"
@@ -65,14 +65,14 @@ export const MAX_COMFORTABLE_YAW = 0.6;
 const IDLE: TrackingGuidance = {
   quality: "idle",
   label: "Not tracking",
-  detail: "Start the camera to see live face and shoulder tracking.",
+  detail: "Start the camera to activate face tracking.",
 };
 
 /**
  * The guidance for one frame.
  *
  * Ordered by what most needs saying: no face at all beats a face that is merely
- * badly framed, and framing beats a missing shoulder. Only one sentence is shown
+ * badly framed. Only one sentence is shown
  * at a time, so the order decides which problem the operator fixes first.
  */
 export function describeTracking(
@@ -125,27 +125,7 @@ export function describeTracking(
     }
   }
 
-  // The face is fine, so anything remaining is about the shoulders. A missing
-  // pose is common and unalarming: it usually means the camera is cropped close.
-  const trackability = pose?.derived?.trackability ?? (pose?.detected ? "partial" : "lost");
-
-  if (trackability === "lost") {
-    return {
-      quality: "fair",
-      label: "Face only",
-      detail: "Move back slightly so your shoulders are visible.",
-    };
-  }
-
-  if (trackability === "partial") {
-    return {
-      quality: "fair",
-      label: "One shoulder",
-      detail: "Centre yourself so both shoulders are in frame.",
-    };
-  }
-
-  return { quality: "good", label: "Tracking", detail: "Face and shoulders are tracking steadily." };
+  return { quality: "good", label: "Tracking", detail: "Face tracking active." };
 }
 
 /**

@@ -18,7 +18,7 @@ import { deriveStudioSteps } from "./studioSteps";
 import { useSourceSelection } from "./useSourceSelection";
 import { useStudioRuntime } from "./useStudioRuntime";
 import { usePreviewExpansion } from "./usePreviewExpansion";
-import type { FaceRendererStats } from "../engine/rendering/FaceRenderer";
+import type { FaceRendererStats, FaceRootMotionDebug } from "../engine/rendering/FaceRenderer";
 import type { OralInteriorMode } from '../engine/rendering/liveMouthCompositor';
 import type { FaceRenderFraming } from "../engine/rendering/faceFraming";
 import { NEUTRAL_FACE_RENDER_POSE, type FaceRenderPose } from '../engine/rendering/faceRendererMath';
@@ -30,6 +30,7 @@ import { AvatarPanel } from "./components/AvatarPanel";
 
 /** `avatar` is the experimental 3D path; `face` is the existing M7/M8 renderer. */
 type PreviewMode = "raw" | "face" | "avatar";
+type FaceDebugView = "final" | "overlay" | "compare" | "tracking-alignment" | "mask" | "boundaries" | "weights" | "face-lock";
 const TrackerLab = lazy(() => import('../tracking/TrackerLab'));
 
 /**
@@ -59,6 +60,11 @@ export function TransformationStudioPage() {
   }, [runtime.state.camera]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("raw");
+  const [faceDebugView, setFaceDebugView] = useState<FaceDebugView>("final");
+  runtime.faceLockDebugRef.current = import.meta.env.DEV && (faceDebugView === "face-lock" || faceDebugView === "compare" || faceDebugView === "tracking-alignment");
+  const [faceRootDebug, setFaceRootDebug] = useState<FaceRootMotionDebug>({ mode: "tracking", x: 0, y: 0, scale: 1, rollDeg: 0 });
+  const faceRootDebugRef = useRef<FaceRootMotionDebug | null>(null);
+  faceRootDebugRef.current = import.meta.env.DEV ? faceRootDebug : null;
   const [rendererStats, setRendererStats] = useState<FaceRendererStats | null>(null);
   const [avatarStats, setAvatarStats] = useState<AvatarRendererStats | null>(null);
   const [avatarManualEnabled, setAvatarManualEnabled] = useState(false);
@@ -144,8 +150,15 @@ export function TransformationStudioPage() {
   }, [previewMode]);
 
   useEffect(() => {
-    rendererRef.current?.setDiagnostics({ showMesh, wireframe });
-  }, [showMesh, wireframe]);
+    rendererRef.current?.setDiagnostics({
+      showMesh,
+      wireframe,
+      showMask: import.meta.env.DEV && faceDebugView === "mask",
+      showBoundaries: import.meta.env.DEV && faceDebugView === "boundaries",
+      showWeights: import.meta.env.DEV && faceDebugView === "weights",
+      showFaceLockDebug: import.meta.env.DEV && (faceDebugView === "face-lock" || faceDebugView === "compare" || faceDebugView === "tracking-alignment"),
+    });
+  }, [showMesh, wireframe, faceDebugView]);
 
   const canRenderFace = !trackerLabOpen && source.stage === "ready" && !!source.profile && !!source.asset &&
     (runtime.calibration.phase === "ready" || (previewMode === "face" && rendererRef.current !== null));
@@ -179,6 +192,8 @@ export function TransformationStudioPage() {
         oralInteriorMode: oralInteriorModeRef,
         motion: runtime.motionRef,
         expression: runtime.expressionRef,
+        faceFrame: runtime.faceFrameRef,
+        rootMotionDebug: faceRootDebugRef,
         manualExpression: manualExpressionRef,
         manualPose: manualHeadRef,
         paused: runtime.renderPausedRef,
@@ -214,7 +229,7 @@ export function TransformationStudioPage() {
       cleanupResize();
       disposeCurrent();
     };
-  }, [previewMode, canRenderFace, source.asset, source.profile, runtime.motionRef, runtime.expressionRef, runtime.renderPausedRef, runtime.facing]);
+      }, [previewMode, canRenderFace, source.asset, source.profile, runtime.motionRef, runtime.expressionRef, runtime.faceFrameRef, runtime.renderPausedRef, runtime.facing]);
 
   /*
    * Read-through refs, so the avatar renderer needs no loop of its own.
@@ -398,6 +413,41 @@ export function TransformationStudioPage() {
    */
   const outputLayout = (previewMode === "face" && rendererStats?.status !== "failed") || previewMode === "avatar";
   const sourceLayout = outputLayout ? "is-decoder" : isLive ? "is-thumbnail" : "is-full";
+  const rootFrame = rendererStats?.faceFrame ?? null;
+  const rootProbe = rendererStats?.attachmentProbe ?? null;
+  const rootModeLabel = faceRootDebug.mode === "tracking"
+    ? "LIVE TRACKING"
+    : faceRootDebug.mode === "raw-direct" ? "RAW DIRECT"
+    : faceRootDebug.mode === "manual" ? "MANUAL ROOT" : "FORCED OSCILLATOR";
+  const rootOverrideActive = faceRootDebug.mode === "manual" || faceRootDebug.mode === "oscillator";
+  const rootNumber = (value: number | null | undefined) => Number.isFinite(value) ? value!.toFixed(3) : "—";
+  const rootCanvas = rendererCanvasRef.current;
+  const rootWidth = rootCanvas?.clientWidth ?? 0;
+  const rootHeight = rootCanvas?.clientHeight ?? 0;
+  const rootAspect = rootHeight > 0 ? rootWidth / rootHeight : 0;
+  const renderedCenter = rootProbe?.rootPosition && rootHeight > 0
+    ? {
+        x: runtime.facing === "user"
+          ? rootWidth - (rootProbe.rootPosition.x + rootAspect) * rootHeight / 2
+          : (rootProbe.rootPosition.x + rootAspect) * rootHeight / 2,
+        y: (1 - rootProbe.rootPosition.y) * rootHeight / 2,
+      }
+    : null;
+  const centerErrorX = renderedCenter && rootFrame?.viewportPlacement ? renderedCenter.x - rootFrame.viewportPlacement.center.x : null;
+  const centerErrorY = renderedCenter && rootFrame?.viewportPlacement ? renderedCenter.y - rootFrame.viewportPlacement.center.y : null;
+  const scaleErrorPx = rootFrame?.viewportPlacement && rendererStats ? rendererStats.faceWidthPx - rootFrame.viewportPlacement.width : null;
+  const scaleErrorRatio = rootFrame?.viewportPlacement?.width && rendererStats
+    ? rendererStats.faceWidthPx / rootFrame.viewportPlacement.width - 1
+    : null;
+  const rollErrorDeg = rootFrame?.livePlacement?.roll !== null && rootFrame?.livePlacement?.roll !== undefined && rootProbe?.rootLocal
+    ? (rootProbe.rootLocal.roll - rootFrame.livePlacement.roll) * 180 / Math.PI
+    : null;
+  const anchorBounds = (rootFrame?.stableAnchors ?? []).reduce<{
+    minX: number; maxX: number; minY: number; maxY: number;
+  } | null>((bounds, point) => bounds ? {
+    minX: Math.min(bounds.minX, point.x), maxX: Math.max(bounds.maxX, point.x),
+    minY: Math.min(bounds.minY, point.y), maxY: Math.max(bounds.maxY, point.y),
+  } : { minX: point.x, maxX: point.x, minY: point.y, maxY: point.y }, null);
 
   return (
     <div className="studio-page">
@@ -411,7 +461,7 @@ export function TransformationStudioPage() {
       <div className="studio-layout">
         <section ref={stageRef} className={`studio-stage ${preview.expanded ? "is-expanded" : ""}`} aria-label="Camera preview">
           <div
-            className={`studio-viewport ${runtime.facing === "user" ? "is-mirrored" : ""} ${previewMode === "face" ? "is-face-render-preview" : ""} ${outputLayout && isLive ? "is-output-preview" : ""}`}
+            className={`studio-viewport ${runtime.facing === "user" ? "is-mirrored" : ""} ${previewMode === "face" ? "is-face-render-preview" : ""} ${previewMode === "face" && faceDebugView === "overlay" ? "is-overlay-only" : ""} ${previewMode === "face" && (faceDebugView === "compare" || faceDebugView === "tracking-alignment") ? "is-placement-compare" : ""} ${outputLayout && isLive ? "is-output-preview" : ""}`}
             data-layout={outputLayout ? "output" : "camera"}
           >
             <video
@@ -445,19 +495,39 @@ export function TransformationStudioPage() {
                 {sourceLayout === "is-thumbnail" && <span className="studio-source-label">Source</span>}
               </div>
             )}
-            <canvas ref={rendererCanvasRef} className={`studio-face-renderer ${previewMode === "face" ? "is-visible" : ""}`} aria-label="Experimental face renderer preview" />
+            <canvas ref={rendererCanvasRef} className={`studio-face-renderer is-face-overlay ${previewMode === "face" ? "is-visible" : ""}`} aria-label="Experimental face renderer preview" />
             <canvas
               ref={avatarCanvasRef}
               className={`studio-face-renderer ${previewMode === "avatar" ? "is-visible" : ""}`}
               aria-label="Experimental 3D avatar preview"
             />
 
+            {import.meta.env.DEV && previewMode === "face" && rendererStats?.status !== "failed" && (
+              <div className="studio-root-hud" data-testid="face-root-hud" aria-label="Live face root diagnostics">
+                <div className="studio-root-hud-mode">
+                  <span>ROOT MODE</span>
+                  <strong>{rootModeLabel}</strong>
+                  {rootOverrideActive && <em>Developer override active</em>}
+                </div>
+                <div className="studio-root-hud-metrics">
+                  <span><b>FACE</b>{summary.face?.detected ? "Yes" : "No"}</span>
+                  <span><b>RAW X</b>{rootNumber(rootFrame?.globalCenter?.x)}</span>
+                  <span><b>RAW Y</b>{rootNumber(rootFrame?.globalCenter?.y)}</span>
+                  <span><b>RAW SCALE</b>{rootNumber(rootFrame?.rawScaleRatio)}</span>
+                  <span><b>ROOT X</b>{rootNumber(rootProbe?.rootPosition?.x)}</span>
+                  <span><b>ROOT Y</b>{rootNumber(rootProbe?.rootPosition?.y)}</span>
+                  <span><b>ROOT SCALE</b>{rootNumber(rootProbe?.rootScale)}</span>
+                  <span><b>TRACKING FPS</b>{summary.stats?.faceFps?.toFixed(1) ?? "—"}</span>
+                </div>
+              </div>
+            )}
+
             {isIdle && !source.previewUrl && (
               <div className="studio-placeholder">
                 <Icon name="camera" className="size-8" />
                 <h2>Live tracking preview</h2>
                 <p>
-                  Starts the camera on this device, loads the face and pose models, and draws what they see.
+                  Starts the camera on this device and loads the face model. Face landmarks and expressions stay on this device.
                   Nothing is uploaded, stored or sent anywhere.
                 </p>
                 <button type="button" className="studio-primary" onClick={runtime.start}>
@@ -484,16 +554,10 @@ export function TransformationStudioPage() {
               </div>
             )}
 
-            {/*
-              * A restrained framing guide: one soft oval where a head belongs,
-              * and a line where shoulders do. No scanning grid, no reticle —
-              * this is somebody being asked to sit still for a second, not a
-              * biometric enrolment, and it must not look like one.
-              */}
+            {/* A simple face guide during the explicit face-only calibration. */}
             {calibrating && (
               <div className="studio-calibration-guide" aria-hidden="true">
                 <span className="studio-guide-face" />
-                {calibration.mode === "full" && <span className="studio-guide-shoulders" />}
               </div>
             )}
 
@@ -531,6 +595,131 @@ export function TransformationStudioPage() {
               </div>
             )}
           </div>
+
+          {import.meta.env.DEV && previewMode === "face" && rendererStats?.status !== "failed" && (
+            <details className="studio-root-dev-panel" data-testid="face-root-debug-panel">
+              <summary>
+                <span>Face Tracking Debug</span>
+                <strong data-testid="face-root-mode-indicator">ROOT MODE: {rootModeLabel}</strong>
+              </summary>
+              <div className="studio-root-dev-content">
+                <section className="studio-root-debug-group" aria-label="Face root mode">
+                  <h3>Face Root Mode</h3>
+                  <label className="studio-root-mode-select">Mode
+                    <select aria-label="Face root test mode" value={faceRootDebug.mode}
+                      onChange={(event) => setFaceRootDebug(value => ({ ...value, mode: event.target.value as FaceRootMotionDebug["mode"] }))}>
+                      <option value="tracking">Live Tracking</option>
+                      <option value="raw-direct">Raw Direct</option>
+                      <option value="manual">Manual Root</option>
+                      <option value="oscillator">Forced Oscillator</option>
+                    </select>
+                  </label>
+                  {rootOverrideActive && <p className="studio-root-override-warning" role="status">Developer override active — natural live tracking is overridden.</p>}
+                </section>
+
+                <section className="studio-root-debug-group" aria-label="Manual root controls">
+                  <h3>Manual Root</h3>
+                  {faceRootDebug.mode === "manual" ? <div className="studio-root-manual-grid">
+                    <label>Root X <output>{faceRootDebug.x.toFixed(2)}</output>
+                      <input aria-label="Manual face root X" type="range" min="-0.30" max="0.30" step="0.01" value={faceRootDebug.x}
+                        onChange={(event) => setFaceRootDebug(value => ({ ...value, x: Number(event.target.value) }))} />
+                    </label>
+                    <label>Root Y <output>{faceRootDebug.y.toFixed(2)}</output>
+                      <input aria-label="Manual face root Y" type="range" min="-0.30" max="0.30" step="0.01" value={faceRootDebug.y}
+                        onChange={(event) => setFaceRootDebug(value => ({ ...value, y: Number(event.target.value) }))} />
+                    </label>
+                    <label>Root scale <output>{faceRootDebug.scale.toFixed(2)}×</output>
+                      <input aria-label="Manual face root scale" type="range" min="0.50" max="1.80" step="0.01" value={faceRootDebug.scale}
+                        onChange={(event) => setFaceRootDebug(value => ({ ...value, scale: Number(event.target.value) }))} />
+                    </label>
+                    <label>Root roll <output>{faceRootDebug.rollDeg}°</output>
+                      <input aria-label="Manual face root roll" type="range" min="-30" max="30" step="1" value={faceRootDebug.rollDeg}
+                        onChange={(event) => setFaceRootDebug(value => ({ ...value, rollDeg: Number(event.target.value) }))} />
+                    </label>
+                  </div> : <p className="studio-root-debug-note">Select Manual Root to adjust global X, Y, scale, and roll.</p>}
+                  {faceRootDebug.mode === "oscillator" && <p className="studio-root-debug-note">Tracking placement is bypassed. Root X/Y, scale, and roll cycle continuously.</p>}
+                  <button type="button" className="studio-root-reset" onClick={() => setFaceRootDebug({ mode: "tracking", x: 0, y: 0, scale: 1, rollDeg: 0 })}>RESET ROOT TEST</button>
+                </section>
+
+                <section className="studio-root-debug-group" aria-label="Raw tracking values">
+                  <h3>Raw Tracking</h3>
+                  <dl className="studio-root-value-grid">
+                    <div><dt>Center X</dt><dd>{rootNumber(rootFrame?.globalCenter?.x)}</dd></div>
+                    <div><dt>Center Y</dt><dd>{rootNumber(rootFrame?.globalCenter?.y)}</dd></div>
+                    <div><dt>Face width</dt><dd>{rootNumber(anchorBounds ? anchorBounds.maxX - anchorBounds.minX : null)}</dd></div>
+                    <div><dt>Face height</dt><dd>{rootNumber(anchorBounds ? anchorBounds.maxY - anchorBounds.minY : null)}</dd></div>
+                    <div><dt>Scale ratio</dt><dd>{rootNumber(rootFrame?.rawScaleRatio)}</dd></div>
+                    <div><dt>Raw preview frame</dt><dd>{rootFrame?.frameId ?? "—"}</dd></div>
+                  </dl>
+                </section>
+
+                <section className="studio-root-debug-group" aria-label="Root output values">
+                  <h3>Root Output</h3>
+                  <dl className="studio-root-value-grid">
+                    <div><dt>Root X</dt><dd>{rootNumber(rootProbe?.rootPosition?.x)}</dd></div>
+                    <div><dt>Root Y</dt><dd>{rootNumber(rootProbe?.rootPosition?.y)}</dd></div>
+                    <div><dt>Root scale</dt><dd>{rootNumber(rootProbe?.rootScale)}</dd></div>
+                    <div><dt>Root roll</dt><dd>{rootNumber(rootProbe?.rootLocal?.roll === undefined ? null : rootProbe.rootLocal.roll * 180 / Math.PI)}°</dd></div>
+                    <div><dt>Yaw / pitch</dt><dd>{rootNumber(rootFrame?.globalTransform?.yawDelta === undefined ? null : rootFrame.globalTransform.yawDelta * 180 / Math.PI)}° / {rootNumber(rootFrame?.globalTransform?.pitchDelta === undefined ? null : rootFrame.globalTransform.pitchDelta * 180 / Math.PI)}°</dd></div>
+                    <div><dt>Center error X / Y</dt><dd>{rootNumber(centerErrorX)} px / {rootNumber(centerErrorY)} px</dd></div>
+                    <div><dt>Scale error</dt><dd>{rootNumber(scaleErrorRatio === null ? null : scaleErrorRatio * 100)}%</dd></div>
+                    <div><dt>Width error</dt><dd>{rootNumber(scaleErrorPx)} px</dd></div>
+                    <div><dt>Roll error</dt><dd>{rootNumber(rollErrorDeg)}°</dd></div>
+                  </dl>
+                </section>
+
+                <section className="studio-root-debug-group" aria-label="Frame state values">
+                  <h3>Frame State</h3>
+                  <dl className="studio-root-value-grid">
+                    <div><dt>Camera frame ID</dt><dd>{summary.face?.frameId ?? "—"}</dd></div>
+                    <div><dt>Tracking frame ID</dt><dd>{rootFrame?.frameId ?? "—"}</dd></div>
+                    <div><dt>Render root frame ID</dt><dd>{rendererStats?.faceFrame?.frameId ?? "—"}</dd></div>
+                    <div><dt>Root update count</dt><dd>{rendererStats?.frames ?? 0}</dd></div>
+                    <div><dt>Expression update count</dt><dd>{summary.stats?.faceInferences ?? 0}</dd></div>
+                    <div><dt>Tracking FPS</dt><dd>{summary.stats?.faceFps?.toFixed(1) ?? "—"}</dd></div>
+                  </dl>
+                </section>
+
+                <section className="studio-root-debug-group" aria-label="Tracking alignment" data-tracking-alignment>
+                  <h3>Tracking Alignment</h3>
+                  <p className="studio-root-debug-note">Raw face contour is cyan/white; rendered source contour is magenta. Errors compare six matching MediaPipe vertices.</p>
+                  {rendererStats?.contourAlignment?.length ? rendererStats.contourAlignment.map(sample => (
+                    <div className="studio-root-alignment-row" key={sample.region} data-alignment-region={sample.region}>
+                      <strong>{sample.region}</strong>
+                      <span>LIVE ({sample.live.x.toFixed(1)}, {sample.live.y.toFixed(1)})</span>
+                      <span>RENDER ({sample.rendered.x.toFixed(1)}, {sample.rendered.y.toFixed(1)})</span>
+                      <b>ERROR {sample.errorPx.toFixed(1)} px</b>
+                    </div>
+                  )) : <p className="studio-root-debug-note">Waiting for a detected face frame.</p>}
+                </section>
+
+                <details className="studio-root-advanced-debug">
+                  <summary>Advanced Debug</summary>
+                  <div className="studio-root-advanced-content">
+                    <p>Frame {rootFrame?.frameId ?? "—"} · video {rootFrame ? rootNumber(rootFrame.timestampMs) : "—"} ms · tracking {rootFrame ? rootNumber(rootFrame.trackingTimestampMs) : "—"} ms</p>
+                    <p>Stable anchors {rootFrame?.stableAnchors.length ?? 0} · calibrated anchors {rootFrame?.referenceAnchors.length ?? 0} · center ({rootNumber(rootFrame?.globalCenter?.x)}, {rootNumber(rootFrame?.globalCenter?.y)})</p>
+                    <p>Root matrix: <code>{rootProbe?.rootMatrix?.map(value => value.toFixed(3)).join(", ") ?? "unavailable"}</code></p>
+                    <p>Stable anchors: <code>{rootFrame?.stableAnchors.map(point => `(${point.x.toFixed(3)}, ${point.y.toFixed(3)})`).join(" ") || "unavailable"}</code></p>
+                    <p>Reference anchors: <code>{rootFrame?.referenceAnchors.map(point => `(${point.x.toFixed(3)}, ${point.y.toFixed(3)})`).join(" ") || "unavailable"}</code></p>
+                    {rootProbe && (() => {
+                      const point = (value: { x: number; y: number; z?: number } | null) => value
+                        ? `(${value.x.toFixed(3)}, ${value.y.toFixed(3)}${value.z === undefined ? "" : `, ${value.z.toFixed(3)}`})`
+                        : "unavailable";
+                      return <div className="studio-root-world-diagnostics" data-face-root-world
+                        data-root-x={rootProbe.rootLocal?.x ?? ""} data-root-y={rootProbe.rootLocal?.y ?? ""}
+                        data-root-scale-x={rootProbe.rootLocal?.scaleX ?? ""} data-root-scale-y={rootProbe.rootLocal?.scaleY ?? ""}
+                        data-root-roll={rootProbe.rootLocal?.roll ?? ""} data-root-matrix-world={rootProbe.rootMatrix?.join(",") ?? ""}>
+                        <p>ROOT LOCAL: {point(rootProbe.rootLocal)} · scale ({rootProbe.rootLocal?.scaleX.toFixed(3)}, {rootProbe.rootLocal?.scaleY.toFixed(3)}) · roll {rootProbe.rootLocal?.roll.toFixed(3)} · matrixAutoUpdate {String(rootProbe.rootLocal?.matrixAutoUpdate)}</p>
+                        <p>SKIN WORLD CENTER: {point(rootProbe.skinWorldCenter)} · EYE WORLD CENTER: {point(rootProbe.eyeWorldCenter)} · CHILD {rootProbe.childWorldPosition?.name ?? "—"} WORLD: {point(rootProbe.childWorldPosition)}</p>
+                        <p>Hierarchy: {rootProbe.sceneHierarchy?.name} ({rootProbe.sceneHierarchy?.type}) → {rootProbe.sceneHierarchy?.children.map(child => `${child.name} (${child.type})`).join(" · ")}</p>
+                        <p>Root links · skin {String(rootProbe.skinIsRootChild)} · eye pixels {String(rootProbe.eyePixelsShareRoot)} · mask geometry {String(rootProbe.maskSharesFaceGeometry)} · nose {String(rootProbe.noseSharesRoot)} · mouth {String(rootProbe.mouthSharesRoot)}</p>
+                      </div>;
+                    })()}
+                  </div>
+                </details>
+              </div>
+            </details>
+          )}
 
           {/*
             * With a source showing, the camera control moves below the stage.
@@ -604,6 +793,22 @@ export function TransformationStudioPage() {
             {rendererStats?.status === "failed" && <p className="studio-alert" role="alert">{rendererStats.message ?? "Face renderer unavailable."} The camera and tracker are still running.</p>}
             {previewMode === "face" && rendererStats?.status !== "failed" && (
               <div className="studio-render-options">
+                {import.meta.env.DEV && (
+                  <label className="studio-composite-debug">Composite view
+                    <select className="studio-composite-debug-select" aria-label="Developer composite view" value={faceDebugView} onChange={(event) => setFaceDebugView(event.target.value as FaceDebugView)}>
+                      <option value="final">Camera + transformed face</option>
+                      <option value="overlay">Face overlay only</option>
+                      <option value="compare">Overlay Compare (raw + rendered)</option>
+                      <option value="tracking-alignment">Tracking Alignment</option>
+                      <option value="mask">Face mask</option>
+                      <option value="boundaries">Topology boundaries</option>
+                      <option value="weights">Alpha weights</option>
+                      <option value="face-lock">Face lock</option>
+                    </select>
+                    {faceDebugView === "boundaries" && <small aria-label="Topology boundary legend">Outer yellow · left eye cyan · right eye magenta · mouth orange</small>}
+                    {faceDebugView === "face-lock" && <small aria-label="Face lock legend">Cyan anchors = live · magenta rings = calibrated fit · white = live contour · cyan/magenta WebGL contours = shared face/mask root</small>}
+                  </label>
+                )}
                 <label><input type="checkbox" checked={showMesh} onChange={(event) => setShowMesh(event.target.checked)} /> Show mesh</label>
                 <label><input type="checkbox" checked={wireframe} onChange={(event) => setWireframe(event.target.checked)} /> Wireframe</label>
               </div>
@@ -740,26 +945,7 @@ export function TransformationStudioPage() {
               />
               <span>Face mesh</span>
             </label>
-            <label className="studio-switch">
-              <input
-                type="checkbox"
-                checked={runtime.showPose}
-                onChange={(event) => runtime.setShowPose(event.target.checked)}
-              />
-              <span>Shoulders and torso</span>
-            </label>
-            <label className="studio-switch">
-              <input
-                type="checkbox"
-                checked={runtime.segmentation}
-                disabled={runtime.segmentationBusy || !isLive}
-                onChange={(event) => runtime.setSegmentation(event.target.checked)}
-              />
-              <span>
-                Segmentation
-                {runtime.segmentationBusy && <em> — rebuilding pose task…</em>}
-              </span>
-            </label>
+            <p className="studio-note">Face-only mode is active. Pose inference and body overlays are disabled.</p>
           </section>
 
           <section className="studio-card">
@@ -797,7 +983,6 @@ export function TransformationStudioPage() {
               <StudioDiagnostics
                 summary={summary}
                 quality={runtime.quality}
-                segmentation={runtime.segmentation}
                 calibration={calibration}
               />
               {previewMode === "face" && rendererStats && (
@@ -807,6 +992,25 @@ export function TransformationStudioPage() {
                   <p>AUTO preserves the source interior at rest and reveals live teeth and tongue when the aperture opens beyond it. LIVE always uses the camera interior while open; SOURCE keeps the photograph.</p>
                   <p data-metric="live-mouth">Mouth feed {rendererStats.mouthFeedOpacity && rendererStats.mouthFeedOpacity > 0.01 ? "active" : "off"} · opacity {(rendererStats.mouthFeedOpacity ?? 0).toFixed(2)}</p>
                   <p>Mesh {rendererStats.meshVertices ?? 0} vertices / {rendererStats.meshTriangles ?? 0} triangles · depth {rendererStats.depthRange?.toFixed(3)} · DPR {rendererStats.dpr?.toFixed(1)} · WebGL {rendererStats.status} · context losses {rendererStats.contextLossCount ?? 0}</p>
+                  {import.meta.env.DEV && rendererStats.boundaryLoops?.map(loop => (
+                    <p key={loop.id} data-metric={`boundary-loop-${loop.id}`}>
+                      Boundary {loop.id} · {loop.kind} · {loop.vertices.length} vertices · centroid ({loop.centroid.x.toFixed(3)}, {loop.centroid.y.toFixed(3)}) · bounds [{loop.bounds.minX.toFixed(3)}, {loop.bounds.minY.toFixed(3)}]–[{loop.bounds.maxX.toFixed(3)}, {loop.bounds.maxY.toFixed(3)}] · area {loop.area.toFixed(4)} · perimeter {loop.perimeter.toFixed(3)}
+                    </p>
+                  ))}
+                  {import.meta.env.DEV && rendererStats.faceFrame && <p data-metric="face-lock-transform">
+                    Face lock frame {rendererStats.faceFrame.frameId} · video {rendererStats.faceFrame.timestampMs.toFixed(1)} ms · tracking {rendererStats.faceFrame.trackingTimestampMs.toFixed(1)} ms · anchors {rendererStats.faceFrame.stableAnchors.length}/{rendererStats.faceFrame.referenceAnchors.length}
+                    {rendererStats.faceFrame.globalCenter && <> · center ({rendererStats.faceFrame.globalCenter.x.toFixed(3)}, {rendererStats.faceFrame.globalCenter.y.toFixed(3)})</>}
+                  </p>}
+                  {import.meta.env.DEV && rendererStats.faceFrame && (() => {
+                    const frame = rendererStats.faceFrame;
+                    const raw = frame.rawGlobalTransform;
+                    const filtered = frame.globalTransform;
+                    const root = rendererStats.attachmentProbe;
+                    const number = (value: number | null | undefined) => Number.isFinite(value) ? value!.toFixed(3) : "—";
+                    return <p data-metric="live-root-motion">
+                      RAW center ({number(frame.globalCenter?.x)}, {number(frame.globalCenter?.y)}) · reference ({number(frame.referenceCenter?.x)}, {number(frame.referenceCenter?.y)}) · raw/reference scale ({number(frame.rawFaceScale)} / {number(frame.referenceScale)}) · ratio {number(frame.rawScaleRatio)} · raw TX/TY ({number(raw?.translationX)}, {number(raw?.translationY)}) · filtered TX/TY/scale ({number(filtered?.translationX)}, {number(filtered?.translationY)}, {number(filtered?.scaleDelta)}) · root X/Y/scale ({number(root?.rootPosition?.x)}, {number(root?.rootPosition?.y)}, {number(root?.rootScale)})
+                    </p>;
+                  })()}
                   {import.meta.env.DEV && <p>Expression leakage: {rendererStats.expressionLeakage ? 'pitch / brow mismatch detected' : 'not detected'} (diagnostic only)</p>}
                   {source.profile && <p>Source pose: yaw {(source.profile.primaryFace.yaw * 180 / Math.PI).toFixed(1)}°, pitch {(source.profile.primaryFace.pitch * 180 / Math.PI).toFixed(1)}°, roll {(source.profile.primaryFace.roll * 180 / Math.PI).toFixed(1)}° — removed before deformation.
                     {source.profile.baseFrameTime !== undefined && <> Base frame: {source.profile.baseFrameTime.toFixed(2)}s · score {source.profile.baseFrameScore?.toFixed(3)}</>}

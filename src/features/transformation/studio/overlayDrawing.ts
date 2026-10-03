@@ -1,5 +1,7 @@
 import { computeFitRect, mapNormalizedToDisplay, type DisplayGeometry } from "../engine/coordinateMapping";
 import type { FaceTrackingResult } from "../engine/faceTypes";
+import type { FaceFrameSnapshot, LiveFacePlacement } from "../engine/faceFrame";
+import { FACE_RENDER_VERTEX_INDICES } from "../engine/rendering/sourceMesh";
 import { POSE_LANDMARKS } from "../engine/poseGeometry";
 import type { PoseLandmark, PoseTrackingResult } from "../engine/poseTypes";
 
@@ -82,6 +84,8 @@ export interface OverlayOptions {
   showPose: boolean;
   /** Max face dots to draw. The full 478 on a phone is still cheap. */
   faceDotBudget?: number;
+  faceLockDebug?: FaceFrameSnapshot | null;
+  livePlacement?: LiveFacePlacement | null;
 }
 
 /**
@@ -111,9 +115,59 @@ export function drawTrackingOverlay(
     if (options.showPose && pose?.detected) drawPose(context, pose, options);
     // Face last: it is the smaller, more detailed layer and should sit on top.
     if (options.showFace && face?.detected) drawFace(context, face, options);
+    if (options.faceLockDebug) drawFaceLock(context, options.faceLockDebug, options);
   } finally {
     context.restore();
   }
+}
+
+function drawFaceLock(context: CanvasRenderingContext2D, frame: FaceFrameSnapshot, options: OverlayOptions): void {
+  const { geometry, style } = options;
+  const current = frame.stableAnchors;
+  const reference = frame.projectedReferenceAnchors;
+  const map = (point: { x: number; y: number }) => mapNormalizedToDisplay(point, geometry);
+  context.lineWidth = Math.max(1, 1.5 * style.ratio);
+  for (const point of current) {
+    const p = map(point);
+    context.fillStyle = "#00eaff";
+    context.beginPath(); context.arc(p.x, p.y, 3 * style.ratio, 0, Math.PI * 2); context.fill();
+  }
+  for (const point of reference) {
+    const p = map(point);
+    context.strokeStyle = "#ff22c8";
+    context.beginPath(); context.arc(p.x, p.y, 5 * style.ratio, 0, Math.PI * 2); context.stroke();
+  }
+
+  const boundary = FACE_RENDER_VERTEX_INDICES.slice(1).map(index => frame.landmarks[index]).filter((point): point is NonNullable<typeof point> => !!point);
+  if (boundary.length > 2) {
+    context.strokeStyle = "rgba(255,255,255,0.9)";
+    context.lineWidth = 2 * style.ratio;
+    context.beginPath();
+    boundary.forEach((point, index) => {
+      const p = map(point);
+      if (index === 0) context.moveTo(p.x, p.y); else context.lineTo(p.x, p.y);
+    });
+    context.closePath(); context.stroke();
+  }
+
+  if (frame.globalCenter) {
+    const center = frame.livePlacement?.viewport?.center ?? map(frame.globalCenter);
+    const roll = frame.globalTransform?.rollDelta ?? 0;
+    const half = 24 * style.ratio;
+    context.strokeStyle = "#a5ff37";
+    context.lineWidth = 2 * style.ratio;
+    context.beginPath();
+    context.moveTo(center.x - Math.cos(roll) * half, center.y - Math.sin(roll) * half);
+    context.lineTo(center.x + Math.cos(roll) * half, center.y + Math.sin(roll) * half);
+    context.stroke();
+    context.fillStyle = "#a5ff37";
+    context.beginPath(); context.arc(center.x, center.y, 4 * style.ratio, 0, Math.PI * 2); context.fill();
+  }
+  const transform = frame.globalTransform;
+  context.fillStyle = "#fff";
+  context.font = `${12 * style.ratio}px sans-serif`;
+  context.fillText(`frame ${frame.frameId} · ${frame.timestampMs.toFixed(1)} ms · track ${frame.trackingTimestampMs.toFixed(1)} ms`, 8, 18 * style.ratio);
+  context.fillText(`yaw ${(transform?.yawDelta ?? 0).toFixed(3)} · pitch ${(transform?.pitchDelta ?? 0).toFixed(3)} · roll ${(transform?.rollDelta ?? 0).toFixed(3)}`, 8, 34 * style.ratio);
 }
 
 function drawFace(context: CanvasRenderingContext2D, face: FaceTrackingResult, options: OverlayOptions): void {
@@ -137,8 +191,13 @@ function drawFace(context: CanvasRenderingContext2D, face: FaceTrackingResult, o
   const bounds = face.derived?.bounds;
   if (!bounds) return;
 
-  const topLeft = mapNormalizedToDisplay({ x: bounds.minX, y: bounds.minY }, geometry);
-  const bottomRight = mapNormalizedToDisplay({ x: bounds.maxX, y: bounds.maxY }, geometry);
+  const placement = options.livePlacement?.viewport;
+  const topLeft = placement
+    ? { x: placement.left, y: placement.top }
+    : mapNormalizedToDisplay({ x: bounds.minX, y: bounds.minY }, geometry);
+  const bottomRight = placement
+    ? { x: placement.left + placement.width, y: placement.top + placement.height }
+    : mapNormalizedToDisplay({ x: bounds.maxX, y: bounds.maxY }, geometry);
 
   context.strokeStyle = style.faceBounds;
   context.lineWidth = 1.5;

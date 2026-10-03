@@ -204,16 +204,16 @@ export class PoseTracker {
    * result, not an error — the trackability state says which, and the Studio
    * turns that into guidance rather than a failure screen.
    */
-  detect(frame: CanvasImageSource, timestampMs: number): PoseTrackingResult {
+  detect(frame: CanvasImageSource, timestampMs: number, frameId?: number): PoseTrackingResult {
     if (this.disposed || !this.task) {
-      return { ...NO_POSE_RESULT, status: "skipped", timestampMs };
+      return { ...NO_POSE_RESULT, status: "skipped", timestampMs, frameId };
     }
 
     if (this.busy) {
-      return { ...NO_POSE_RESULT, status: "skipped", timestampMs };
+      return { ...NO_POSE_RESULT, status: "skipped", timestampMs, frameId };
     }
 
-    const stamp = this.clock.next(timestampMs);
+    const stamp = this.clock.next(timestampMs, frameId);
     this.busy = true;
     const started = performance.now();
     let raw: MediaPipePoseResult | null = null;
@@ -228,11 +228,12 @@ export class PoseTracker {
 
       const landmarks = copyLandmarks(raw.landmarks?.[0]);
       if (landmarks.length === 0) {
-        return { ...NO_POSE_RESULT, segmentation, timestampMs: stamp };
+        return { ...NO_POSE_RESULT, segmentation, timestampMs: stamp, frameId };
       }
 
       return {
         timestampMs: stamp,
+        frameId,
         status: "tracked",
         detected: true,
         landmarks,
@@ -247,7 +248,7 @@ export class PoseTracker {
       } catch {
         // Nothing further to do.
       }
-      return { ...NO_POSE_RESULT, status: "skipped", timestampMs: stamp };
+      return { ...NO_POSE_RESULT, status: "skipped", timestampMs: stamp, frameId };
     } finally {
       this.busy = false;
     }

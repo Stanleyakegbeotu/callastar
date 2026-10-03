@@ -70,12 +70,12 @@ function makeVideo() {
 
 /** Typed parameters, so the assertions can read back the frame and timestamp. */
 function makeTracker<T>(result: T) {
-  const detect = vi.fn((_frame: CanvasImageSource, _timestampMs: number) => result);
+  const detect = vi.fn((_frame: CanvasImageSource, _timestampMs: number, _frameId?: number) => result);
   return { tracker: { ready: true, detect } as unknown as SchedulableTracker<T>, detect };
 }
 
 function idleTracker<T>() {
-  const detect = vi.fn((_frame: CanvasImageSource, _timestampMs: number) => undefined as T);
+  const detect = vi.fn((_frame: CanvasImageSource, _timestampMs: number, _frameId?: number) => undefined as T);
   return { tracker: { ready: false, detect } as unknown as SchedulableTracker<T>, detect };
 }
 
@@ -120,6 +120,19 @@ function setup(options: { faceInterval?: number; poseInterval?: number } = {}) {
 }
 
 describe("single frame owner", () => {
+  it("stamps both models with one camera-frame id and media timestamp", () => {
+    const { harness, scheduler, face, pose, updates } = setup();
+    scheduler.start(harness.video);
+    harness.deliver(0.125, 1);
+    expect(face.detect.mock.calls[0]?.[1]).toBe(125);
+    expect(pose.detect.mock.calls[0]?.[1]).toBe(125);
+    expect(face.detect.mock.calls[0]?.[2]).toBe(1);
+    expect(pose.detect.mock.calls[0]?.[2]).toBe(1);
+    expect(updates[0]?.face?.frameId).toBe(1);
+    expect(updates[0]?.pose?.frameId).toBe(1);
+    scheduler.dispose();
+  });
+
   it("counts camera frames skipped while synchronous inference occupies the main thread", () => {
     const { harness, scheduler } = setup();
     scheduler.start(harness.video);
@@ -241,7 +254,8 @@ describe("cadence", () => {
     for (let i = 1; i <= 4; i += 1) harness.deliver(i * 0.033);
     expect(updates).toHaveLength(4);
     // The last result is held between inferences rather than going null.
-    expect(updates[3]?.face).toBe(FACE);
+    expect(updates[3]?.face?.status).toBe(FACE.status);
+    expect(updates[3]?.face?.frameId).toBe(updates[2]?.face?.frameId);
 
     scheduler.dispose();
   });

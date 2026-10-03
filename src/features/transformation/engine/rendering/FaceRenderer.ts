@@ -2,6 +2,8 @@ import { loadThreeRenderer } from "../../loaders";
 import type { SourceAsset } from "../../source/sourceAsset";
 import type { TransformationSourceProfile } from "../../source/sourceTypes";
 import type { CalibrationMotion } from "../relativeMotion";
+import type { FaceFrameSnapshot } from "../faceFrame";
+import { mapNormalizedToDisplay } from "../coordinateMapping";
 import {
   clampExpression, deriveExpressionEnvelope, deriveSourceExpression,
   clampExpressionInto, NEUTRAL_EXPRESSION, smoothExpressionInto,
@@ -10,9 +12,11 @@ import {
 } from "../expressionMotion";
 
 import {
+  FACE_RENDER_LIMITS,
   NEUTRAL_FACE_RENDER_POSE,
   poseFromSourceMotion,
   smoothFaceRenderPose,
+  poseFromMotion,
   type FaceRenderPose,
   type FaceRenderPoseResult,
 } from "./faceRendererMath";
@@ -23,7 +27,7 @@ import {
   type RenderMirrorMode,
   type RendererMotion,
 } from "./rendererMotion";
-import { buildSourceFaceMesh } from "./sourceMesh";
+import { buildSourceFaceMesh, type FaceBoundaryLoop } from "./sourceMesh";
 import { faceWorldTransform, meshEyeSpan, type FaceRenderFraming } from "./faceFraming";
 import { ExpressionDeformer } from "./expressionDeformer";
 import { faceWebGLContext, FACE_WEBGL_UNAVAILABLE } from './webglPreflight';
@@ -33,6 +37,7 @@ import { INNER_LIP_RING } from './sourceMesh';
 import { EyeGazeWarper } from "./eyeGazeWarper";
 import { EYE_RENDER_CHANNELS, eyeGazeForRenderer } from '../eyeControls';
 import { noseCavityData, nostrilVisibility } from './noseCavities';
+import { buildProjectionBindings, projectLiveMeshPositions, type ProjectionBinding } from "./liveMeshProjection";
 
 export type FaceRendererStatus = "loading" | "ready" | "lost" | "failed" | "disposed";
 
@@ -45,6 +50,10 @@ export interface FaceRendererStats {
   } | null;
   meshVertices?: number;
   meshTriangles?: number;
+  boundaryLoops?: readonly FaceBoundaryLoop[];
+  faceFrame?: FaceFrameSnapshot | null;
+  attachmentProbe?: ReturnType<FaceRenderer["getAttachmentProbe"]>;
+  contourAlignment?: readonly ContourAlignmentSample[];
   depthRange?: number;
   dpr?: number;
   contextLossCount?: number;
@@ -89,6 +98,25 @@ export interface FaceRendererStats {
   mouthFeedOpacity?: number;
   mouthMeshAperturePx?: { neutral: number; applied: number } | null;
   jawChinMovementPx?: number | null;
+}
+
+export interface ContourAlignmentSample {
+  region: "forehead" | "left-temple" | "right-temple" | "left-cheek" | "right-cheek" | "chin";
+  landmarkIndex: number;
+  live: { x: number; y: number };
+  rendered: { x: number; y: number };
+  errorPx: number;
+}
+
+/** Temporary developer-only override for proving visible root movement. */
+export interface FaceRootMotionDebug {
+  mode: "tracking" | "raw-direct" | "manual" | "oscillator";
+  /** Absolute orthographic world position while mode is manual. */
+  x: number;
+  y: number;
+  /** Multiplier against the calibrated neutral face size. */
+  scale: number;
+  rollDeg: number;
 }
 
 export interface OralDiagnostics {
@@ -137,6 +165,10 @@ export interface FaceRendererOptions {
   /** The tracking loop owns writes to this ref. Rendering never starts inference. */
   motion: { current: CalibrationMotion };
   expression?: { current: ExpressionMotion | null };
+  /** Atomic transform + expression snapshot from one camera inference frame. */
+  faceFrame?: { current: FaceFrameSnapshot | null };
+  /** Developer-only forced/manual placement. A tracking mode leaves live motion untouched. */
+  rootMotionDebug?: { current: FaceRootMotionDebug | null };
   manualExpression?: { current: ExpressionMotion | null };
   manualPose?: { current: FaceRenderPose | null };
   paused?: { current: boolean };
@@ -184,6 +216,9 @@ export class FaceRenderer {
   private renderer: import("three").WebGLRenderer | null = null;
   private scene: import("three").Scene | null = null;
   private camera: import("three").OrthographicCamera | null = null;
+  /** Single placement ancestor of skin/mask, nose and live mouth geometry. */
+  private faceRoot: import("three").Group | null = null;
+  /** Textured skin/mask mesh; eye pixels and gaze UVs are part of this surface. */
   private mesh: import("three").Mesh | null = null;
   private geometry: import("three").BufferGeometry | null = null;
   private material: import("three").MeshBasicMaterial | null = null;
@@ -209,8 +244,16 @@ export class FaceRenderer {
   private meshEdges: import("three").LineSegments | null = null;
   private edgeGeometry: import("three").EdgesGeometry | null = null;
   private edgeMaterial: import("three").LineBasicMaterial | null = null;
+  private boundaryLines: { line: import("three").LineLoop; vertices: number[] }[] = [];
+  private faceLockLines: { line: import("three").LineLoop; vertices: number[] }[] = [];
+  private boundaryLoopStats: FaceBoundaryLoop[] = [];
+  private baseColors: Float32Array | null = null;
+  private showBoundaries = false;
+  private showWeights = false;
+  private showFaceLockDebug = false;
   private wireframe = false;
   private showMesh = false;
+  private showMask = false;
   private deformer: ExpressionDeformer | null = null;
   private gazeWarper: EyeGazeWarper | null = null;
   private lastEyeGaze: import('../eyeGaze').NormalizedGaze | null = null;
@@ -239,6 +282,9 @@ export class FaceRenderer {
   private lastExpressionAt = 0;
   private renderedMotion: RendererMotion | null = null;
   private expressionTrace: ExpressionTrace | null = null;
+  private lastAppliedFaceFrame: FaceFrameSnapshot | null = null;
+  private projectionBindings: ProjectionBinding[] = [];
+  private contourAlignment: ContourAlignmentSample[] = [];
 
   constructor(private readonly options: FaceRendererOptions) {}
 
@@ -277,13 +323,54 @@ export class FaceRenderer {
     }
   }
 
-  setDiagnostics(options: { showMesh: boolean; wireframe: boolean }): void {
+  setDiagnostics(options: { showMesh: boolean; wireframe: boolean; showMask?: boolean; showBoundaries?: boolean; showWeights?: boolean; showFaceLockDebug?: boolean }): void {
     this.showMesh = options.showMesh;
     this.wireframe = options.wireframe;
-    if (this.material) this.material.wireframe = options.wireframe || options.showMesh;
-    if (this.cavityMaterial) this.cavityMaterial.wireframe = options.wireframe || options.showMesh;
+    this.showMask = options.showMask ?? false;
+    this.showBoundaries = options.showBoundaries ?? false;
+    this.showWeights = options.showWeights ?? false;
+    this.showFaceLockDebug = options.showFaceLockDebug ?? false;
+    const showMask = this.showMask || this.showWeights;
+    if (this.material) {
+      this.material.wireframe = options.wireframe || options.showMesh;
+      this.material.map = showMask ? null : this.texture;
+      this.material.needsUpdate = true;
+    }
+    if (this.fillMaterial) {
+      this.fillMaterial.wireframe = options.wireframe || options.showMesh;
+      this.fillMaterial.map = showMask ? null : this.texture;
+      this.fillMaterial.needsUpdate = true;
+    }
+    if (this.cavityMaterial) {
+      this.cavityMaterial.wireframe = options.wireframe || options.showMesh;
+      this.cavityMaterial.color.set(showMask ? 0xffffff : 0x4a1a1e);
+    }
     if (this.mesh) this.mesh.visible = true;
+    if (this.nostrilMesh) this.nostrilMesh.visible = !showMask;
+    if (this.liveMouthMesh) this.liveMouthMesh.visible = !showMask;
     if (this.meshEdges) this.meshEdges.visible = options.showMesh;
+    for (const { line } of this.boundaryLines) line.visible = this.showBoundaries;
+    for (const { line } of this.faceLockLines) line.visible = this.showFaceLockDebug;
+    const color = this.geometry?.getAttribute("color") as import("three").BufferAttribute | undefined;
+    if (color && this.baseColors) {
+      const values = color.array as Float32Array;
+      for (let vertex = 0; vertex < values.length / 4; vertex++) {
+        if (this.showWeights) {
+          const alpha = this.deformer && vertex < this.deformer.basePositions.length / 3
+            ? this.getBoundaryAlpha(vertex) : 1;
+          values[vertex * 4] = 1 - alpha;
+          values[vertex * 4 + 1] = alpha;
+          values[vertex * 4 + 2] = 0;
+          values[vertex * 4 + 3] = 1;
+        } else values.set(this.baseColors.subarray(vertex * 4, vertex * 4 + 4), vertex * 4);
+      }
+      color.needsUpdate = true;
+    }
+  }
+
+  private getBoundaryAlpha(vertex: number): number {
+    // The immutable render alpha is retained alongside its RGBA color.
+    return this.baseColors?.[vertex * 4 + 3] ?? 1;
   }
 
   resize(width: number, height: number, pixelRatio: number): void {
@@ -314,6 +401,17 @@ export class FaceRenderer {
       this.options.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
     }
     this.geometry?.dispose();
+    for (const { line } of this.boundaryLines) {
+      line.geometry.dispose();
+      for (const material of Array.isArray(line.material) ? line.material : [line.material]) material.dispose();
+    }
+    for (const { line } of this.faceLockLines) {
+      line.geometry.dispose();
+      for (const material of Array.isArray(line.material) ? line.material : [line.material]) material.dispose();
+    }
+    this.boundaryLines = [];
+    this.faceLockLines = [];
+    this.boundaryLoopStats = [];
     this.edgeGeometry?.dispose();
     this.edgeMaterial?.dispose();
     this.material?.dispose();
@@ -355,7 +453,9 @@ export class FaceRenderer {
     this.lastEyeGaze = null;
     this.expressionEnvelope = null;
     this.mesh = null;
+    this.faceRoot = null;
     this.meshEdges = null;
+    this.baseColors = null;
     if (this.renderer) {
       this.renderer.dispose();
       // A source switch reuses the mounted canvas/context. Losing that context
@@ -373,12 +473,17 @@ export class FaceRenderer {
     this.renderer = renderer;
     this.options.canvas.addEventListener("webglcontextlost", this.onContextLost);
     this.options.canvas.addEventListener("webglcontextrestored", this.onContextRestored);
-    renderer.setClearColor(0x0f172a, 1);
+    // The live camera is composited underneath this canvas by the Studio. Keep
+    // untouched canvas pixels transparent so a renderer background never
+    // replaces the operator's video.
+    renderer.setClearColor(0x000000, 0);
     const scene = new three.Scene();
     const camera = new three.OrthographicCamera(-1, 1, 1, -1, 0.01, 10);
     camera.position.z = 2;
     const meshData = buildSourceFaceMesh(this.options.profile.primaryFace.landmarks,
       this.options.profile.primaryFace, this.options.profile.dimensions?.aspectRatio ?? 1);
+    this.projectionBindings = buildProjectionBindings(meshData.uvs, this.options.profile.primaryFace.landmarks);
+    this.boundaryLoopStats = meshData.boundaryLoops;
     this.deformer = new ExpressionDeformer(meshData, this.options.profile.primaryFace.landmarks);
     this.gazeWarper = new EyeGazeWarper(meshData.uvs, this.options.profile.primaryFace.landmarks, meshData.eyeInterior);
     this.meshEyeSpan = meshEyeSpan(meshData.positions);
@@ -390,12 +495,21 @@ export class FaceRenderer {
     geometry.setAttribute("uv", new three.BufferAttribute(meshData.uvs.slice(), 2).setUsage(three.DynamicDrawUsage));
     geometry.setIndex(new three.BufferAttribute(meshData.indices, 1));
     const mouth = meshData.mouth;
-    // Cavity shading: the lip-ring edge is lighter than its depth, so an open
-    // mouth reads as a recess rather than a flat patch. Only the cavity
-    // material reads this attribute.
-    const shade = new Float32Array(meshData.positions.length).fill(1);
-    if (mouth) shade.fill(0.35, (mouth.cavityStart + mouth.cavityCount - 1) * 3, (mouth.cavityStart + mouth.cavityCount) * 3);
-    geometry.setAttribute("color", new three.BufferAttribute(shade, 3));
+    // Texture color stays white except for the cavity centroid shading. Alpha
+    // carries the topology-derived face edge ramp, attached to these same
+    // deforming vertices so the live frame shows through the outer contour.
+    const colors = new Float32Array(meshData.positions.length / 3 * 4).fill(1);
+    for (let vertex = 0; vertex < meshData.boundaryAlpha.length; vertex++) {
+      colors[vertex * 4 + 3] = meshData.boundaryAlpha[vertex]!;
+    }
+    if (mouth) {
+      const cavityCenter = (mouth.cavityStart + mouth.cavityCount - 1) * 4;
+      colors[cavityCenter] = 0.35;
+      colors[cavityCenter + 1] = 0.35;
+      colors[cavityCenter + 2] = 0.35;
+    }
+    geometry.setAttribute("color", new three.BufferAttribute(colors, 4));
+    this.baseColors = colors.slice();
     if (mouth) {
       geometry.addGroup(0, mouth.fillIndexStart, 0);
       geometry.addGroup(mouth.cavityIndexStart, mouth.cavityIndexCount, 1);
@@ -408,19 +522,35 @@ export class FaceRenderer {
     texture.wrapS = three.ClampToEdgeWrapping;
     texture.wrapT = three.ClampToEdgeWrapping;
     texture.needsUpdate = true;
-    const material = new three.MeshBasicMaterial({ map: texture, transparent: true, side: three.DoubleSide });
+    const material = new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, side: three.DoubleSide });
     // A fixed dark oral tone: nothing here samples or matches the source's skin.
     const cavityMaterial = mouth
-      ? new three.MeshBasicMaterial({ color: 0x4a1a1e, vertexColors: true, transparent: true, side: three.DoubleSide })
+      ? new three.MeshBasicMaterial({ color: this.showMask ? 0xffffff : 0x4a1a1e, vertexColors: true, transparent: true, side: three.DoubleSide })
       : null;
     const fillMaterial = mouth
-      ? new three.MeshBasicMaterial({ map: texture, transparent: true, side: three.DoubleSide })
+      ? new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, side: three.DoubleSide })
       : null;
+    const faceRoot = new three.Group();
+    faceRoot.name = "CallaStarFaceRoot";
+    faceRoot.matrixAutoUpdate = true;
     const mesh = new three.Mesh(geometry, cavityMaterial && fillMaterial ? [material, cavityMaterial, fillMaterial] : material);
-    // The source's neutral pose is the local mesh. Only relative live motion is applied.
-    scene.add(mesh);
+    mesh.name = "CallaStarFaceSkinMaskEyes";
+    this.boundaryLines = meshData.boundaryLoops.map(loop => this.createBoundaryLine(loop, meshData))
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    for (const { line } of this.boundaryLines) { line.visible = this.showBoundaries; mesh.add(line); }
+    const outerBoundary = meshData.boundaryLoops.find(loop => loop.kind === "outer");
+    this.faceLockLines = outerBoundary ? [
+      this.createBoundaryLine(outerBoundary, meshData, 0x00eaff, 5, 0.85, 8),
+      this.createBoundaryLine(outerBoundary, meshData, 0xff22c8, 2, 0.9, 9),
+    ].filter((entry): entry is NonNullable<typeof entry> => entry !== null) : [];
+    for (const { line } of this.faceLockLines) { line.visible = this.showFaceLockDebug; mesh.add(line); }
+    // The source geometry is canonical/local. One explicit Object3D owns every
+    // global placement transform; the skin/mask surface remains its child.
+    faceRoot.add(mesh);
+    scene.add(faceRoot);
     this.scene = scene;
     this.camera = camera;
+    this.faceRoot = faceRoot;
     this.geometry = geometry;
     this.texture = texture;
     this.material = material;
@@ -431,7 +561,7 @@ export class FaceRenderer {
     if(nose){
       const g=new three.BufferGeometry();g.setAttribute('position',new three.BufferAttribute(nose.positions,3));g.setAttribute('color',new three.BufferAttribute(nose.colors,3));g.setIndex(new three.BufferAttribute(nose.indices,1));
       const m=new three.MeshBasicMaterial({color:0x361b1b,vertexColors:true,transparent:true,opacity:0,depthWrite:false,side:three.DoubleSide});
-      const recess=new three.Mesh(g,m);recess.renderOrder=1;scene.add(recess);
+      const recess=new three.Mesh(g,m);recess.name="CallaStarNoseCavities";recess.renderOrder=1;recess.visible=!this.showMask;faceRoot.add(recess);
       this.nostrilGeometry=g;this.nostrilMaterial=m;this.nostrilMesh=recess;this.noseDepth=nose.depth;
     }
     if (mouth && fillMaterial) {
@@ -475,8 +605,10 @@ export class FaceRenderer {
         liveGeometry.setIndex(new three.BufferAttribute(indices, 1));
         liveGeometry.computeVertexNormals();
         const liveMesh = new three.Mesh(liveGeometry, liveMaterial);
+        liveMesh.name = "CallaStarLiveMouth";
+        liveMesh.visible = !this.showMask;
         liveMesh.renderOrder = 1;
-        scene.add(liveMesh);
+        faceRoot.add(liveMesh);
         this.liveMouthCanvas = canvas;
         this.liveMouthTexture = liveTexture;
         this.liveMouthMaterial = liveMaterial;
@@ -492,45 +624,87 @@ export class FaceRenderer {
     this.resize(this.options.canvas.clientWidth || 1, this.options.canvas.clientHeight || 1, window.devicePixelRatio);
   }
 
+  private createBoundaryLine(
+    loop: FaceBoundaryLoop,
+    meshData: ReturnType<typeof buildSourceFaceMesh>,
+    customColor?: number,
+    width = 1,
+    opacity = 1,
+    renderOrder = 9,
+  ): { line: import("three").LineLoop; vertices: number[] } | null {
+    const three = this.three!;
+    if (loop.vertices.length < 3) return null;
+    const positions = new Float32Array(loop.vertices.length * 3);
+    for (let i = 0; i < loop.vertices.length; i++) positions.set(meshData.positions.slice(loop.vertices[i]! * 3, loop.vertices[i]! * 3 + 3), i * 3);
+    const geometry = new three.BufferGeometry();
+    geometry.setAttribute("position", new three.BufferAttribute(positions, 3).setUsage(three.DynamicDrawUsage));
+    const colors: Record<FaceBoundaryLoop["kind"], number> = { outer: 0xffd400, "left-eye": 0x00d9ff, "right-eye": 0xff37d7, mouth: 0xff7b22, internal: 0x9b7cff };
+    const material = new three.LineBasicMaterial({ color: customColor ?? colors[loop.kind], linewidth: width,
+      opacity, transparent: opacity < 1, depthTest: false, depthWrite: false });
+    const line = new three.LineLoop(geometry, material);
+    line.renderOrder = renderOrder;
+    return { line, vertices: loop.vertices };
+  }
+
+  private updateBoundaryLines(): void {
+    const positions = this.deformer?.positions;
+    if (!positions) return;
+    for (const { line, vertices } of [...this.boundaryLines, ...this.faceLockLines]) {
+      const attribute = line.geometry.getAttribute("position") as import("three").BufferAttribute;
+      for (let i = 0; i < vertices.length; i++) {
+        const vertex = vertices[i]!;
+        attribute.setXYZ(i, positions[vertex * 3]!, positions[vertex * 3 + 1]!, positions[vertex * 3 + 2]!);
+      }
+      attribute.needsUpdate = true;
+    }
+  }
+
   private renderFrame = (now: number): void => {
     if (this.disposed || this.status === "failed") return;
     this.displayFrameAtMs = now;
     const elapsed = this.lastFrameAt ? now - this.lastFrameAt : 16;
     this.lastFrameAt = now;
     const motion = this.options.motion.current;
-    const expression = this.options.manualExpression?.current ?? this.options.expression?.current ?? null;
+    const faceFrame = this.options.faceFrame?.current ?? null;
+    const frameMotion = faceFrame ? { ...motion, head: faceFrame.globalTransform } : motion;
+    const expression = this.options.manualExpression?.current ??
+      (faceFrame ? faceFrame.expressionState : this.options.expression?.current) ?? null;
     this.displayInputAgeMs = expression?.updatedAtMs === undefined ? null : Math.max(0, performance.now() - expression.updatedAtMs);
     if (this.options.paused?.current) {
       if (this.nostrilMaterial) this.nostrilMaterial.opacity = 0;
       smoothExpressionInto(this.expressionState, NEUTRAL_EXPRESSION, elapsed, this.expressionState);
       this.expressionApplied = this.expressionState;
       this.deformer?.update(this.expressionState);
+      this.updateBoundaryLines();
       const position = this.geometry?.getAttribute("position") as import("three").BufferAttribute | undefined;
       if (position) position.needsUpdate = true;
       const uv = this.geometry?.getAttribute('uv') as import('three').BufferAttribute | undefined;
       if (uv && this.gazeWarper) { uv.array.set(this.gazeWarper.update(null)); uv.needsUpdate = true; }
       this.lastEyeGaze = null;
-      this.updateLiveMouth(elapsed, true);
+      this.updateLiveMouth(elapsed, true, expression);
       this.renderStartMs = performance.now();
       this.renderer?.render(this.scene!, this.camera!);
       this.renderEndMs = performance.now();
       this.raf = requestAnimationFrame(this.renderFrame);
       return;
     }
-    if (motion.head) this.lastTrackedAt = now;
-    const lost = !motion.head && now - this.lastTrackedAt > 450;
+    if (frameMotion.head) this.lastTrackedAt = now;
+    const lost = !frameMotion.head && now - this.lastTrackedAt > 450;
     this.status = lost ? "lost" : "ready";
     if (this.material) {
-      this.material.opacity = motion.head || now - this.lastTrackedAt <= 450
+      this.material.opacity = frameMotion.head || now - this.lastTrackedAt <= 450
         ? 1
         : Math.max(0, 1 - (now - this.lastTrackedAt - 450) / 450);
       if (this.cavityMaterial) this.cavityMaterial.opacity = this.material.opacity;
     }
-    const target = this.options.manualPose?.current ?? this.motionResult(motion).applied;
+    const target = this.options.manualPose?.current ?? this.motionResult(frameMotion).applied;
     // Hold briefly during tracker dropouts, then fade rather than snap to neutral.
-    const safeTarget = this.options.manualPose?.current || motion.head ? target : !lost ? this.pose : NEUTRAL_FACE_RENDER_POSE;
-    this.pose = smoothFaceRenderPose(this.pose, safeTarget, elapsed);
-    if (this.mesh && this.renderer && this.scene && this.camera) {
+    const safeTarget = this.options.manualPose?.current || frameMotion.head ? target : !lost ? this.pose : NEUTRAL_FACE_RENDER_POSE;
+    const newCameraFrame = !!faceFrame && faceFrame !== this.lastAppliedFaceFrame;
+    if (newCameraFrame) this.lastAppliedFaceFrame = faceFrame;
+    if (newCameraFrame && !this.options.manualPose?.current && frameMotion.head) this.pose = safeTarget;
+    else if (!this.options.faceFrame || this.options.manualPose?.current) this.pose = smoothFaceRenderPose(this.pose, safeTarget, elapsed);
+    if (this.mesh && this.faceRoot && this.renderer && this.scene && this.camera) {
       if (expression) this.lastExpressionAt = now;
       const expressionLost = !expression && now - this.lastExpressionAt > 130;
       this.expressionRequested = expression ? expression : null;
@@ -546,6 +720,33 @@ export class FaceRenderer {
       this.expressionApplied = this.expressionState;
       const deformationStarted = performance.now();
       this.deformer?.update(this.expressionState);
+      const rootDebugMode = this.options.rootMotionDebug?.current?.mode ?? "tracking";
+      const rawDirectGeometry = faceFrame?.livePlacement &&
+        (rootDebugMode === "tracking" || rootDebugMode === "raw-direct") &&
+        !this.options.manualPose?.current;
+      if (rawDirectGeometry && faceFrame?.livePlacement?.center && faceFrame.livePlacement.width) {
+        const liveRotation = rendererMotionFromPose(this.pose);
+        const inverse = new this.three!.Matrix4()
+          .makeRotationFromEuler(new this.three!.Euler(liveRotation.rotationX, liveRotation.rotationY, liveRotation.rotationZ, "XYZ"))
+          .invert();
+        const positions = this.deformer?.positions;
+        if (positions && this.deformer && this.projectionBindings.length) {
+          projectLiveMeshPositions(
+            positions,
+            this.deformer.basePositions,
+            positions,
+            this.projectionBindings,
+            faceFrame.landmarks,
+            faceFrame.livePlacement.center,
+            faceFrame.livePlacement.width,
+            faceFrame.trackingAspect,
+            inverse.elements,
+          );
+        }
+      } else {
+        this.contourAlignment = [];
+      }
+      this.updateBoundaryLines();
       const position = this.geometry?.getAttribute("position") as import("three").BufferAttribute | undefined;
       if (position) position.needsUpdate = true;
       this.deformationMs = performance.now() - deformationStarted;
@@ -560,7 +761,7 @@ export class FaceRenderer {
         uv.array.set(this.gazeWarper.update(this.lastEyeGaze, { left: this.expressionState.eyes?.[EYE_RENDER_CHANNELS.left].wideOpen ?? 0, right: this.expressionState.eyes?.[EYE_RENDER_CHANNELS.right].wideOpen ?? 0 }));
         uv.needsUpdate = true;
       }
-      this.updateLiveMouth(elapsed, false);
+      this.updateLiveMouth(elapsed, false, expression);
       const started = performance.now();
       this.renderStartMs = started;
       /*
@@ -579,21 +780,58 @@ export class FaceRenderer {
       // Unmirrored world position; the scene's negative x scale is the one
       // display flip, exactly as the camera preview does it.
       const canvas = this.options.canvas;
-      const world = faceWorldTransform(this.pose, this.meshEyeSpan,
+      const placement = faceFrame?.livePlacement;
+      const liveCenter = placement?.center ?? faceFrame?.globalCenter;
+      const livePlacement = faceFrame && !this.options.manualPose?.current && frameMotion.head && liveCenter
+        ? {
+            center: liveCenter,
+            scale: placement?.scale ?? this.pose.scale,
+          }
+        : null;
+      const framing = this.options.framing?.current ?? null;
+      let world = faceWorldTransform(this.pose, this.meshEyeSpan,
         { width: canvas.clientWidth || canvas.width, height: canvas.clientHeight || canvas.height },
-        this.options.framing?.current ?? null);
-      this.worldTransform = world;
-      this.mesh.position.set(world.x, world.y, 0);
-      this.mesh.scale.setScalar(world.scale);
-      this.mesh.rotation.set(rendered.rotationX, rendered.rotationY, rendered.rotationZ, "XYZ");
-      if(this.nostrilMesh && this.nostrilMaterial){
-        this.nostrilMesh.position.copy(this.mesh.position);this.nostrilMesh.scale.copy(this.mesh.scale);this.nostrilMesh.rotation.copy(this.mesh.rotation);
-        this.nostrilMaterial.opacity=nostrilVisibility(this.pose.pitch)*(this.material?.opacity ?? 1);
+        framing,
+        livePlacement);
+      let rootRotation = rendered;
+      const rootDebug = this.options.rootMotionDebug?.current;
+      if (livePlacement && placement?.viewport?.width && canvas.clientHeight > 0 &&
+          (!rootDebug || rootDebug.mode === "tracking" || rootDebug.mode === "raw-direct")) {
+        // Use the current mapped raw face width as the global scale. Calibration
+        // continues to define local source proportions, never screen size.
+        world = { ...world, scale: (placement.viewport.width * 2 / canvas.clientHeight) / 0.44 };
       }
-      if (this.liveMouthMesh) {
-        this.liveMouthMesh.position.copy(this.mesh.position);
-        this.liveMouthMesh.scale.copy(this.mesh.scale);
-        this.liveMouthMesh.rotation.copy(this.mesh.rotation);
+      if (rootDebug && rootDebug.mode !== "tracking" && rootDebug.mode !== "raw-direct") {
+        const neutralWorld = faceWorldTransform(NEUTRAL_FACE_RENDER_POSE, this.meshEyeSpan,
+          { width: canvas.clientWidth || canvas.width, height: canvas.clientHeight || canvas.height }, framing);
+        if (rootDebug.mode === "manual") {
+          world = {
+            ...world,
+            x: Number.isFinite(rootDebug.x) ? Math.max(-0.3, Math.min(0.3, rootDebug.x)) : 0,
+            y: Number.isFinite(rootDebug.y) ? Math.max(-0.3, Math.min(0.3, rootDebug.y)) : 0,
+            scale: neutralWorld.scale * (Number.isFinite(rootDebug.scale) ? Math.max(0.5, Math.min(1.8, rootDebug.scale)) : 1),
+          };
+          rootRotation = { ...rendered, rotationX: 0, rotationY: 0,
+            rotationZ: (Number.isFinite(rootDebug.rollDeg) ? Math.max(-30, Math.min(30, rootDebug.rollDeg)) : 0) * Math.PI / 180 };
+        } else {
+          const t = now / 1000;
+          const roll = Math.sin(t * 0.6) * (10 * Math.PI / 180);
+          world = {
+            ...world,
+            x: Math.sin(t) * 0.3,
+            y: Math.cos(t * 0.7) * 0.22,
+            scale: neutralWorld.scale * (1 + Math.sin(t * 0.5) * 0.3),
+          };
+          rootRotation = { ...rendered, rotationX: 0, rotationY: 0, rotationZ: roll };
+        }
+      }
+      this.worldTransform = world;
+      this.faceRoot.position.set(world.x, world.y, 0);
+      this.faceRoot.scale.setScalar(world.scale);
+      this.faceRoot.rotation.set(rootRotation.rotationX, rootRotation.rotationY, rootRotation.rotationZ, "XYZ");
+      this.updateContourAlignment(faceFrame);
+      if(this.nostrilMesh && this.nostrilMaterial){
+        this.nostrilMaterial.opacity=nostrilVisibility(this.pose.pitch)*(this.material?.opacity ?? 1);
       }
       this.material!.wireframe = this.wireframe || this.showMesh;
       if (this.cavityMaterial) this.cavityMaterial.wireframe = this.material!.wireframe;
@@ -628,16 +866,24 @@ export class FaceRenderer {
   };
 
   private publish(message: string | null, renderMs: number | null = null, fps: number | null = null): void {
-    const result = this.motionResult(this.options.motion.current);
+    const faceFrame = this.options.faceFrame?.current ?? null;
+    const frameMotion = faceFrame ? { ...this.options.motion.current, head: faceFrame.globalTransform } : this.options.motion.current;
+    const frameExpression = this.options.manualExpression?.current ??
+      (faceFrame ? faceFrame.expressionState : this.options.expression?.current) ?? null;
+    const result = this.motionResult(frameMotion);
     const probe = this.getProbe();
     this.options.onStats?.({
       status: this.status,
-      expressionLeakage: this.options.expression?.current?.leakage ?? false,
-      eyes: this.options.expression?.current
-        ? { aperture: this.options.expression.current.eyeAperture ?? null, state: this.options.expression.current.blinkState ?? null }
+      expressionLeakage: frameExpression?.leakage ?? false,
+      eyes: frameExpression
+        ? { aperture: frameExpression.eyeAperture ?? null, state: frameExpression.blinkState ?? null }
         : null,
       meshVertices: this.geometry?.getAttribute('position').count ?? 0,
       meshTriangles: (this.geometry?.index?.count ?? 0) / 3,
+      boundaryLoops: this.boundaryLoopStats,
+      faceFrame: this.options.faceFrame?.current ?? null,
+      attachmentProbe: this.getAttachmentProbe(),
+      contourAlignment: this.contourAlignment,
       depthRange: this.depthRange(),
       dpr: this.renderer?.getPixelRatio() ?? 0,
       contextLossCount: this.contextLossCount,
@@ -677,7 +923,7 @@ export class FaceRenderer {
     const base = this.deformer.basePositions;
     const applied = this.deformer.positions;
     const height = this.options.canvas.clientHeight || this.options.canvas.height;
-    const pixelsPerUnit = height * (this.mesh?.scale.y ?? 1) / 2;
+    const pixelsPerUnit = height * (this.faceRoot?.scale.y ?? 1) / 2;
     const aperture = (positions: Float32Array) => Math.abs(positions[13 * 3 + 1]! - positions[14 * 3 + 1]!) * pixelsPerUnit;
     const chinOffset = Math.abs(applied[152 * 3 + 1]! - base[152 * 3 + 1]!) * pixelsPerUnit;
     return {
@@ -687,7 +933,7 @@ export class FaceRenderer {
   }
 
   /** The renderer's existing RAF owns this transient warp; there is no extra loop. */
-  private updateLiveMouth(elapsedMs: number, suppress: boolean): void {
+  private updateLiveMouth(elapsedMs: number, suppress: boolean, expression: ExpressionMotion | null): void {
     const enabled = !suppress && this.options.liveMouthEnabled?.current === true;
     const mode = this.options.oralInteriorMode?.current ?? 'live';
     this.oralDiagnostics.mode = mode;
@@ -699,7 +945,6 @@ export class FaceRenderer {
       return;
     }
     const started = performance.now();
-    const expression = this.options.expression?.current;
     const video = this.options.liveMouthVideoRef?.current ?? null;
     const mouth = expression?.liveMouth;
     const sourceFrame=mouth?.sourceFrame ?? video;
@@ -804,7 +1049,45 @@ export class FaceRenderer {
 
   /** Apply both the conservative M7 envelope and the measured source envelope. */
   private motionResult(motion: CalibrationMotion): FaceRenderPoseResult {
+    const liveMode = this.options.rootMotionDebug?.current?.mode;
+    if (this.options.faceFrame?.current?.livePlacement && (liveMode === undefined || liveMode === "tracking" || liveMode === "raw-direct")) {
+      return poseFromMotion(motion, { ...FACE_RENDER_LIMITS, yaw: Math.PI / 2, pitch: Math.PI / 2, roll: Math.PI });
+    }
     return poseFromSourceMotion(motion, this.options.profile.movementEnvelope);
+  }
+
+  private updateContourAlignment(frame: FaceFrameSnapshot | null): void {
+    const placement = frame?.livePlacement;
+    const faceRoot = this.faceRoot;
+    const camera = this.camera;
+    const scene = this.scene;
+    const three = this.three;
+    const positions = this.geometry?.getAttribute("position") as import("three").BufferAttribute | undefined;
+    const viewport = placement?.viewportTransform;
+    const width = this.options.canvas.clientWidth;
+    const height = this.options.canvas.clientHeight;
+    if (!frame || !placement || !viewport || !faceRoot || !camera || !scene || !three || !positions || width <= 0 || height <= 0) {
+      this.contourAlignment = [];
+      return;
+    }
+    const regions = [
+      ["forehead", 10], ["left-temple", 234], ["right-temple", 454],
+      ["left-cheek", 127], ["right-cheek", 356], ["chin", 152],
+    ] as const;
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    this.contourAlignment = regions.flatMap(([region, landmarkIndex]) => {
+      const point = frame.landmarks[landmarkIndex];
+      if (!point) return [];
+      const live = mapNormalizedToDisplay(point, viewport);
+      const local = new three.Vector3(
+        positions.getX(landmarkIndex), positions.getY(landmarkIndex), positions.getZ(landmarkIndex),
+      );
+      faceRoot.localToWorld(local);
+      local.project(camera);
+      const rendered = { x: (local.x + 1) * width / 2, y: (1 - local.y) * height / 2 };
+      return [{ region, landmarkIndex, live, rendered, errorPx: Math.hypot(rendered.x - live.x, rendered.y - live.y) }];
+    });
   }
 
   private depthRange(): number {
@@ -846,10 +1129,10 @@ export class FaceRenderer {
     const vectors = motion ? faceDirectionVectors(motion) : null;
     let actualNose = vectors ? { ...vectors.nose, x: vectors.nose.x * flip } : null;
     let actualUp = vectors ? { ...vectors.up, x: vectors.up.x * flip } : null;
-    if (this.mesh && this.three) {
+    if (this.faceRoot && this.three) {
       this.scene?.updateMatrixWorld(true);
-      actualNose = new this.three.Vector3(0, 0, 1).transformDirection(this.mesh.matrixWorld);
-      actualUp = new this.three.Vector3(0, 1, 0).transformDirection(this.mesh.matrixWorld);
+      actualNose = new this.three.Vector3(0, 0, 1).transformDirection(this.faceRoot.matrixWorld);
+      actualUp = new this.three.Vector3(0, 1, 0).transformDirection(this.faceRoot.matrixWorld);
     }
 
     let maxDisplacement = 0;
@@ -876,10 +1159,11 @@ export class FaceRenderer {
      */
     let screen: FaceScreenProbe | null = null;
     const deformed = this.deformer?.positions;
-    if (this.mesh && this.camera && this.three && deformed) {
+    const faceRoot = this.faceRoot;
+    if (faceRoot && this.camera && this.three && deformed) {
       const widthPx = this.options.canvas.clientWidth || this.options.canvas.width || 1;
       const project = (local: [number, number, number]) => {
-        const v = new this.three!.Vector3(...local).applyMatrix4(this.mesh!.matrixWorld).project(this.camera!);
+        const v = new this.three!.Vector3(...local).applyMatrix4(faceRoot.matrixWorld).project(this.camera!);
         return { x: ((v.x + 1) / 2) * widthPx, y: ((1 - v.y) / 2) * heightPx };
       };
       const vertex = (i: number): [number, number, number] => [deformed[i * 3]!, deformed[i * 3 + 1]!, deformed[i * 3 + 2]!];
@@ -903,6 +1187,79 @@ export class FaceRenderer {
       vertexDisplacementMax: maxDisplacement,
       vertexDisplacementPx: maxDisplacement * scale * pxPerWorld,
       faceWidthPx: (this.deformer?.faceWidth ?? 0) * scale * pxPerWorld,
+    };
+  }
+
+  /** Geometry-level proof that every global facial layer inherits one root. */
+  getAttachmentProbe(): {
+    frameId: number | null;
+    rootMatrix: number[] | null;
+    rootLocal: { x: number; y: number; scaleX: number; scaleY: number; roll: number; matrixAutoUpdate: boolean } | null;
+    rootPosition: { x: number; y: number } | null;
+    rootScale: number | null;
+    skinWorldCenter: { x: number; y: number; z: number } | null;
+    eyeWorldCenter: { x: number; y: number; z: number } | null;
+    childWorldPosition: { name: string; x: number; y: number; z: number } | null;
+    sceneHierarchy: { name: string; type: string; children: { name: string; type: string; children: string[] }[] } | null;
+    skinIsRootChild: boolean;
+    eyePixelsShareRoot: boolean;
+    noseSharesRoot: boolean;
+    mouthSharesRoot: boolean;
+    maskSharesFaceGeometry: boolean;
+    featureLayersShareRoot: boolean;
+    debugContoursShareRoot: boolean;
+  } {
+    this.scene?.updateMatrixWorld(true);
+    const root = this.faceRoot;
+    const skin = this.mesh;
+    const isDescendant = (object: import("three").Object3D | null): boolean => {
+      let current = object;
+      while (current) {
+        if (current === root) return true;
+        current = current.parent;
+      }
+      return false;
+    };
+    const origin = root && this.three ? new this.three.Vector3(0, 0, 0).applyMatrix4(root.matrixWorld) : null;
+    let eyeCenter: import("three").Vector3 | null = null;
+    const points = this.deformer?.positions;
+    if (skin && this.three && points && points.length > 263 * 3 + 2) {
+      const left = 33 * 3, right = 263 * 3;
+      eyeCenter = new this.three.Vector3(
+        (points[left]! + points[right]!) / 2,
+        (points[left + 1]! + points[right + 1]!) / 2,
+        (points[left + 2]! + points[right + 2]!) / 2,
+      ).applyMatrix4(skin.matrixWorld);
+    }
+    const child = this.nostrilMesh ?? this.liveMouthMesh ?? skin;
+    const childWorld = child && this.three ? child.getWorldPosition(new this.three.Vector3()) : null;
+    const hierarchy = root ? {
+      name: root.name,
+      type: root.type,
+      children: root.children.map(object => ({
+        name: object.name || "(unnamed)",
+        type: object.type,
+        children: object.children.map(nested => `${nested.name || "(unnamed)"}:${nested.type}`),
+      })),
+    } : null;
+    return {
+      frameId: this.options.faceFrame?.current?.frameId ?? null,
+      rootMatrix: root ? Array.from(root.matrixWorld.elements) : null,
+      rootLocal: root ? { x: root.position.x, y: root.position.y, scaleX: root.scale.x, scaleY: root.scale.y,
+        roll: root.rotation.z, matrixAutoUpdate: root.matrixAutoUpdate } : null,
+      rootPosition: root ? { x: root.position.x, y: root.position.y } : null,
+      rootScale: root ? root.scale.x : null,
+      skinWorldCenter: origin ? { x: origin.x, y: origin.y, z: origin.z } : null,
+      eyeWorldCenter: eyeCenter ? { x: eyeCenter.x, y: eyeCenter.y, z: eyeCenter.z } : null,
+      childWorldPosition: childWorld ? { name: child?.name ?? "(unnamed)", x: childWorld.x, y: childWorld.y, z: childWorld.z } : null,
+      sceneHierarchy: hierarchy,
+      skinIsRootChild: !!root && skin?.parent === root,
+      eyePixelsShareRoot: !!root && isDescendant(skin),
+      noseSharesRoot: !!root && (!this.nostrilMesh || this.nostrilMesh.parent === root),
+      mouthSharesRoot: !!root && (!this.liveMouthMesh || this.liveMouthMesh.parent === root),
+      maskSharesFaceGeometry: !!root && !!skin && skin.geometry === this.geometry,
+      featureLayersShareRoot: !!root && [this.nostrilMesh, this.liveMouthMesh].every(layer => !layer || layer.parent === root),
+      debugContoursShareRoot: !!root && [...this.boundaryLines, ...this.faceLockLines].every(({ line }) => isDescendant(line)),
     };
   }
 }

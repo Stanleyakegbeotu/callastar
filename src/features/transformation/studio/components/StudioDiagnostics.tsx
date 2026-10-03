@@ -8,7 +8,6 @@ import type { StudioSummary } from "../useStudioRuntime";
 interface StudioDiagnosticsProps {
   summary: StudioSummary;
   quality: QualityMode;
-  segmentation: boolean;
   calibration: CalibrationCollectorState;
 }
 
@@ -69,10 +68,9 @@ function signedDegrees(radians: number | null | undefined): string {
   return signed((radians * 180) / Math.PI, 1, "°");
 }
 
-export function StudioDiagnostics({ summary, quality, segmentation, calibration }: StudioDiagnosticsProps) {
-  const { stats, face, pose, motion } = summary;
+export function StudioDiagnostics({ summary, quality, calibration }: StudioDiagnosticsProps) {
+  const { stats, face, motion } = summary;
   const derivedFace = face?.derived ?? null;
-  const derivedPose = pose?.derived ?? null;
   const profile = calibration.profile;
   const outside = motionOutsideEnvelope(motion);
 
@@ -102,21 +100,6 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
               />
               <Row metric="motion-x" label="Move X" value={signed(motion.head?.translationX)} />
               <Row metric="motion-y" label="Move Y" value={signed(motion.head?.translationY)} />
-              <Row
-                metric="motion-shoulder-angle"
-                label="Shoulder angle"
-                value={signedDegrees(motion.upperBody?.shoulderAngleDelta)}
-              />
-              <Row
-                metric="motion-shoulder-scale"
-                label="Shoulder scale"
-                value={
-                  typeof motion.upperBody?.shoulderScaleDelta === "number"
-                    ? `${motion.upperBody.shoulderScaleDelta.toFixed(2)}×`
-                    : MISSING
-                }
-              />
-              <Row metric="motion-shoulder-x" label="Shoulder X" value={signed(motion.upperBody?.translationX)} />
             </dl>
             <p className="studio-note">
               {motion.tracked
@@ -162,16 +145,6 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
           <Row metric="neutral-roll" label="Neutral roll" value={degrees(profile?.face.roll)} />
           <Row metric="neutral-scale" label="Neutral face scale" value={ratio(profile?.face.scale)} />
           <Row
-            metric="neutral-shoulder-width"
-            label="Neutral shoulder width"
-            value={ratio(profile?.pose.shoulderWidth)}
-          />
-          <Row
-            metric="neutral-shoulder-angle"
-            label="Neutral shoulder angle"
-            value={degrees(profile?.pose.shoulderAngle)}
-          />
-          <Row
             metric="calibration-warnings"
             label="Warnings"
             value={profile ? (profile.quality.warnings.join(", ") || "none") : MISSING}
@@ -188,22 +161,18 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
           <Row metric="camera-frames" label="Camera frames" value={count(stats?.cameraFrames)} />
           <Row metric="tracking-frames" label="Tracking frames" value={count(stats?.trackingFrames)} />
           <Row metric="face-inferences" label="Face inferences" value={count(stats?.faceInferences)} />
-          <Row metric="pose-inferences" label="Pose inferences" value={count(stats?.poseInferences)} />
+          <Row metric="pose-inferences" label="Pose inferences (disabled)" value={count(stats?.poseInferences)} />
           <Row metric="dropped-frames" label="Dropped frames" value={count(stats?.droppedFrames)} />
           <Row metric="camera-fps" label="Camera rate" value={fps(stats?.cameraFps)} />
           <Row metric="accepted-camera-fps" label="Accepted frame rate" value={fps(stats?.acceptedCameraFps)} />
           <Row metric="face-fps" label="Face tracking rate" value={fps(stats?.faceFps)} />
-          <Row metric="pose-fps" label="Pose tracking rate" value={fps(stats?.poseFps)} />
           <Row metric="dropped-input-frames" label="Input frames skipped" value={count(stats?.droppedInputFrames)} />
           <Row metric="dropped-tracking-frames" label="Tracking frames dropped" value={count(stats?.droppedTrackingFrames)} />
           <Row metric="camera-face-latency" label="Camera callback → face result" value={ms(stats?.cameraToFaceMs)} />
           <Row metric="camera-frame-timestamp" label="Camera media timestamp" value={ms(stats?.cameraTimestampMs)} />
           <Row metric="face-stage-start" label="Face tracking start" value={ms(stats?.faceStartMs)} />
           <Row metric="face-stage-end" label="Face tracking end" value={ms(stats?.faceEndMs)} />
-          <Row metric="pose-stage-start" label="Pose tracking start" value={ms(stats?.poseStartMs)} />
-          <Row metric="pose-stage-end" label="Pose tracking end" value={ms(stats?.poseEndMs)} />
           <Row metric="face-ms" label="Face inference" value={ms(stats?.faceAverageMs)} />
-          <Row metric="pose-ms" label="Pose inference" value={ms(stats?.poseAverageMs)} />
           <Row metric="loop-ms" label="Loop" value={ms(stats?.loopAverageMs)} />
         </dl>
       </section>
@@ -222,7 +191,6 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
           />
           <Row metric="quality-mode" label="Quality mode" value={quality} plain />
           <Row metric="face-init" label="Face model init" value={ms(summary.faceInitMs)} />
-          <Row metric="pose-init" label="Pose model init" value={ms(summary.poseInitMs)} />
         </dl>
       </section>
 
@@ -268,58 +236,6 @@ export function StudioDiagnostics({ summary, quality, segmentation, calibration 
         </dl>
       </section>
 
-      <section>
-        <h3>Pose</h3>
-        <dl>
-          <Row metric="pose-landmarks" label="Landmarks" value={count(pose?.landmarks.length)} />
-          <Row
-            metric="pose-trackability"
-            label="Trackability"
-            value={derivedPose?.trackability ?? MISSING}
-            plain
-          />
-          <Row metric="pose-shoulder-width" label="Shoulder width" value={ratio(derivedPose?.shoulderWidth)} />
-          <Row metric="pose-shoulder-angle" label="Shoulder angle" value={degrees(derivedPose?.shoulderAngle)} />
-          <Row metric="pose-visibility" label="Visibility" value={ratio(derivedPose?.visibility, 2)} />
-        </dl>
-      </section>
-
-      <section>
-        <h3>Segmentation</h3>
-        {segmentation ? (
-          <dl>
-            <Row
-              metric="segmentation-mask"
-              label="Mask"
-              value={pose?.segmentation.available ? "present" : "absent"}
-              plain
-            />
-            <Row
-              metric="segmentation-size"
-              label="Size"
-              value={
-                pose?.segmentation.width && pose.segmentation.height
-                  ? `${pose.segmentation.width} × ${pose.segmentation.height}`
-                  : MISSING
-              }
-            />
-            <Row
-              metric="segmentation-representation"
-              label="Held as"
-              value={pose?.segmentation.representation ?? MISSING}
-              plain
-            />
-          </dl>
-        ) : (
-          <p className="studio-note">
-            Off. Turning it on rebuilds the pose task and adds a mask to every inference — compare the pose
-            inference time above before and after.
-          </p>
-        )}
-        <p className="studio-note">
-          The mask is measured, not drawn. Copying its pixels out of the GPU is a later milestone.
-        </p>
-      </section>
     </div>
   );
 }

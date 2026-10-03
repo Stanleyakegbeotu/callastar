@@ -172,46 +172,17 @@ describe("framing", () => {
   });
 });
 
-describe("shoulders", () => {
-  it("reports face-only tracking as guidance, not failure", () => {
-    /*
-     * The case this whole module exists for.
-     *
-     * A close-cropped camera loses the shoulders constantly, and calling that
-     * "tracking lost" would make an entirely normal framing look like a crash.
-     */
+describe("face-only guidance", () => {
+  it("reports active face tracking without referring to shoulders", () => {
     const result = describeTracking(face(), pose({ detected: false, derived: null }), RUNNING);
-
-    expect(result.quality).toBe("fair");
-    expect(result.label).toBe("Face only");
-    expect(result.detail).not.toMatch(/error|fail|lost/i);
-  });
-
-  it("asks the operator to centre themselves when one shoulder is missing", () => {
-    const result = describeTracking(face(), pose({ derived: poseGeometry({ trackability: "partial" }) }), RUNNING);
-    expect(result.label).toBe("One shoulder");
-  });
-
-  it("treats a detected pose with no derived geometry as partial", () => {
-    // The model found a person but not enough anchors to reason about.
-    const result = describeTracking(face(), pose({ derived: null }), RUNNING);
-    expect(result.label).toBe("One shoulder");
-  });
-
-  it("is only good when both face and shoulders are solid", () => {
-    const result = describeTracking(face(), pose(), RUNNING);
     expect(result.quality).toBe("good");
     expect(result.label).toBe("Tracking");
+    expect(result.detail).toBe("Face tracking active.");
   });
 
-  it("never mentions shoulders while the face itself is the problem", () => {
-    // One sentence at a time, and the face is what to fix first.
-    const result = describeTracking(
-      face({ detected: false, derived: null }),
-      pose({ detected: false, derived: null }),
-      RUNNING,
-    );
-    expect(result.label).toBe("No face");
+  it("does not let body pose results affect face tracking guidance", () => {
+    const result = describeTracking(face(), pose({ detected: false, derived: null }), RUNNING);
+    expect(result.detail).not.toMatch(/shoulder|torso|body/i);
   });
 });
 

@@ -14,6 +14,7 @@
  */
 export class MonotonicClock {
   private last = 0;
+  private lastFrameId: number | null = null;
 
   /**
    * The next usable timestamp.
@@ -23,9 +24,11 @@ export class MonotonicClock {
    * downstream reasons about the timeline MediaPipe actually saw rather than the
    * one the camera claimed.
    */
-  next(requestedMs: number): number {
+  next(requestedMs: number, frameId?: number): number {
+    if (frameId !== undefined && frameId === this.lastFrameId) return this.last;
     const usable = Number.isFinite(requestedMs) && requestedMs > this.last ? requestedMs : this.last + 1;
     this.last = usable;
+    this.lastFrameId = frameId ?? null;
     return usable;
   }
 

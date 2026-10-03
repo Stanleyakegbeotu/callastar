@@ -17,6 +17,7 @@ import {
   type TransformationCalibrationProfile,
 } from "./calibrationTypes";
 import type { FaceTrackingResult, Point3 } from "./faceTypes";
+import { stableHeadAnchors } from "./headLock";
 import type { PoseTrackingResult } from "./poseTypes";
 import type { CameraFacing } from "./studioCamera";
 import { canonicalFaceLandmarks, localBrowHeights } from './faceLocalGeometry';
@@ -86,6 +87,7 @@ interface Sample {
   timestampMs: number;
   faceCenter: Point3;
   faceScale: number;
+  stableAnchors: Point3[] | null;
   yaw: number;
   pitch: number;
   roll: number;
@@ -374,6 +376,7 @@ export class CalibrationCollector {
       regionShapes: Object.fromEntries([...MOUTH_SHAPES,'noseSneerLeft','noseSneerRight'].filter(k=>typeof face.blendshapes[k]==='number').map(k=>[k,face.blendshapes[k]!])),
       faceCenter: derived.center,
       faceScale: derived.scale,
+      stableAnchors: stableHeadAnchors(face.landmarks),
       yaw: derived.yaw,
       pitch: derived.pitch,
       roll: derived.roll,
@@ -461,6 +464,16 @@ export class CalibrationCollector {
       return;
     }
 
+    const anchorSamples = samples.map(sample => sample.stableAnchors)
+      .filter((anchors): anchors is Point3[] => anchors !== null);
+    const stableAnchors = anchorSamples.length >= Math.ceil(samples.length * 0.7)
+      ? anchorSamples[0]!.map((_point, index) => ({
+          x: median(anchorSamples.map(anchors => anchors[index]!.x)) ?? 0,
+          y: median(anchorSamples.map(anchors => anchors[index]!.y)) ?? 0,
+          z: median(anchorSamples.map(anchors => anchors[index]!.z)) ?? 0,
+        }))
+      : undefined;
+
     const shoulderCentres = samples.map((sample) => sample.shoulderCenter).filter(finitePoint);
     const shoulderCenter = shoulderCentres.length > 0 ? medianPoint(shoulderCentres) : null;
     const shoulderWidth = median(
@@ -512,6 +525,7 @@ export class CalibrationCollector {
         })) as unknown as NonNullable<TransformationCalibrationProfile['face']['eyes']> : undefined,
         center: faceCenter,
         scale: faceScale,
+        stableAnchors,
         yaw,
         pitch,
         roll,
