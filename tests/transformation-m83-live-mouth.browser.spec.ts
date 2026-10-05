@@ -63,7 +63,35 @@ test("live mouth warp copies interior pixels only inside the inner-lip mask", as
   expect(report.leaked).toBe(0);
 });
 
-test("FaceRenderer fades the transient mouth layer on and off", async ({ page }) => {
+test("perioral source patch includes current-frame skin with a soft alpha edge", async ({ page }) => {
+  await page.goto("/");
+  const report = await page.evaluate(async () => {
+    const { drawPerioralPatch } = await import("/src/features/transformation/engine/rendering/liveMouthCompositor.ts");
+    const width=320,height=240;
+    const source=document.createElement("canvas");source.width=width;source.height=height;
+    const sourceContext=source.getContext("2d")!;
+    sourceContext.fillStyle="rgb(210,150,130)";sourceContext.fillRect(0,0,width,height);
+    sourceContext.fillStyle="rgb(20,10,15)";sourceContext.beginPath();sourceContext.ellipse(160,120,58,26,0,0,Math.PI*2);sourceContext.fill();
+    const ring=Array.from({length:20},(_,i)=>{const angle=-Math.PI/2+i*Math.PI*2/20;return {x:(160+48*Math.cos(angle))/width,y:(120+16*Math.sin(angle))/height};});
+    const output=document.createElement("canvas");output.width=128;output.height=96;
+    const context=output.getContext("2d")!;
+    const drawn=drawPerioralPatch(context,source,ring,width,height,160);
+    const started=performance.now();
+    for(let i=0;i<40;i++)drawPerioralPatch(context,source,ring,width,height,160);
+    const compositorMeanMs=(performance.now()-started)/40;
+    const pixels=context.getImageData(0,0,output.width,output.height).data;
+    let featherPixels=0;
+    for(let i=3;i<pixels.length;i+=4)if(pixels[i]!>8&&pixels[i]!<247)featherPixels++;
+    return {drawn,centerAlpha:pixels[(48*output.width+64)*4+3],cornerAlpha:pixels[3],featherPixels,compositorMeanMs};
+  });
+  console.log("[perioral compositor performance]",JSON.stringify(report));
+  expect(report.drawn).toBe(true);
+  expect(report.centerAlpha).toBeGreaterThan(240);
+  expect(report.cornerAlpha).toBeLessThan(8);
+  expect(report.featherPixels).toBeGreaterThan(40);
+});
+
+test("FaceRenderer preserves the current perioral patch while enabled and clears it when disabled", async ({ page }) => {
   await page.goto("/");
   const report = await page.evaluate(async () => {
     const [{ SourceAnalyzer }, { FaceRenderer }] = await Promise.all([
@@ -96,7 +124,7 @@ test("FaceRenderer fades the transient mouth layer on and off", async ({ page })
     const expression = { current: {
       blinkLeft: 0, blinkRight: 0, jawOpen: 0, smileLeft: 0, smileRight: 0,
       browInnerUp: 0, browOuterUpLeft: 0, browOuterUpRight: 0,
-      status: "tracked", calculationMs: 0, liveMouth: { timestampMs: 1, ring },
+      status: "tracked", calculationMs: 0, liveMouth: { timestampMs: 1, ring, faceWidthRatio: .45 },
     } as any };
     const enabled = { current: true };
     const stats = { current: null as any };
@@ -129,7 +157,7 @@ test("FaceRenderer fades the transient mouth layer on and off", async ({ page })
     };
   });
   console.log("[live mouth performance]", JSON.stringify(report));
-  expect(report.closed).toBeLessThan(0.02);
+  expect(report.closed).toBeGreaterThan(0.5);
   expect(report.on).toBeGreaterThan(0.5);
   expect(report.off).toBeLessThan(0.02);
   expect(report.compositorMs).not.toBeNull();

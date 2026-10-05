@@ -33,8 +33,8 @@ import { faceWorldTransform, meshEyeSpan, type FaceRenderFraming } from "./faceF
 import { ExpressionDeformer } from "./expressionDeformer";
 import { faceWebGLContext, FACE_WEBGL_UNAVAILABLE } from './webglPreflight';
 import { VideoFrameReader } from '../../source/videoFrameReader';
-import { drawWarpedMouth, mouthTextureTarget, mouthMaskMetrics, oralFrameFresh, oralFeedAllowed, oralContentFit, type MouthPoint, type OralInteriorMode } from './liveMouthCompositor';
-import { INNER_LIP_RING } from './sourceMesh';
+import { drawPerioralPatch, mouthMaskMetrics, perioralRegion, oralFrameFresh, MOUTH_HORIZONTAL_PAD_RATIO, MOUTH_UPPER_PAD_FACE_RATIO, MOUTH_LOWER_PAD_FACE_RATIO, type MouthPoint, type OralInteriorMode } from './liveMouthCompositor';
+import { OUTER_LIP_RING } from './sourceMesh';
 import { EyeGazeWarper } from "./eyeGazeWarper";
 import { EYE_RENDER_CHANNELS, eyeGazeForRenderer } from '../eyeControls';
 import { noseCavityData, nostrilVisibility } from './noseCavities';
@@ -146,6 +146,9 @@ export interface OralDiagnostics {
   teethVisibleEstimate: number | null;
   cropBounds: NonNullable<ReturnType<typeof mouthMaskMetrics>>['bounds'] | null;
   maskBounds: {minX:number;maxX:number;minY:number;maxY:number} | null;
+  faceWidthPx?: number | null;
+  mouthWidthPx?: number | null;
+  featherSigmaPx?: number | null;
   frameAgeMs: number | null;
   cameraTimestampMs: number | null;
   faceResultTimestampMs: number | null;
@@ -248,11 +251,6 @@ export class FaceRenderer {
   private liveMouthCanvas: HTMLCanvasElement | null = null;
   private liveMouthGeometry: import("three").BufferGeometry | null = null;
   private liveMouthMesh: import("three").Mesh | null = null;
-  private liveMouthTarget: MouthPoint[] = [];
-  private liveMouthBasePositions: Float32Array | null = null;
-  private liveMouthMidY = 0;
-  private liveMouthHalfHeight = 0.001;
-  private liveMouthWidth = 0;
   private liveMouthLastTimestamp = -1;
   private liveMouthHasFrame = false;
   private liveMouthOpacity = 0;
@@ -596,11 +594,6 @@ export class FaceRenderer {
     this.boundaryRegionAnchors = [];
     this.boundaryCurrentCorrection = NEUTRAL_BOUNDARY_CORRECTION;
     this.boundaryBlendMs = null;
-    this.liveMouthTarget = [];
-    this.liveMouthBasePositions = null;
-    this.liveMouthMidY = 0;
-    this.liveMouthHalfHeight = 0.001;
-    this.liveMouthWidth = 0;
     this.liveMouthLastTimestamp = -1;
     this.liveMouthHasFrame = false;
     this.liveMouthOpacity = 0;
@@ -781,27 +774,32 @@ export class FaceRenderer {
           side: three.DoubleSide, toneMapped: false,
         });
         const liveGeometry = new three.BufferGeometry();
-        const count = mouth.fillCount;
-        const position = new Float32Array(meshData.positions.subarray(mouth.fillStart * 3, (mouth.fillStart + count) * 3));
-        // Live interior is in front of the textured fill but remains behind
-        // the source face surface and its lips.
-        for (let i = 0; i < count; i++) position[i * 3 + 2] += 0.003;
-        const minX = Math.min(...INNER_LIP_RING.map(i => meshData.localLandmarks![i]!.x));
-        const maxX = Math.max(...INNER_LIP_RING.map(i => meshData.localLandmarks![i]!.x));
-        const minY = Math.min(...INNER_LIP_RING.map(i => meshData.localLandmarks![i]!.y));
-        const maxY = Math.max(...INNER_LIP_RING.map(i => meshData.localLandmarks![i]!.y));
-        const target = INNER_LIP_RING.map(i => ({
-          x: (meshData.localLandmarks![i]!.x - minX) / Math.max(1e-6, maxX - minX),
-          y: (meshData.localLandmarks![i]!.y - minY) / Math.max(1e-6, maxY - minY),
+        const count = OUTER_LIP_RING.length + 1;
+        const faceLeft = meshData.localLandmarks![234]!, faceRight = meshData.localLandmarks![454]!;
+        const faceWidth = Math.hypot(faceRight.x-faceLeft.x,faceRight.y-faceLeft.y);
+        const lip = OUTER_LIP_RING.map(i => meshData.localLandmarks![i]!);
+        const lipCx=lip.reduce((sum,p)=>sum+p.x,0)/lip.length,lipCy=lip.reduce((sum,p)=>sum+p.y,0)/lip.length;
+        const mouthWidth=Math.max(...lip.map(p=>p.x))-Math.min(...lip.map(p=>p.x));
+        const padX=mouthWidth*MOUTH_HORIZONTAL_PAD_RATIO,padTop=faceWidth*MOUTH_UPPER_PAD_FACE_RATIO,padBottom=faceWidth*MOUTH_LOWER_PAD_FACE_RATIO;
+        const expanded=lip.map(p=>({
+          x:lipCx+(p.x-lipCx)*(1+2*padX/Math.max(1e-6,mouthWidth)),
+          y:p.y+(p.y>=lipCy?padTop:-padBottom),
+          z:p.z,
         }));
-        this.liveMouthTarget = target;
+        const minX=Math.min(...expanded.map(p=>p.x)),maxX=Math.max(...expanded.map(p=>p.x));
+        const minY=Math.min(...expanded.map(p=>p.y)),maxY=Math.max(...expanded.map(p=>p.y));
+        const position=new Float32Array(count*3);
+        expanded.forEach((p,i)=>position.set([p.x,p.y,p.z+.003],i*3));
+        const centre=expanded.reduce((sum,p)=>({x:sum.x+p.x/count,y:sum.y+p.y/count,z:sum.z+p.z/count}),{x:0,y:0,z:0});
+        position.set([centre.x,centre.y,centre.z+.003],OUTER_LIP_RING.length*3);
+        const target = expanded.map(p => ({ x:(p.x-minX)/Math.max(1e-6,maxX-minX), y:(p.y-minY)/Math.max(1e-6,maxY-minY) }));
         const uv = new Float32Array(count * 2);
         for (let i = 0; i < count; i++) {
-          const point = target[i] ?? { x: 0.5, y: 0.5 };
+          const point = target[i] ?? { x: (centre.x-minX)/Math.max(1e-6,maxX-minX), y: (centre.y-minY)/Math.max(1e-6,maxY-minY) };
           uv[i * 2] = point.x;
           uv[i * 2 + 1] = 1 - point.y;
         }
-        const indices = new Uint16Array(INNER_LIP_RING.flatMap((_, i) => [INNER_LIP_RING.length, i, (i + 1) % INNER_LIP_RING.length]));
+        const indices = new Uint16Array(OUTER_LIP_RING.flatMap((_, i) => [OUTER_LIP_RING.length, i, (i + 1) % OUTER_LIP_RING.length]));
         liveGeometry.setAttribute('position', new three.BufferAttribute(position, 3).setUsage(three.DynamicDrawUsage));
         liveGeometry.setAttribute('uv', new three.BufferAttribute(uv, 2));
         liveGeometry.setIndex(new three.BufferAttribute(indices, 1));
@@ -810,17 +808,14 @@ export class FaceRenderer {
         liveMesh.name = "CallaStarLiveMouth";
         liveMesh.visible = !this.showMask;
         liveMesh.renderOrder = 1;
+        // No independent image-space warp is used here: this padded mouth patch
+        // is a mesh child of the same faceRoot that places the transformed face.
         faceRoot.add(liveMesh);
         this.liveMouthCanvas = canvas;
         this.liveMouthTexture = liveTexture;
         this.liveMouthMaterial = liveMaterial;
         this.liveMouthGeometry = liveGeometry;
         this.liveMouthMesh = liveMesh;
-        this.liveMouthBasePositions = position.slice();
-        this.liveMouthMidY = -(maxY + minY) / 2;
-        this.liveMouthHalfHeight = Math.max(0.001, (maxY - minY) / 2);
-        const ringX = INNER_LIP_RING.map((_, i) => position[i * 3]!);
-        this.liveMouthWidth = Math.max(...ringX) - Math.min(...ringX);
       }
     }
     this.resize(this.options.canvas.clientWidth || 1, this.options.canvas.clientHeight || 1, window.devicePixelRatio);
@@ -1273,37 +1268,37 @@ export class FaceRenderer {
     const sourceFrame=mouth?.sourceFrame ?? video;
     const sourceWidth=mouth?.sourceFrame?.width ?? video?.videoWidth ?? 0;
     const sourceHeight=mouth?.sourceFrame?.height ?? video?.videoHeight ?? 0;
-    const opening = Math.max(this.expressionApplied?.mouth?.jaw.open ?? this.expressionApplied?.jawOpen ?? 0,
-      (this.expressionApplied?.mouth?.lips.funnel ?? 0)*.4);
     const canvas = this.liveMouthCanvas;
-    const base=this.deformer?.basePositions, current=this.deformer?.positions;
-    const sourceGap=base ? Math.abs(base[13*3+1]!-base[14*3+1]!) : 0;
-    const renderedGap=current ? Math.abs(current[13*3+1]!-current[14*3+1]!) : 0;
-    const feedAllowed=oralFeedAllowed(mode,sourceGap,renderedGap,this.liveMouthWidth);
     if (!enabled || !mouth || !video || video.readyState < 2) this.liveMouthActive = false;
-    else if (this.liveMouthActive ? opening <= 0.06 : opening >= 0.12) this.liveMouthActive = !this.liveMouthActive;
+    else this.liveMouthActive = true;
     // Legacy unclocked scalar fixtures remain supported; production canonical
     // controls always carry completion time and expire after a bounded hold.
     const fresh = !!mouth && (oralFrameFresh(expression?.updatedAtMs,performance.now()) || (expression?.updatedAtMs===undefined && !expression?.mouth));
     const trustworthy = !expression?.mouth || expression.mouth.confidence >= .35;
-    const wantsFeed = enabled && feedAllowed && trustworthy && this.liveMouthActive && fresh && !!mouth && !!video && video.readyState >= 2;
+    // SOURCE is the explicit A/B bypass. AUTO and LIVE restore the current
+    // outer-lip/perioral patch; this no longer waits for a jaw-opening threshold.
+    const wantsFeed = enabled && mode !== 'source' && trustworthy && this.liveMouthActive && fresh && !!mouth && !!video && video.readyState >= 2;
     const metrics=mouth && sourceFrame ? mouthMaskMetrics(mouth.ring,sourceWidth,sourceHeight) : null;
+    const faceWidthPx=mouth?(mouth.faceWidthRatio || .45)*sourceWidth:0;
+    const region=mouth&&sourceFrame?perioralRegion(mouth.ring,sourceWidth,sourceHeight,faceWidthPx):null;
     this.oralDiagnostics.frameAvailable=!!video && video.readyState>=2;
     this.oralDiagnostics.polygonValid=metrics?.valid ?? false;
     this.oralDiagnostics.maskAreaPx=metrics?.area ?? 0;
-    this.oralDiagnostics.cropBounds=metrics?.bounds ?? null;
+    this.oralDiagnostics.cropBounds=region?.bounds ?? metrics?.bounds ?? null;
+    this.oralDiagnostics.faceWidthPx=region?.faceWidthPx ?? null;
+    this.oralDiagnostics.mouthWidthPx=region?.mouthWidth ?? null;
+    this.oralDiagnostics.featherSigmaPx=region?.sigma ?? null;
     this.oralDiagnostics.frameAgeMs=expression?.updatedAtMs===undefined ? null : Math.max(0,performance.now()-expression.updatedAtMs);
     this.oralDiagnostics.cameraTimestampMs=mouth?.sourceFrame ? mouth.timestampMs : video ? video.currentTime*1000 : null;
     this.oralDiagnostics.faceResultTimestampMs=mouth?.timestampMs ?? null;
     this.oralDiagnostics.controlsTimestampMs=expression?.mouth?.timestampMs ?? null;
     this.oralDiagnostics.renderTimestampMs=performance.now();
     if(!fresh && mouth && this.oralDroppedTimestamp!==mouth.timestampMs){this.oralDiagnostics.droppedFrames++;this.oralDroppedTimestamp=mouth.timestampMs;}
-    this.mouthMaskStatus=!enabled?'disabled':!mouth||!video||video.readyState<2?'unavailable':!fresh?'stale':!trustworthy?'invalid':!feedAllowed||!this.liveMouthActive?'closed':this.liveMouthHasFrame?'ready':'unavailable';
+    this.mouthMaskStatus=!enabled||mode==='source'?'disabled':!mouth||!video||video.readyState<2?'unavailable':!fresh?'stale':!trustworthy?'invalid':this.liveMouthHasFrame?'ready':'unavailable';
     if (wantsFeed && mouth && video && mouth.timestampMs !== this.liveMouthLastTimestamp && canvas) {
       const context = canvas.getContext('2d');
-      const target=mouthTextureTarget(mouth.ring,sourceWidth,sourceHeight,canvas.width,canvas.height);
-      if (context && sourceFrame && drawWarpedMouth(context, sourceFrame, mouth.ring, target,
-        canvas.width, canvas.height, sourceWidth, sourceHeight)) {
+      if (context && sourceFrame && drawPerioralPatch(context, sourceFrame, mouth.ring,
+        sourceWidth, sourceHeight, faceWidthPx)) {
         this.liveMouthLastTimestamp = mouth.timestampMs;
         this.liveMouthHasFrame = true;
         this.mouthMaskStatus='ready';
@@ -1321,8 +1316,20 @@ export class FaceRenderer {
         if (this.liveMouthTexture) this.liveMouthTexture.needsUpdate = true;
       }else{
         this.liveMouthHasFrame=false;
+        canvas.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height);
+        this.liveMouthLastTimestamp=-1;
+        this.liveMouthOpacity=0;
+        if(this.liveMouthTexture)this.liveMouthTexture.needsUpdate=true;
         this.mouthMaskStatus='invalid';
       }
+    }
+    if(!wantsFeed && this.liveMouthHasFrame){
+      // Never carry a prior camera mouth across a tracking miss or A/B toggle.
+      canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height);
+      this.liveMouthHasFrame=false;
+      this.liveMouthLastTimestamp=-1;
+      this.liveMouthOpacity=0;
+      if(this.liveMouthTexture)this.liveMouthTexture.needsUpdate=true;
     }
     const targetOpacity = wantsFeed && this.liveMouthHasFrame ? 1 : 0;
     this.oralDiagnostics.active = targetOpacity === 1;
@@ -1344,26 +1351,27 @@ export class FaceRenderer {
     if (this.liveMouthMaterial) this.liveMouthMaterial.opacity = this.liveMouthOpacity*(this.material?.opacity ?? 1);
     if (this.fillMaterial) this.fillMaterial.opacity = (1 - this.liveMouthOpacity)*(this.material?.opacity ?? 1);
     const position = this.liveMouthGeometry?.getAttribute('position') as import('three').BufferAttribute | undefined;
-    if (position && this.liveMouthBasePositions && this.deformer) {
+    if (position && this.deformer) {
       const vertices=this.deformer.positions;
       const uv=this.liveMouthGeometry!.getAttribute('uv') as import('three').BufferAttribute;
-      const currentRing=INNER_LIP_RING.map(anchor=>({x:vertices[anchor*3]!,y:-vertices[anchor*3+1]!}));
-      const mapped=mouthTextureTarget(currentRing,1,1,canvas?.width ?? 256,canvas?.height ?? 192);
-      if(mouth && video){
-        const liveMapped=mouthTextureTarget(mouth.ring,sourceWidth,sourceHeight,canvas?.width ?? 256,canvas?.height ?? 192);
-        const fit=oralContentFit(liveMapped,mapped);
-        for(const p of mapped){p.x=.5+(p.x-.5)/fit;p.y=.15+(p.y-.15)/fit;}
-      }
-      const centreUv=mapped.reduce((sum,p)=>({x:sum.x+p.x/mapped.length,y:sum.y+p.y/mapped.length}),{x:0,y:0});
+      const anchors=OUTER_LIP_RING.map(anchor=>({x:vertices[anchor*3]!,y:vertices[anchor*3+1]!,z:vertices[anchor*3+2]!}));
+      const cx=anchors.reduce((sum,p)=>sum+p.x,0)/anchors.length,cy=anchors.reduce((sum,p)=>sum+p.y,0)/anchors.length;
+      const width=Math.max(...anchors.map(p=>p.x))-Math.min(...anchors.map(p=>p.x));
+      const faceLeft=vertices[234*3]!,faceRight=vertices[454*3]!,faceWidth=Math.abs(faceRight-faceLeft);
+      const padX=width*MOUTH_HORIZONTAL_PAD_RATIO,padTop=faceWidth*MOUTH_UPPER_PAD_FACE_RATIO,padBottom=faceWidth*MOUTH_LOWER_PAD_FACE_RATIO;
+      const expanded=anchors.map(p=>({
+        x:cx+(p.x-cx)*(1+2*padX/Math.max(1e-6,width)),
+        y:p.y+(p.y>=cy?padTop:-padBottom),
+        z:p.z+.003,
+      }));
+      const minX=Math.min(...expanded.map(p=>p.x)),maxX=Math.max(...expanded.map(p=>p.x));
+      const minY=Math.min(...expanded.map(p=>p.y)),maxY=Math.max(...expanded.map(p=>p.y));
       let x=0,y=0,z=0;
-      for(const [i,anchor] of INNER_LIP_RING.entries()){
-        const px=vertices[anchor*3]!,py=vertices[anchor*3+1]!,pz=vertices[anchor*3+2]!-.005;
-        position.setXYZ(i,px,py,pz);x+=px;y+=py;z+=pz;
-        uv.setXY(i,mapped[i]!.x,1-mapped[i]!.y);
-      }
-      const n=INNER_LIP_RING.length;
+      expanded.forEach((p,i)=>{position.setXYZ(i,p.x,p.y,p.z);x+=p.x;y+=p.y;z+=p.z;
+        uv.setXY(i,(p.x-minX)/Math.max(1e-6,maxX-minX),1-(p.y-minY)/Math.max(1e-6,maxY-minY));});
+      const n=OUTER_LIP_RING.length;
       position.setXYZ(n,x/n,y/n,z/n);
-      uv.setXY(n,centreUv.x,1-centreUv.y);
+      uv.setXY(n,(x/n-minX)/Math.max(1e-6,maxX-minX),1-(y/n-minY)/Math.max(1e-6,maxY-minY));
       uv.needsUpdate=true;
       position.needsUpdate = true;
     }

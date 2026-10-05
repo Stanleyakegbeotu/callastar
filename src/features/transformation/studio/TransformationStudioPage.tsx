@@ -1188,12 +1188,12 @@ export function TransformationStudioPage() {
 
             {previewMode === 'face' && (
               <div className="studio-render-controls">
-                <label className="studio-live-mouth-toggle">Mouth interior
-                  <select aria-label="Mouth interior" value={oralInteriorMode} onChange={event => setOralInteriorMode(event.target.value as OralInteriorMode)}>
+                <label className="studio-live-mouth-toggle">Mouth preservation
+                  <select aria-label="Mouth preservation" value={oralInteriorMode} onChange={event => setOralInteriorMode(event.target.value as OralInteriorMode)}>
                     <option value="auto">AUTO</option><option value="source">SOURCE</option><option value="live">LIVE</option>
                   </select>
                 </label>
-                <span>AUTO keeps the source at rest and uses live teeth/tongue as the mouth opens.</span>
+                <span>AUTO preserves the current live mouth; SOURCE disables it for A/B comparison.</span>
               </div>
             )}
             {previewMode === "face" && rendererStats?.status === "ready" && (

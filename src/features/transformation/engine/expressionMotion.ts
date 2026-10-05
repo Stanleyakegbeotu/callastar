@@ -9,6 +9,7 @@ import { measureEyeGeometry, eyeStateFromGeometry, EYE_RENDER_CHANNELS, type Eye
 import { measureMouthControls, measureMouthGeometry, smoothMouth, type MouthControlFrame } from './mouthControls';
 import { noseControls, type NoseControlFrame } from './noseControls';
 import { mouthNoseLocalLandmarks } from './mouthNoseLocalGeometry';
+import { OUTER_LIP_RING } from './rendering/sourceMesh';
 
 const BROW_FULL_RAISE = 0.085;
 const localScratch: Point3[] = [];
@@ -62,7 +63,7 @@ export interface ExpressionMotion extends ExpressionValues {
   /** Local inner-lip aperture and chin drop, retained for jaw diagnostics. */
   mouthAperture?: { ratio: number | null; jawDrop: number | null };
   /** Ephemeral landmarks only; consumed in-memory by the optional compositor. */
-  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[]; sourceFrame?: HTMLCanvasElement };
+  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[]; faceWidthRatio: number; sourceFrame?: HTMLCanvasElement };
   /** Per-eye blink state and the closure measured before it shaped the value. */
   blinkState?: {
     left: "open" | "closing" | "closed" | "opening";
@@ -115,7 +116,6 @@ export const BLENDSHAPE_JITTER = 0.02;
 export const EYE_CLOSED_FRACTION = 0.25;
 export const BLENDSHAPE_POSE_DRIFT = 0.12;
 const POSE_DRIFT_FULL_AT = 0.26;
-const LIVE_INNER_LIP_RING = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191] as const;
 
 const relativeShape = (value: number, neutral: number, deadZone: number) =>
   unit((value - neutral - deadZone) / Math.max(0.25, 1 - neutral - deadZone));
@@ -274,7 +274,10 @@ export function computeExpressionMotion(
     mouthAperture: { ratio: mouthGeometry, jawDrop: jawGeometry },
     liveMouth: hasMesh ? {
       timestampMs: face.timestampMs,
-      ring: LIVE_INNER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
+      ring: OUTER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
+      // x is normalized by frame width, so the renderer multiplies by the
+      // current tracking-frame width to recover face width in pixels.
+      faceWidthRatio: Math.abs(face.landmarks[454]!.x - face.landmarks[234]!.x),
     } : undefined,
   };
   result.eyes = Object.fromEntries((['left', 'right'] as const).map(side => {

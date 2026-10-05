@@ -1,6 +1,12 @@
 export interface MouthPoint { x: number; y: number }
 export type OralInteriorMode = 'source' | 'live' | 'auto';
 export const ORAL_FRESH_MS = 400;
+export const MOUTH_HORIZONTAL_PAD_RATIO = 0.08;
+export const MOUTH_UPPER_PAD_FACE_RATIO = 0.03;
+export const MOUTH_LOWER_PAD_FACE_RATIO = 0.035;
+export const MOUTH_MIN_FEATHER_SIGMA = 1.5;
+export const MOUTH_FEATHER_FACE_RATIO = 0.008;
+const perioralWorkspaces=new WeakMap<HTMLCanvasElement,{mask:HTMLCanvasElement;feathered:HTMLCanvasElement}>();
 export function oralFrameFresh(updatedAtMs:number|undefined,nowMs:number):boolean {
   return updatedAtMs !== undefined && Number.isFinite(updatedAtMs) && nowMs >= updatedAtMs && nowMs-updatedAtMs < ORAL_FRESH_MS;
 }
@@ -12,6 +18,62 @@ export function mouthMaskMetrics(ring:readonly MouthPoint[],width:number,height:
   const bounds={minX:Math.min(...pixels.map(p=>p.x)),maxX:Math.max(...pixels.map(p=>p.x)),minY:Math.min(...pixels.map(p=>p.y)),maxY:Math.max(...pixels.map(p=>p.y))};
   const area=Math.abs(signed)/2;
   return {area,bounds,valid:area>=2 && bounds.minX>=0 && bounds.minY>=0 && bounds.maxX<=width && bounds.maxY<=height};
+}
+
+/** Expands an ordered outer-lip contour by mouth/face-relative padding. */
+export function perioralRegion(ring:readonly MouthPoint[],width:number,height:number,faceWidthPx:number) {
+  if (ring.length < 3 || ![width,height,faceWidthPx].every(n=>Number.isFinite(n)&&n>0) || ring.some(p=>![p.x,p.y].every(Number.isFinite))) return null;
+  const pixels=ring.map(p=>({x:p.x*width,y:p.y*height}));
+  const xs=pixels.map(p=>p.x),ys=pixels.map(p=>p.y);
+  const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
+  const mouthWidth=right-left,mouthHeight=bottom-top;
+  if (faceWidthPx < 24 || mouthWidth < 8 || mouthHeight < 4 || mouthWidth > width*.65 || mouthHeight > faceWidthPx*.45) return null;
+  const padX=Math.max(1,Math.min(mouthWidth*.12,mouthWidth*MOUTH_HORIZONTAL_PAD_RATIO));
+  const padTop=Math.max(1,Math.min(faceWidthPx*.05,faceWidthPx*MOUTH_UPPER_PAD_FACE_RATIO));
+  const padBottom=Math.max(1,Math.min(faceWidthPx*.06,faceWidthPx*MOUTH_LOWER_PAD_FACE_RATIO));
+  const cx=(left+right)/2,cy=(top+bottom)/2+(padBottom-padTop)/2;
+  const expanded=pixels.map(p=>({
+    x:cx+(p.x-(left+right)/2)*(1+2*padX/mouthWidth),
+    y:cy+(p.y-(top+bottom)/2)*(1+(padTop+padBottom)/mouthHeight),
+  }));
+  const sigma=Math.max(MOUTH_MIN_FEATHER_SIGMA,faceWidthPx*MOUTH_FEATHER_FACE_RATIO);
+  const bounds={minX:Math.min(...expanded.map(p=>p.x)),maxX:Math.max(...expanded.map(p=>p.x)),minY:Math.min(...expanded.map(p=>p.y)),maxY:Math.max(...expanded.map(p=>p.y))};
+  if(bounds.minX<0||bounds.minY<0||bounds.maxX>width||bounds.maxY>height) return null;
+  return { expanded, bounds, sigma, mouthWidth, faceWidthPx };
+}
+
+/** Crops current-frame perioral pixels and applies a feathered polygon alpha. */
+export function drawPerioralPatch(
+  context:CanvasRenderingContext2D, frame:CanvasImageSource, ring:readonly MouthPoint[],
+  width:number,height:number,faceWidthPx:number,
+):boolean {
+  const region=perioralRegion(ring,width,height,faceWidthPx);
+  if(!region||context.canvas.width<=0||context.canvas.height<=0)return false;
+  const {bounds,expanded,sigma}=region,canvasWidth=context.canvas.width,canvasHeight=context.canvas.height;
+  const roiWidth=bounds.maxX-bounds.minX,roiHeight=bounds.maxY-bounds.minY;
+  if(roiWidth<2||roiHeight<2)return false;
+  let workspace=perioralWorkspaces.get(context.canvas);
+  if(!workspace){workspace={mask:document.createElement('canvas'),feathered:document.createElement('canvas')};perioralWorkspaces.set(context.canvas,workspace);}
+  const {mask,feathered}=workspace;
+  if(mask.width!==canvasWidth||mask.height!==canvasHeight){mask.width=canvasWidth;mask.height=canvasHeight;feathered.width=canvasWidth;feathered.height=canvasHeight;}
+  const maskContext=mask.getContext('2d');if(!maskContext)return false;
+  context.setTransform(1,0,0,1,0,0);context.filter='none';context.globalCompositeOperation='source-over';
+  context.clearRect(0,0,canvasWidth,canvasHeight);
+  context.drawImage(frame,bounds.minX,bounds.minY,roiWidth,roiHeight,0,0,canvasWidth,canvasHeight);
+  const scaleX=canvasWidth/roiWidth,scaleY=canvasHeight/roiHeight;
+  maskContext.clearRect(0,0,canvasWidth,canvasHeight);
+  maskContext.beginPath();
+  expanded.forEach((p,i)=>{const x=(p.x-bounds.minX)*scaleX,y=(p.y-bounds.minY)*scaleY;i===0?maskContext.moveTo(x,y):maskContext.lineTo(x,y);});
+  maskContext.closePath();maskContext.fillStyle='#fff';maskContext.fill();
+  const feather=Math.max(.5,sigma*(scaleX+scaleY)/2);
+  // The contour is one filled polygon, so raster gaps cannot form internally;
+  // only the feather is needed here (no full-frame morphology pass).
+  const featherContext=feathered.getContext('2d');if(!featherContext)return false;
+  featherContext.clearRect(0,0,canvasWidth,canvasHeight);
+  featherContext.filter=`blur(${feather}px)`;featherContext.drawImage(mask,0,0);maskContext.filter='none';
+  maskContext.clearRect(0,0,canvasWidth,canvasHeight);maskContext.drawImage(feathered,0,0);
+  context.globalCompositeOperation='destination-in';context.drawImage(mask,0,0);context.globalCompositeOperation='source-over';
+  return true;
 }
 /** Half a camera pixel prevents nearest-sample exterior bleed; capped at
  * 0.65px. The old 1.5px inset erased narrow strips at distance. */

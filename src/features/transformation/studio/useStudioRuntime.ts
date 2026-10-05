@@ -115,7 +115,7 @@ interface Runtime {
   /** Where each camera frame is downscaled before inference. */
   trackingCanvas: HTMLCanvasElement;
   trackingContext: CanvasRenderingContext2D;
-  oralFrame: HTMLCanvasElement;
+  oralFrames: readonly [HTMLCanvasElement, HTMLCanvasElement];
   gazeSmoother: GazeSmoother;
   blinkState: BlinkStateMachine;
 }
@@ -225,7 +225,7 @@ export function useStudioRuntime(controlsRef: TransformationControlsRef): Studio
     runtime.scheduler.dispose();
     runtime.camera.dispose();
     runtime.face.dispose();
-    runtime.oralFrame.width=0;runtime.oralFrame.height=0;
+    for(const frame of runtime.oralFrames){frame.width=0;frame.height=0;}
 
     const video = videoRef.current;
     if (video) video.srcObject = null;
@@ -276,8 +276,12 @@ export function useStudioRuntime(controlsRef: TransformationControlsRef): Studio
     // through the GPU path, and forcing a software surface would slow every
     // frame down for nobody's benefit.
     const trackingContext = trackingCanvas.getContext("2d");
-    const oralFrame = document.createElement('canvas');
-    const oralContext = oralFrame.getContext('2d');
+    // Two snapshots keep the pixels paired with the immutable landmark ring
+    // consumed by the renderer. The previous frame is never overwritten while
+    // its FaceFrameSnapshot can still reference it.
+    const oralFrames: [HTMLCanvasElement, HTMLCanvasElement] = [document.createElement('canvas'), document.createElement('canvas')];
+    const oralContexts = oralFrames.map(frame => frame.getContext('2d')) as [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null];
+    let currentOralFrame = 0;
     const boundarySampleCanvas = document.createElement("canvas");
     boundarySampleCanvas.width = 96;
     boundarySampleCanvas.height = 96;
@@ -472,12 +476,17 @@ export function useStudioRuntime(controlsRef: TransformationControlsRef): Studio
         // Snapshot only for a visible live oral preview, once per NEW face
         // result. The inference pixels and lip polygon now describe the same
         // frame, even when video decoding advances during model inference.
-        // One reusable buffer, no queue, camera/tracker/eye inputs unchanged.
-        if(expression?.liveMouth && oralFrameEnabledRef.current && oralContext){
-          if(oralFrame.width!==trackingCanvas.width || oralFrame.height!==trackingCanvas.height){oralFrame.width=trackingCanvas.width;oralFrame.height=trackingCanvas.height;}
-          oralContext.drawImage(trackingCanvas,0,0);
-          expression.liveMouth.sourceFrame=oralFrame;
-        } else if(oralFrame.width>0){oralContext?.clearRect(0,0,oralFrame.width,oralFrame.height);}
+        // Two reusable snapshots alternate; camera, tracker, and eye inputs are unchanged.
+        if(expression?.liveMouth && oralFrameEnabledRef.current){
+          const nextOralFrame=(currentOralFrame+1)%oralFrames.length;
+          const frame=oralFrames[nextOralFrame]!,context=oralContexts[nextOralFrame];
+          if(context){
+            if(frame.width!==trackingCanvas.width || frame.height!==trackingCanvas.height){frame.width=trackingCanvas.width;frame.height=trackingCanvas.height;}
+            context.drawImage(trackingCanvas,0,0);
+            expression.liveMouth.sourceFrame=frame;
+            currentOralFrame=nextOralFrame;
+          }
+        }
         expressionRef.current = expression;
         }
         if (calibrationCollector.getState().phase === "ready") renderPausedRef.current = false;
@@ -588,7 +597,7 @@ export function useStudioRuntime(controlsRef: TransformationControlsRef): Studio
       calibration: calibrationCollector,
       trackingCanvas,
       trackingContext,
-      oralFrame,
+      oralFrames,
       gazeSmoother,
       blinkState,
     };
