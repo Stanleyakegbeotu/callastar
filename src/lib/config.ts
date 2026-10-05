@@ -320,17 +320,7 @@ export const RTC_ENV = {
   turnCredential: import.meta.env.VITE_RTC_TURN_CREDENTIAL ?? "",
 } as const;
 
-/**
- * The portrait rule for a video call source.
- *
- * A call source is played full-frame as a participant on a phone held upright,
- * so it has to be shot that way. A 16:9 clip stretched to fill 9:16 is a
- * distorted face, and one letterboxed into it is a small picture in a black
- * field — neither reads as a person on a call.
- *
- * The tolerance exists because encoders and crops rarely land on 0.5625 exactly
- * (1080×1920 is exact; 720×1281 is not). It is not a licence for 3:4.
- */
+/** Recommended portrait dimensions for call sources; other ratios are supported. */
 export const CALL_SOURCE_RULES = {
   /** 9 / 16 = 0.5625. */
   targetAspect: 9 / 16,

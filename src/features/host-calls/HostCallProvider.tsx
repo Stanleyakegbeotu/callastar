@@ -34,9 +34,8 @@ import {
 /**
  * The profile this browser tab is operating.
  *
- * Deliberately per tab rather than per account: an operator may have the
- * dashboard open on a laptop and CallaStar open on their phone, and those are
- * different capabilities — only the phone can answer a video call.
+ * Deliberately per tab rather than per account: an operator may take a call
+ * from any supported device where they are signed in.
  */
 export interface OperatedProfile {
   id: string;
@@ -55,8 +54,6 @@ export interface HostCallContextValue {
   /** Why live calling is unavailable in this build, for the operator to read. */
   unsupportedReason: string | null;
   socketStatus: SignalingStatus;
-  /** True when a video call has arrived somewhere it cannot be answered. */
-  mustAnswerOnMobile: boolean;
   sourceOptions: { liveCamera: VideoSourceAvailability; uploadedSource: VideoSourceAvailability } | null;
 
   startReceiving: (profile: OperatedProfile) => Promise<void>;
@@ -113,9 +110,6 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
 
   const deviceClass = getCallDeviceClass();
   const canAnswerVideoHere = videoCallSupport().supported;
-
-  /** A video call has arrived on a device that cannot answer video. */
-  const mustAnswerOnMobile = state.call?.callType === "video" && !canAnswerVideoHere;
 
   /* --------------------------------------------------------- socket status */
 
@@ -269,9 +263,7 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
     const call = state.call;
     if (!call) return;
 
-    // A video call cannot be answered from a device that cannot run one. The
-    // product rule holds on both sides of the call, so this is refused here
-    // rather than half-started and then abandoned.
+    // Do not start a video call when browser media APIs are unavailable.
     if (call.callType === "video" && !canAnswerVideoHere) return;
 
     dispatch({ type: "ANSWER" });
@@ -469,7 +461,6 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
       supported: hostCredentialProvider.available,
       unsupportedReason: hostCredentialProvider.unavailableReason,
       socketStatus,
-      mustAnswerOnMobile,
       sourceOptions,
       startReceiving,
       stopReceiving,
@@ -500,7 +491,6 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
       media.switchCamera,
       media.toggleCamera,
       media.toggleMic,
-      mustAnswerOnMobile,
       profile,
       rtc.hasRemoteMedia,
       rtc.remoteStream,

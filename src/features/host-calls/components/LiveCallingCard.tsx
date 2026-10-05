@@ -10,7 +10,7 @@ import { useHostCall } from "../HostCallProvider";
 
 interface LiveCallingCardProps {
   profile: HostProfile;
-  /** Whether this profile has a usable portrait call source uploaded. */
+  /** Whether this profile has a usable video call source uploaded. */
   hasCallSource: boolean;
 }
 

@@ -90,7 +90,7 @@ export function createLiveCameraSource(callType: "video" | "audio" = "video"): V
 }
 
 /**
- * A portrait video the operator uploaded for this profile.
+ * A video the operator uploaded for this profile.
  *
  * Only the asset id leaves this provider. Resolving it to a playable URL is the
  * media provider's job on the side that plays it, so a browser never puts a

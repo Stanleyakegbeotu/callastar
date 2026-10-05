@@ -69,17 +69,7 @@ export function validateRemoteAudioFile(file: File): FileCheck {
   return { ok: true };
 }
 
-/**
- * Whether a video's shape is usable as a call source.
- *
- * A call source is played full-frame as a participant on a phone held upright,
- * so it has to have been shot that way. There is no honest way to rescue a
- * landscape clip: stretching it distorts a face, and letterboxing it leaves a
- * small picture in a black field. Neither reads as a person on a call.
- *
- * The tolerance exists because encoders and crops rarely land on 0.5625 exactly
- * — 1080×1920 does, 720×1281 does not — and not as licence for 3:4.
- */
+/** Legacy 9:16 recommendation check. Call source uploads now accept every ratio. */
 export type AspectCheck =
   | { ok: true; aspect: number }
   /** Dimensions could not be read; the caller decides whether to accept it. */
@@ -109,31 +99,9 @@ export function describeAspect(width: number | null, height: number | null): str
   return `${Math.round(width / factor)}:${Math.round(height / factor)}`;
 }
 
-/**
- * The full check for a call-source video: the file rules, then its shape.
- *
- * Async because the shape can only be read by letting the browser decode the
- * header. A file whose dimensions cannot be read is accepted rather than
- * rejected — an unreadable header is our limitation, not the operator's, and the
- * media page flags it afterwards.
- */
+/** Validate the supported format and size. Call source uploads accept any ratio. */
 export async function validateCallSourceVideo(file: File): Promise<FileCheck> {
-  const basic = validateRemoteVideoFile(file);
-  if (!basic.ok) return basic;
-
-  const metadata = await readVideoMetadata(file);
-  const shape = checkPortraitSource(metadata.width, metadata.height);
-
-  if (shape.ok || shape.reason === "unknown") return { ok: true };
-
-  const actual = describeAspect(metadata.width, metadata.height);
-  return {
-    ok: false,
-    message:
-      shape.reason === "landscape"
-        ? `Portrait 9:16 required. This video is ${actual} — upload a portrait video designed for CallaStar mobile video calls (${CALL_SOURCE_RULES.recommendedWidth}×${CALL_SOURCE_RULES.recommendedHeight}).`
-        : `Portrait 9:16 required. This video is ${actual}, which is too far from 9:16 to play full-frame without distortion. ${CALL_SOURCE_RULES.recommendedWidth}×${CALL_SOURCE_RULES.recommendedHeight} is ideal.`,
-  };
+  return validateRemoteVideoFile(file);
 }
 
 export function validateFile(kind: AssetKind, file: File): FileCheck {

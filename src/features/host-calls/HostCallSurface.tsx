@@ -4,7 +4,6 @@ import { Icon } from "@/components/ui/Icon";
 import { AudioCallCanvas } from "@/features/calls/components/AudioCallCanvas";
 import { LiveCallCanvas } from "@/features/calls/components/LiveCallCanvas";
 import { ConnectingOverlay } from "@/features/calls/components/CallOverlays";
-import { useOrientationGuard } from "@/features/calls/hooks/useOrientationGuard";
 import { useCallTimer } from "@/features/call-session/hooks/useCallTimer";
 
 import { useHostCall } from "./HostCallProvider";
@@ -26,18 +25,11 @@ export function HostCallSurface() {
   const isVideo = state.call?.callType === "video";
   const seconds = useCallTimer(state.startedAt, state.phase === "in_call" && state.startedAt !== null);
 
-  // A video call is portrait-only on this side too. Armed only while a video call
-  // is actually up, so turning a phone sideways on the dashboard does nothing.
-  const landscape = useOrientationGuard(
-    isVideo === true && (state.phase === "connecting" || state.phase === "in_call"),
-  );
-
   if (state.phase === "incoming" && state.call) {
     return (
       <IncomingCallScreen
         call={state.call}
         profileName={profile?.displayName ?? ""}
-        mustAnswerOnMobile={host.mustAnswerOnMobile}
         onAnswer={host.answer}
         onDecline={host.decline}
       />
@@ -96,7 +88,6 @@ export function HostCallSurface() {
         canSwitchCamera={host.canSwitchCamera}
         showCameraControls={isVideo === true}
         reconnecting={false}
-        landscape={landscape}
         onToggleMic={host.toggleMic}
         onToggleCamera={host.toggleCamera}
         onSwitchCamera={() => void host.switchCamera()}

@@ -5,7 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatDuration, getInitials } from "@/lib/utils";
 
 import { RtcVideo } from "./RtcVideo";
-import { ReconnectingOverlay, RotateToPortraitOverlay } from "./CallOverlays";
+import { ReconnectingOverlay } from "./CallOverlays";
 
 export interface LiveCallCanvasProps {
   /** Who is on the other end, for the top bar and the waiting state. */
@@ -25,8 +25,6 @@ export interface LiveCallCanvasProps {
   showCameraControls: boolean;
   /** Real RTC trouble, already debounced by the engine. */
   reconnecting: boolean;
-  /** The phone is being held sideways. */
-  landscape: boolean;
   onToggleMic: () => void;
   onToggleCamera: () => void;
   onSwitchCamera: () => void;
@@ -38,15 +36,11 @@ export interface LiveCallCanvasProps {
 }
 
 /**
- * The live call, portrait, edge to edge.
+ * The live call, edge to edge on phones and computers.
  *
  * Used by both the caller and the operator. The composition is identical on both
- * phones — the remote participant fills the frame and you are in the corner — so
+ * screens — the remote participant fills the frame and you are in the corner — so
  * there is one canvas and the two sides simply pass different streams to it.
- *
- * Portrait is not a breakpoint here, it is the design. There is no landscape
- * variant to fall back to, which is why the orientation overlay covers rather
- * than relayouts.
  */
 export function LiveCallCanvas({
   remoteName,
@@ -61,7 +55,6 @@ export function LiveCallCanvas({
   canSwitchCamera,
   showCameraControls,
   reconnecting,
-  landscape,
   onToggleMic,
   onToggleCamera,
   onSwitchCamera,
@@ -203,7 +196,6 @@ export function LiveCallCanvas({
       </div>
 
       {showReconnecting && <ReconnectingOverlay />}
-      {landscape && <RotateToPortraitOverlay />}
       {overlay}
     </main>
   );

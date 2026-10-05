@@ -8,12 +8,6 @@ import type { HostIncomingCall } from "../state/hostCallReducer";
 interface IncomingCallScreenProps {
   call: HostIncomingCall;
   profileName: string;
-  /**
-   * True when this device cannot run a video call. The call is still shown — the
-   * operator should know somebody is calling — but Answer is replaced with an
-   * instruction rather than a button that would break the product rule.
-   */
-  mustAnswerOnMobile: boolean;
   onAnswer: () => void;
   onDecline: () => void;
 }
@@ -32,7 +26,6 @@ interface IncomingCallScreenProps {
 export function IncomingCallScreen({
   call,
   profileName,
-  mustAnswerOnMobile,
   onAnswer,
   onDecline,
 }: IncomingCallScreenProps) {
@@ -63,17 +56,6 @@ export function IncomingCallScreen({
         </h1>
 
         <p className="incoming-call-profile">{t("hostCall.callingProfile", { name: profileName })}</p>
-
-        {mustAnswerOnMobile && (
-          <div className="incoming-call-notice" role="status">
-            <Icon name="info" className="size-4" />
-            <span>
-              <strong>{t("hostCall.answerOnMobileTitle")}</strong>
-              {t("hostCall.answerOnMobileCopy")}
-              <em>{t("hostCall.openOnMobile")}</em>
-            </span>
-          </div>
-        )}
       </div>
 
       <div className="incoming-call-actions">
@@ -89,22 +71,17 @@ export function IncomingCallScreen({
           <span className="call-round-label">{t("hostCall.decline")}</span>
         </div>
 
-        {/* Answer is simply absent where it cannot be honoured. A disabled green
-            button invites tapping at it; its absence explains itself alongside the
-            notice above. */}
-        {!mustAnswerOnMobile && (
-          <div className="incoming-call-action">
-            <button
-              type="button"
-              className="call-round-button is-accept"
-              onClick={onAnswer}
-              aria-label={t("hostCall.answer")}
-            >
-              <Icon name={isVideo ? "video" : "phone"} className="size-7" />
-            </button>
-            <span className="call-round-label">{t("hostCall.answer")}</span>
-          </div>
-        )}
+        <div className="incoming-call-action">
+          <button
+            type="button"
+            className="call-round-button is-accept"
+            onClick={onAnswer}
+            aria-label={t("hostCall.answer")}
+          >
+            <Icon name={isVideo ? "video" : "phone"} className="size-7" />
+          </button>
+          <span className="call-round-label">{t("hostCall.answer")}</span>
+        </div>
       </div>
     </div>
   );

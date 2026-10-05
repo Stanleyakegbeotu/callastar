@@ -81,9 +81,7 @@ describe("device classification", () => {
   });
 
   it("stays desktop when the window is narrowed to phone width", () => {
-    // Section 7 and 114. Classification reads the PHYSICAL screen, so resizing a
-    // desktop browser to 390px must not make it a supported video device. There
-    // is no viewport input to this function at all, which is the real guarantee.
+    // Classification reads the physical screen, independently of browser width.
     const narrowed = signals({
       userAgent: UA.windowsChrome,
       screenShortEdge: 1080,
@@ -91,10 +89,7 @@ describe("device classification", () => {
       coarsePointer: false,
     });
     expect(classifyDevice(narrowed)).toBe("desktop");
-    expect(videoCallSupport(capabilities({ deviceClass: "desktop" }))).toEqual({
-      supported: false,
-      reason: "device-class",
-    });
+    expect(videoCallSupport(capabilities({ deviceClass: "desktop" }))).toEqual({ supported: true });
   });
 
   it("does not let a desktop touchscreen become a phone", () => {
@@ -119,15 +114,9 @@ describe("device classification", () => {
 });
 
 describe("call support policy", () => {
-  it("allows video only on a phone", () => {
-    expect(videoCallSupport(capabilities({ deviceClass: "mobile-phone" }))).toEqual({ supported: true });
-
-    // Section 7: tablet is deliberately excluded rather than silently folded in.
-    for (const deviceClass of ["tablet", "desktop", "unknown"] as const) {
-      expect(videoCallSupport(capabilities({ deviceClass }))).toEqual({
-        supported: false,
-        reason: "device-class",
-      });
+  it("allows video on every device class with browser media support", () => {
+    for (const deviceClass of ["mobile-phone", "tablet", "desktop", "unknown"] as const) {
+      expect(videoCallSupport(capabilities({ deviceClass }))).toEqual({ supported: true });
     }
   });
 
@@ -154,9 +143,7 @@ describe("call support policy", () => {
     expect(audioCallSupport(noMedia)).toEqual({ supported: false, reason: "unsupported-browser" });
   });
 
-  it("checks the device class before the secure context for video", () => {
-    // A desktop on HTTP is still primarily a desktop, but the technical failure
-    // is the one that actually blocks a call, so it wins.
+  it("requires a secure context on every device class", () => {
     const both = capabilities({ deviceClass: "desktop", secureContext: false });
     expect(videoCallSupport(both)).toEqual({ supported: false, reason: "insecure-context" });
   });

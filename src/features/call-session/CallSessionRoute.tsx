@@ -17,7 +17,6 @@ import type { MediaErrorInfo } from "@/types/media";
 import type { CallEndReason } from "@/services/signaling";
 import { AudioCallCanvas } from "@/features/calls/components/AudioCallCanvas";
 import { LiveCallCanvas } from "@/features/calls/components/LiveCallCanvas";
-import { useOrientationGuard } from "@/features/calls/hooks/useOrientationGuard";
 
 import { CallOutcomeScreen } from "./live/CallOutcomeScreen";
 import { CallPermissionScreen } from "./live/CallPermissionScreen";
@@ -213,18 +212,6 @@ export function CallSessionRoute() {
   const liveSeconds = useCallTimer(
     session.startedAt,
     (session.status === "active" || session.status === "reconnecting") && session.startedAt !== null,
-  );
-
-  /**
-   * Portrait guard, armed only while a video call is really in flight.
-   *
-   * Reports only. Turning the phone sideways must not touch the peer connection,
-   * the tracks or the session — it puts an overlay over a call that keeps running.
-   */
-  const landscape = useOrientationGuard(
-    liveMode &&
-      session.type === "video" &&
-      (session.status === "connecting" || session.status === "active" || session.status === "reconnecting"),
   );
 
   /**
@@ -485,7 +472,6 @@ export function CallSessionRoute() {
             // Real ICE trouble only. The uploaded-source fallback is a different
             // concept and lives on the simulated path.
             reconnecting={session.status === "reconnecting"}
-            landscape={landscape}
             onToggleMic={media.toggleMic}
             onToggleCamera={media.toggleCamera}
             onSwitchCamera={() => void media.switchCamera()}

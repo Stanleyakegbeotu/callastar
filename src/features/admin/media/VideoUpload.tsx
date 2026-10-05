@@ -1,6 +1,6 @@
 import { useId, useState, type ChangeEvent } from "react";
 
-import { CALL_SOURCE_RULES, MEDIA_LIMITS } from "@/lib/config";
+import { MEDIA_LIMITS } from "@/lib/config";
 import { formatFileSize } from "@/lib/utils";
 import { validateCallSourceVideo } from "@/services/admin/mediaFiles";
 
@@ -35,7 +35,7 @@ export function VideoUpload({ file, previewUrl, onSelect, label, disabled = fals
       return;
     }
 
-    // Async: the shape can only be known once the browser has read the header.
+    // Run format and size checks before accepting the file.
     setChecking(true);
     const check = await validateCallSourceVideo(selected).finally(() => setChecking(false));
     if (!check.ok) {
@@ -88,9 +88,7 @@ export function VideoUpload({ file, previewUrl, onSelect, label, disabled = fals
           </p>
         )}
         <p className="admin-hint" id={`${inputId}-rule`}>
-          <strong>Portrait 9:16 required.</strong> Upload a portrait video designed for CallaStar mobile video
-          calls — {CALL_SOURCE_RULES.recommendedWidth}×{CALL_SOURCE_RULES.recommendedHeight} is ideal. MP4 or
-          WebM, up to {formatFileSize(MEDIA_LIMITS.MAX_REMOTE_VIDEO_BYTES)}.
+          Videos of any aspect ratio are accepted. MP4 or WebM, up to {formatFileSize(MEDIA_LIMITS.MAX_REMOTE_VIDEO_BYTES)}.
         </p>
         {checking && (
           <p className="admin-hint" role="status">

@@ -668,17 +668,17 @@
 }
 
 /*
- * The main participant fills the portrait frame.
+ * The main participant fills the available stage without cropping unusual
+ * camera or uploaded-source ratios on laptop and mobile screens.
  *
- * `cover` rather than `contain`: this is a live camera on a phone held upright,
- * so its native shape already matches the frame and cropping is minimal. A
- * letterboxed live camera would read as a fault.
+ * `contain` keeps the full participant visible across portrait and landscape
+ * cameras. The stage background fills any unused space.
  */
 .live-call-main {
   width: 100%;
   height: 100%;
   background: #04122b;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center;
 }
 

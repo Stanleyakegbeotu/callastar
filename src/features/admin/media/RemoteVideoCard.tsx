@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { formatDateTime, formatFileSize } from "@/lib/utils";
-import { checkPortraitSource, describeAspect } from "@/services/admin/mediaFiles";
+import { describeAspect } from "@/services/admin/mediaFiles";
 import { mediaAssetProvider } from "@/services/media/mediaAssetProvider";
 import { adminRepository } from "@/services/admin/repository";
 import type { HostProfile } from "@/services/admin/types";
@@ -77,14 +77,7 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
 
   const duration = describeDuration(meta?.durationSeconds ?? null);
 
-  /**
-   * Whether this source could actually carry a call.
-   *
-   * Two separate questions, and conflating them would mislead an operator: is it
-   * the right SHAPE, and can another device REACH it. A perfectly good 9:16 clip
-   * sitting in this browser's IndexedDB is still unusable on a real call.
-   */
-  const shape = checkPortraitSource(meta?.width ?? null, meta?.height ?? null);
+  /** A stored clip can only appear on calls from a remote-reachable provider. */
   const reachable = mediaAssetProvider.reachableAcrossDevices;
 
   return (
@@ -106,18 +99,10 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
 
           {meta && (
             <>
-            {/*
-              Two separate questions, deliberately not merged: is this the right
-              SHAPE, and can another device REACH it. A perfect 9:16 clip sitting
-              in this browser's storage is still unusable on a real call, and an
-              operator told only "Ready" would never know why it failed.
-            */}
-            <p className={`source-status is-${shape.ok ? (reachable ? "ready" : "local") : "invalid"}`} role="status">
-              {!shape.ok && shape.reason !== "unknown"
-                ? "Needs portrait source — this video is not 9:16 and cannot be used for video calls."
-                : !reachable
-                  ? "Local only — stored in this browser, so another device cannot load it yet. Remote storage is required before Uploaded Source works on a real call."
-                  : "Ready for calls"}
+            <p className={`source-status is-${reachable ? "ready" : "local"}`} role="status">
+              {!reachable
+                ? "Local only — stored in this browser, so another device cannot load it yet. Remote storage is required before Uploaded Source works on a real call."
+                : "Ready for calls"}
             </p>
 
             <dl className="admin-meta-grid">

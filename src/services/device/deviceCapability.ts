@@ -1,9 +1,8 @@
 /**
- * Which kind of device this is, for product capability gating and nothing else.
+ * Which kind of device this is, for diagnostics and nothing else.
  *
- * CallaStar video calls are a mobile-phone product: the composition is 9:16 and
- * both participants hold a phone. Audio calls have no such constraint and run
- * everywhere. This module is the single place that decides which is which.
+ * Device class is recorded for diagnostics. Video and audio call support is
+ * determined by browser media APIs and a secure context, across device classes.
  *
  * Deliberately NOT fingerprinting. Every signal read here is a coarse capability
  * the browser advertises for exactly this purpose — is this a handheld, is the
@@ -11,9 +10,8 @@
  * identifier, stored or sent anywhere: the only output is one of four words.
  *
  * Viewport width is deliberately not a signal. A desktop browser narrowed to
- * 390px is still a desktop, and resizing a window must never turn an unsupported
- * device into a supported one — so classification reads the physical screen,
- * which a resize does not change.
+ * 390px is still a desktop, so classification reads the physical screen, which
+ * a resize does not change.
  */
 
 export type CallDeviceClass = "mobile-phone" | "tablet" | "desktop" | "unknown";
@@ -175,12 +173,8 @@ export function getCallDeviceClass(): CallDeviceClass {
 }
 
 /**
- * Why a call type cannot run here.
- *
- * `device-class` is a product decision and gets the "open this on your phone"
- * screen. The other two are genuine technical dead ends and have to read
- * differently: telling somebody to use their phone when the real problem is that
- * the page is not on HTTPS would send them in the wrong direction.
+ * Why a call type cannot run here. Device class is retained in the union for
+ * compatibility with older callers, but current support checks are technical.
  */
 export type CallSupportReason = "device-class" | "insecure-context" | "unsupported-browser";
 
@@ -196,20 +190,11 @@ function technicalVerdict(capabilities: DeviceCapabilities): CallSupportVerdict 
   return null;
 }
 
-/**
- * Video calling is a phone product, on both sides of the call.
- *
- * Tablet is deliberately excluded. The requirement names iPhone and Android
- * phones, and quietly widening a product rule to "anything with a touchscreen"
- * is not this module's decision to make. Audio remains available there.
- */
+/** Video calling is available on any supported device with browser media APIs. */
 export function videoCallSupport(
   capabilities: DeviceCapabilities = getDeviceCapabilities(),
 ): CallSupportVerdict {
-  const technical = technicalVerdict(capabilities);
-  if (technical) return technical;
-  if (capabilities.deviceClass !== "mobile-phone") return { supported: false, reason: "device-class" };
-  return SUPPORTED;
+  return technicalVerdict(capabilities) ?? SUPPORTED;
 }
 
 /** Audio calling runs on every device class, phone through desktop. */
