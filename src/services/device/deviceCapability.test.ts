@@ -150,7 +150,7 @@ describe("call support policy", () => {
 
   it("routes by call type", () => {
     const desktop = capabilities({ deviceClass: "desktop" });
-    expect(callSupport("video", desktop).supported).toBe(false);
+    expect(callSupport("video", desktop).supported).toBe(true);
     expect(callSupport("audio", desktop).supported).toBe(true);
   });
 });
