@@ -542,6 +542,7 @@ describe("the profile itself", () => {
     expect(keys).toEqual(
       [
         "analysisVersion",
+        "appearance",
         "asset",
         "createdAt",
         "dimensions",

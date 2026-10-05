@@ -3,9 +3,10 @@ import type { SourceAsset } from "../../source/sourceAsset";
 import type { TransformationSourceProfile } from "../../source/sourceTypes";
 import type { CalibrationMotion } from "../relativeMotion";
 import type { FaceFrameSnapshot } from "../faceFrame";
+import { boundaryCorrectionLimit, coverageExtensionScale, featherExtensionScale, responseGain, scaleFollowRatio, sourceSurfaceAlpha, type TransformationControlsRef } from "../transformationControls";
 import { mapNormalizedToDisplay } from "../coordinateMapping";
 import {
-  clampExpression, deriveExpressionEnvelope, deriveSourceExpression,
+  EXPRESSION_KEYS, clampExpression, deriveExpressionEnvelope, deriveSourceExpression,
   clampExpressionInto, NEUTRAL_EXPRESSION, smoothExpressionInto,
   type ExpressionKey, type ExpressionMotion, type ExpressionValues, type ExpressionEnvelope,
   type ExpressionTrace,
@@ -38,6 +39,17 @@ import { EyeGazeWarper } from "./eyeGazeWarper";
 import { EYE_RENDER_CHANNELS, eyeGazeForRenderer } from '../eyeControls';
 import { noseCavityData, nostrilVisibility } from './noseCavities';
 import { buildProjectionBindings, projectLiveMeshPositions, type ProjectionBinding } from "./liveMeshProjection";
+import { estimateFacialHairMask } from "./facialHairMask";
+import {
+  applyBoundaryCorrections,
+  BOUNDARY_SKIN_REGIONS,
+  estimateBoundaryCorrections,
+  NEUTRAL_BOUNDARY_CORRECTION,
+  sampleImageRegion,
+  smoothBoundaryCorrections,
+  type BoundaryColorCorrection,
+  type BoundaryRgb,
+} from "./boundaryHarmonization";
 
 export type FaceRendererStatus = "loading" | "ready" | "lost" | "failed" | "disposed";
 
@@ -54,6 +66,10 @@ export interface FaceRendererStats {
   faceFrame?: FaceFrameSnapshot | null;
   attachmentProbe?: ReturnType<FaceRenderer["getAttachmentProbe"]>;
   contourAlignment?: readonly ContourAlignmentSample[];
+  alphaPipeline?: "straight texture/shader → premultiplied framebuffer/canvas";
+  boundaryBlendMs?: number | null;
+  boundaryColorCorrection?: readonly BoundaryColorCorrection[];
+  poseAlignment?: Readonly<Record<"leftYaw" | "rightYaw" | "upPitch" | "downPitch", { angleDeg: number | null; errorPx: number | null; count: number }>>;
   depthRange?: number;
   dpr?: number;
   contextLossCount?: number;
@@ -101,7 +117,7 @@ export interface FaceRendererStats {
 }
 
 export interface ContourAlignmentSample {
-  region: "forehead" | "left-temple" | "right-temple" | "left-cheek" | "right-cheek" | "chin";
+  region: "forehead" | "left-temple" | "right-temple" | "left-cheek" | "right-cheek" | "chin" | "nose-center";
   landmarkIndex: number;
   live: { x: number; y: number };
   rendered: { x: number; y: number };
@@ -180,13 +196,15 @@ export interface FaceRendererOptions {
    * must receive. Mirroring is applied to the SCENE, never to the motion — see
    * `rendererMotion.ts`.
    */
-  mirror?: RenderMirrorMode;
+  mirror?: RenderMirrorMode | { current: RenderMirrorMode };
   /**
    * Where the operator's neutral face sat in the camera frame. Present once
    * calibrated: the face is then drawn where, and as large as, the camera
    * preview shows it — see `faceFraming.ts`.
    */
   framing?: { current: FaceRenderFraming | null };
+  /** One authoritative live control model, read without restarting the renderer. */
+  controls?: TransformationControlsRef;
   onStats?: (stats: FaceRendererStats) => void;
 }
 
@@ -246,8 +264,26 @@ export class FaceRenderer {
   private edgeMaterial: import("three").LineBasicMaterial | null = null;
   private boundaryLines: { line: import("three").LineLoop; vertices: number[] }[] = [];
   private faceLockLines: { line: import("three").LineLoop; vertices: number[] }[] = [];
+  private coveragePreviewLines: { line: import("three").Line; vertices: number[] }[] = [];
   private boundaryLoopStats: FaceBoundaryLoop[] = [];
   private baseColors: Float32Array | null = null;
+  private boundaryAlpha: Float32Array | null = null;
+  private coverageBoundaryVertices: number[] = [];
+  private coverageExtensionVertices: number[] = [];
+  private coverageExtensionRegions: Uint8Array = new Uint8Array();
+  private sourceFacialHairWeights: Float32Array | null = null;
+  private sourceFacialHairPresent = false;
+  private sourceForeheadExtensionLimit: number | null = null;
+  private boundarySourceCanvas: HTMLCanvasElement | null = null;
+  private boundarySourcePixels: Uint8ClampedArray | null = null;
+  private boundarySourceSamples: (BoundaryRgb | null)[] = [];
+  private boundaryCurrentCorrection: readonly BoundaryColorCorrection[] = NEUTRAL_BOUNDARY_CORRECTION;
+  private boundaryLastLiveSamples: readonly (BoundaryRgb | null)[] = [];
+  private boundaryControlSignature = "";
+  private boundaryLastSampleAt = -Infinity;
+  private boundaryLastUpdateAt = 0;
+  private boundaryBlendMs: number | null = null;
+  private boundaryRegionAnchors: { x: number; y: number }[] = [];
   private showBoundaries = false;
   private showWeights = false;
   private showFaceLockDebug = false;
@@ -261,6 +297,7 @@ export class FaceRenderer {
   private worldTransform: { x: number; y: number; scale: number; eyeSpanWorld: number } | null = null;
   private expressionEnvelope: ExpressionEnvelope | null = null;
   private expressionState: ExpressionValues = { ...NEUTRAL_EXPRESSION };
+  private responseExpression: ExpressionValues = { ...NEUTRAL_EXPRESSION };
   private expressionRequested: ExpressionValues | null = null;
   private expressionApplied: ExpressionValues | null = null;
   private readonly expressionClamped: ExpressionKey[] = [];
@@ -285,8 +322,117 @@ export class FaceRenderer {
   private lastAppliedFaceFrame: FaceFrameSnapshot | null = null;
   private projectionBindings: ProjectionBinding[] = [];
   private contourAlignment: ContourAlignmentSample[] = [];
+  private lastAlignmentFrameId = -1;
+  private readonly poseAlignmentSamples: Record<"leftYaw" | "rightYaw" | "upPitch" | "downPitch", { angle: number; error: number }[]> = {
+    leftYaw: [], rightYaw: [], upPitch: [], downPitch: [],
+  };
 
   constructor(private readonly options: FaceRendererOptions) {}
+
+  private initializeBoundarySampler(
+    localLandmarks: readonly { x: number; y: number }[],
+    sourceLandmarks: readonly { x: number; y: number }[],
+  ): void {
+    const appearance = this.options.profile.appearance?.facialHair;
+    if (appearance && appearance.mask.length >= 468) {
+      this.setSourceFacialHairEstimate({ weights: Float32Array.from(appearance.mask.slice(0, 468)), present: appearance.present });
+    }
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = 96;
+    sourceCanvas.height = 96;
+    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    if (!sourceContext || !this.textureBitmap) return;
+    try {
+      sourceContext.drawImage(this.textureBitmap, 0, 0, sourceCanvas.width, sourceCanvas.height);
+      this.boundarySourcePixels = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height).data;
+    } catch {
+      return;
+    }
+    this.boundarySourceCanvas = sourceCanvas;
+    const sourceCenter = sourceLandmarks[1];
+    this.boundarySourceSamples = BOUNDARY_SKIN_REGIONS.map(({ landmark }) => {
+      const point = sourceLandmarks[landmark];
+      if (!point || !sourceCenter || !this.boundarySourcePixels) return null;
+      return sampleImageRegion(this.boundarySourcePixels, sourceCanvas.width, sourceCanvas.height, {
+        x: point.x + (sourceCenter.x - point.x) * 0.18,
+        y: point.y + (sourceCenter.y - point.y) * 0.18,
+      });
+    });
+    this.boundaryRegionAnchors = BOUNDARY_SKIN_REGIONS.flatMap(({ landmark }) => {
+      const point = localLandmarks[landmark];
+      return point ? [{ x: point.x, y: -point.y }] : [];
+    });
+    if (!appearance || appearance.mask.length < 468) {
+      this.setSourceFacialHairEstimate(estimateFacialHairMask(this.boundarySourcePixels!, sourceCanvas.width, sourceCanvas.height, this.options.profile.primaryFace.landmarks));
+    }
+  }
+
+  private setSourceFacialHairEstimate(estimated: { weights: Float32Array; present: boolean }): void {
+    const count = (this.deformer?.positions.length ?? 0) / 3;
+    this.sourceFacialHairWeights = new Float32Array(count);
+    this.sourceFacialHairPresent = estimated.present;
+    if (estimated.present) {
+      for (let vertex = 0; vertex < Math.min(468, count, estimated.weights.length); vertex++) {
+        this.sourceFacialHairWeights[vertex] = estimated.weights[vertex]!;
+      }
+      for (let index = 0; index < this.coverageBoundaryVertices.length; index++) {
+        const boundary = this.coverageBoundaryVertices[index]!;
+        const extension = this.coverageExtensionVertices[index]!;
+        this.sourceFacialHairWeights[extension] = this.sourceFacialHairWeights[boundary] ?? 0;
+      }
+    }
+  }
+
+  private updateBoundaryHarmonization(frame: FaceFrameSnapshot | null, now: number): void {
+    if (!this.geometry || !this.baseColors || !this.boundaryAlpha || !this.deformer || this.showMask || this.showWeights) return;
+    const startedAt = performance.now();
+    const sampleTimestamp = frame?.boundarySkinSampleTimestampMs ?? null;
+    const hasNewSample = sampleTimestamp !== null && sampleTimestamp !== this.boundaryLastSampleAt;
+    const controls = this.options.controls?.current;
+    const blendControls = controls?.blending;
+    const preserveTexture = controls?.appearance.preserveSourceTexture !== false;
+    const controlSignature = [blendControls?.skinMatch, blendControls?.luminanceMatch, blendControls?.chromaMatch,
+      blendControls?.shadowCorrection, preserveTexture].join(":");
+    const controlsChanged = controlSignature !== this.boundaryControlSignature;
+    if (hasNewSample && frame?.boundarySkinSamples) {
+      this.boundaryLastSampleAt = sampleTimestamp;
+      this.boundaryLastLiveSamples = frame.boundarySkinSamples;
+    }
+    if (hasNewSample || controlsChanged) {
+      this.boundaryControlSignature = controlSignature;
+      try {
+        const maxChange = boundaryCorrectionLimit(blendControls?.skinMatch ?? 68, preserveTexture);
+        const estimated = estimateBoundaryCorrections(this.boundarySourceSamples, this.boundaryLastLiveSamples, maxChange);
+        const luminanceStrength = (blendControls?.luminanceMatch ?? 68) / 100 * (0.25 + 0.75 * (blendControls?.shadowCorrection ?? 40) / 100);
+        const chromaStrength = (blendControls?.chromaMatch ?? 68) / 100;
+        const target = estimated.map(correction => {
+          const luminance = 0.2126 * correction.r + 0.7152 * correction.g + 0.0722 * correction.b;
+          const mix = (channel: number) => {
+            const chroma = luminance > 1e-5 ? channel / luminance : 1;
+            return Math.max(0.7, Math.min(1.3, 1 + (luminance - 1) * luminanceStrength + (chroma - 1) * chromaStrength));
+          };
+          return { r: mix(correction.r), g: mix(correction.g), b: mix(correction.b) };
+        });
+        const deltaMs = this.boundaryLastUpdateAt ? now - this.boundaryLastUpdateAt : 125;
+        this.boundaryCurrentCorrection = smoothBoundaryCorrections(this.boundaryCurrentCorrection, target, deltaMs, 650);
+        this.boundaryLastUpdateAt = now;
+        const color = this.geometry.getAttribute("color") as import("three").BufferAttribute;
+        applyBoundaryCorrections(
+          color.array as Float32Array,
+          this.baseColors,
+          this.boundaryAlpha,
+          this.deformer.positions,
+          this.boundaryRegionAnchors,
+          this.boundaryCurrentCorrection,
+        );
+        color.needsUpdate = true;
+      } catch {
+        // An unavailable sample skips appearance matching without interrupting
+        // the tracking/render loop.
+      }
+    }
+    this.boundaryBlendMs = (hasNewSample ? frame?.boundarySkinSampleCostMs ?? 0 : 0) + performance.now() - startedAt;
+  }
 
   initialize(): Promise<void> {
     if (this.initialization) return this.initialization;
@@ -350,6 +496,7 @@ export class FaceRenderer {
     if (this.liveMouthMesh) this.liveMouthMesh.visible = !showMask;
     if (this.meshEdges) this.meshEdges.visible = options.showMesh;
     for (const { line } of this.boundaryLines) line.visible = this.showBoundaries;
+    for (const { line } of this.coveragePreviewLines) line.visible = this.showBoundaries;
     for (const { line } of this.faceLockLines) line.visible = this.showFaceLockDebug;
     const color = this.geometry?.getAttribute("color") as import("three").BufferAttribute | undefined;
     if (color && this.baseColors) {
@@ -409,8 +556,13 @@ export class FaceRenderer {
       line.geometry.dispose();
       for (const material of Array.isArray(line.material) ? line.material : [line.material]) material.dispose();
     }
+    for (const { line } of this.coveragePreviewLines) {
+      line.geometry.dispose();
+      for (const material of Array.isArray(line.material) ? line.material : [line.material]) material.dispose();
+    }
     this.boundaryLines = [];
     this.faceLockLines = [];
+    this.coveragePreviewLines = [];
     this.boundaryLoopStats = [];
     this.edgeGeometry?.dispose();
     this.edgeMaterial?.dispose();
@@ -437,6 +589,13 @@ export class FaceRenderer {
     this.liveMouthMesh = null;
     this.liveMouthCanvas?.getContext('2d')?.clearRect(0, 0, this.liveMouthCanvas.width, this.liveMouthCanvas.height);
     this.liveMouthCanvas = null;
+    this.boundarySourceCanvas?.getContext("2d")?.clearRect(0, 0, this.boundarySourceCanvas.width, this.boundarySourceCanvas.height);
+    this.boundarySourceCanvas = null;
+    this.boundarySourcePixels = null;
+    this.boundarySourceSamples = [];
+    this.boundaryRegionAnchors = [];
+    this.boundaryCurrentCorrection = NEUTRAL_BOUNDARY_CORRECTION;
+    this.boundaryBlendMs = null;
     this.liveMouthTarget = [];
     this.liveMouthBasePositions = null;
     this.liveMouthMidY = 0;
@@ -447,6 +606,7 @@ export class FaceRenderer {
     this.liveMouthOpacity = 0;
     this.liveMouthActive = false;
     this.texture = null;
+    this.boundaryAlpha = null;
     this.textureBitmap = null;
     this.deformer = null;
     this.gazeWarper = null;
@@ -484,6 +644,17 @@ export class FaceRenderer {
       this.options.profile.primaryFace, this.options.profile.dimensions?.aspectRatio ?? 1);
     this.projectionBindings = buildProjectionBindings(meshData.uvs, this.options.profile.primaryFace.landmarks);
     this.boundaryLoopStats = meshData.boundaryLoops;
+    this.coverageBoundaryVertices = meshData.coverageBoundaryVertices ?? [];
+    this.coverageExtensionVertices = meshData.coverageExtensionVertices ?? [];
+    this.coverageExtensionRegions = meshData.coverageExtensionRegions ?? new Uint8Array();
+    const hairline = this.options.profile.appearance?.hairline;
+    const sourceTop = this.options.profile.primaryFace.landmarks[10];
+    if (hairline && sourceTop && hairline.confidence >= 0.18 && hairline.foreheadTop < sourceTop.y) {
+      const dimensions = this.options.profile.dimensions;
+      const sourceFaceWidth = Math.max(1e-4, Math.abs(this.options.profile.primaryFace.landmarks[454]!.x - this.options.profile.primaryFace.landmarks[234]!.x));
+      this.sourceForeheadExtensionLimit = 0.44 * (sourceTop.y - hairline.foreheadTop) * (dimensions?.height ?? 1) /
+        (sourceFaceWidth * (dimensions?.width ?? 1));
+    }
     this.deformer = new ExpressionDeformer(meshData, this.options.profile.primaryFace.landmarks);
     this.gazeWarper = new EyeGazeWarper(meshData.uvs, this.options.profile.primaryFace.landmarks, meshData.eyeInterior);
     this.meshEyeSpan = meshEyeSpan(meshData.positions);
@@ -499,6 +670,7 @@ export class FaceRenderer {
     // carries the topology-derived face edge ramp, attached to these same
     // deforming vertices so the live frame shows through the outer contour.
     const colors = new Float32Array(meshData.positions.length / 3 * 4).fill(1);
+    this.boundaryAlpha = meshData.boundaryAlpha.slice();
     for (let vertex = 0; vertex < meshData.boundaryAlpha.length; vertex++) {
       colors[vertex * 4 + 3] = meshData.boundaryAlpha[vertex]!;
     }
@@ -510,6 +682,10 @@ export class FaceRenderer {
     }
     geometry.setAttribute("color", new three.BufferAttribute(colors, 4));
     this.baseColors = colors.slice();
+    this.initializeBoundarySampler(
+      meshData.localLandmarks ?? this.options.profile.primaryFace.landmarks,
+      this.options.profile.primaryFace.landmarks,
+    );
     if (mouth) {
       geometry.addGroup(0, mouth.fillIndexStart, 0);
       geometry.addGroup(mouth.cavityIndexStart, mouth.cavityIndexCount, 1);
@@ -521,14 +697,17 @@ export class FaceRenderer {
     texture.colorSpace = three.SRGBColorSpace;
     texture.wrapS = three.ClampToEdgeWrapping;
     texture.wrapT = three.ClampToEdgeWrapping;
+    // Keep source texels straight-alpha. NormalBlending then applies SRC_ALPHA
+    // exactly once into the premultiplied drawing buffer.
+    texture.premultiplyAlpha = false;
     texture.needsUpdate = true;
-    const material = new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, side: three.DoubleSide });
+    const material = new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, premultipliedAlpha: false, side: three.DoubleSide });
     // A fixed dark oral tone: nothing here samples or matches the source's skin.
     const cavityMaterial = mouth
-      ? new three.MeshBasicMaterial({ color: this.showMask ? 0xffffff : 0x4a1a1e, vertexColors: true, transparent: true, side: three.DoubleSide })
+      ? new three.MeshBasicMaterial({ color: this.showMask ? 0xffffff : 0x4a1a1e, vertexColors: true, transparent: true, premultipliedAlpha: false, side: three.DoubleSide })
       : null;
     const fillMaterial = mouth
-      ? new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, side: three.DoubleSide })
+      ? new three.MeshBasicMaterial({ map: this.showMask ? null : texture, vertexColors: true, transparent: true, premultipliedAlpha: false, side: three.DoubleSide })
       : null;
     const faceRoot = new three.Group();
     faceRoot.name = "CallaStarFaceRoot";
@@ -539,6 +718,29 @@ export class FaceRenderer {
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
     for (const { line } of this.boundaryLines) { line.visible = this.showBoundaries; mesh.add(line); }
     const outerBoundary = meshData.boundaryLoops.find(loop => loop.kind === "outer");
+    if (outerBoundary && this.coverageBoundaryVertices.length >= 3) {
+      const innerContour = this.createBoundaryLine({ ...outerBoundary, vertices: this.coverageBoundaryVertices }, meshData, 0x00d9ff, 1.5, 0.9, 10);
+      if (innerContour) this.coveragePreviewLines.push(innerContour);
+    }
+    const foreheadTrace = this.coverageExtensionVertices.filter((_vertex, index) => this.coverageExtensionRegions[index] === 0);
+    const hairlineTrace = this.createCoverageTrace(foreheadTrace, meshData, 0x71ffba, 1.7, 11, false);
+    if (hairlineTrace) this.coveragePreviewLines.push(hairlineTrace);
+    if (this.sourceFacialHairPresent && this.sourceFacialHairWeights) {
+      const hairVertices = Array.from(this.sourceFacialHairWeights, (weight, index) => ({ weight, index }))
+        .filter(entry => entry.index < 468 && entry.weight >= 0.42)
+        .map(entry => entry.index);
+      if (hairVertices.length >= 3) {
+        const center = hairVertices.reduce((sum, index) => ({
+          x: sum.x + meshData.positions[index * 3]!, y: sum.y + meshData.positions[index * 3 + 1]!,
+        }), { x: 0, y: 0 });
+        center.x /= hairVertices.length; center.y /= hairVertices.length;
+        hairVertices.sort((a, b) => Math.atan2(meshData.positions[a * 3 + 1]! - center.y, meshData.positions[a * 3]! - center.x) -
+          Math.atan2(meshData.positions[b * 3 + 1]! - center.y, meshData.positions[b * 3]! - center.x));
+        const hairTrace = this.createCoverageTrace(hairVertices, meshData, 0xffaa4c, 1.7, 12, true);
+        if (hairTrace) this.coveragePreviewLines.push(hairTrace);
+      }
+    }
+    for (const { line } of this.coveragePreviewLines) { line.visible = this.showBoundaries; mesh.add(line); }
     this.faceLockLines = outerBoundary ? [
       this.createBoundaryLine(outerBoundary, meshData, 0x00eaff, 5, 0.85, 8),
       this.createBoundaryLine(outerBoundary, meshData, 0xff22c8, 2, 0.9, 9),
@@ -646,10 +848,30 @@ export class FaceRenderer {
     return { line, vertices: loop.vertices };
   }
 
+  private createCoverageTrace(
+    vertices: number[],
+    meshData: ReturnType<typeof buildSourceFaceMesh>,
+    color: number,
+    width: number,
+    renderOrder: number,
+    closed: boolean,
+  ): { line: import("three").Line; vertices: number[] } | null {
+    const three = this.three!;
+    if (vertices.length < (closed ? 3 : 2)) return null;
+    const positions = new Float32Array(vertices.length * 3);
+    for (let i = 0; i < vertices.length; i++) positions.set(meshData.positions.slice(vertices[i]! * 3, vertices[i]! * 3 + 3), i * 3);
+    const geometry = new three.BufferGeometry();
+    geometry.setAttribute("position", new three.BufferAttribute(positions, 3).setUsage(three.DynamicDrawUsage));
+    const material = new three.LineBasicMaterial({ color, linewidth: width, transparent: true, opacity: 0.92, depthTest: false, depthWrite: false });
+    const line = closed ? new three.LineLoop(geometry, material) : new three.Line(geometry, material);
+    line.renderOrder = renderOrder;
+    return { line, vertices };
+  }
+
   private updateBoundaryLines(): void {
     const positions = this.deformer?.positions;
     if (!positions) return;
-    for (const { line, vertices } of [...this.boundaryLines, ...this.faceLockLines]) {
+    for (const { line, vertices } of [...this.boundaryLines, ...this.faceLockLines, ...this.coveragePreviewLines]) {
       const attribute = line.geometry.getAttribute("position") as import("three").BufferAttribute;
       for (let i = 0; i < vertices.length; i++) {
         const vertex = vertices[i]!;
@@ -657,6 +879,65 @@ export class FaceRenderer {
       }
       attribute.needsUpdate = true;
     }
+  }
+
+  /** Update the existing outer ring and its alpha values without rebuilding the mesh. */
+  private applyRuntimeMaskControls(): void {
+    if (!this.geometry || !this.deformer || !this.boundaryAlpha || !this.baseColors) return;
+    const controls = this.options.controls?.current ?? null;
+    const coverage = controls?.coverage;
+    const feather = featherExtensionScale(controls?.blending.feather ?? 24);
+    const positions = this.deformer.positions;
+    const base = this.deformer.basePositions;
+    for (let index = 0; index < this.coverageExtensionVertices.length; index++) {
+      const boundary = this.coverageBoundaryVertices[index];
+      const extension = this.coverageExtensionVertices[index]!;
+      if (boundary === undefined) continue;
+      const region = this.coverageExtensionRegions[index] ?? 1;
+      const regional = region === 0 ? coverage?.forehead ?? 82
+        : region === 2 ? coverage?.jaw ?? 84
+          : region === 3 ? coverage?.chin ?? 84
+            : coverage?.temple ?? 76;
+      let scale = Math.max(0, Math.min(1.15, coverageExtensionScale(coverage?.overall ?? 88, regional) * feather));
+      if (region === 0 && this.sourceForeheadExtensionLimit !== null) {
+        const edgeAt = boundary * 3;
+        const baseAt = extension * 3;
+        const extensionLength = Math.hypot(
+          base[baseAt]! - base[edgeAt]!, base[baseAt + 1]! - base[edgeAt + 1]!, base[baseAt + 2]! - base[edgeAt + 2]!,
+        );
+        if (extensionLength > 1e-6) scale = Math.min(scale, this.sourceForeheadExtensionLimit / extensionLength);
+      }
+      for (let axis = 0; axis < 3; axis++) {
+        const at = extension * 3 + axis;
+        const edgeAt = boundary * 3 + axis;
+        positions[at] = positions[edgeAt]! + (base[at]! - base[edgeAt]!) * scale;
+      }
+    }
+
+    const color = this.geometry.getAttribute("color") as import("three").BufferAttribute;
+    const values = color.array as Float32Array;
+    const sourceOpacity = controls?.blending.sourceOpacity ?? 100;
+    const hairStrength = controls?.appearance.facialHairStrength ?? 100;
+    for (let vertex = 0; vertex < this.boundaryAlpha.length; vertex++) {
+      const offset = vertex * 4;
+      const maskAlpha = Math.max(0, Math.min(1, this.boundaryAlpha[vertex] ?? 0));
+      const hair = this.sourceFacialHairWeights?.[vertex] ?? 0;
+      const appearanceAlpha = sourceSurfaceAlpha(1, sourceOpacity, hair, hairStrength, this.sourceFacialHairPresent);
+      const finalAlpha = maskAlpha * appearanceAlpha;
+      if (this.showMask) {
+        values[offset] = values[offset + 1] = values[offset + 2] = 1;
+        values[offset + 3] = finalAlpha * 0.82;
+      } else if (this.showWeights) {
+        // setDiagnostics owns the red/green weight palette and opaque debug alpha.
+        continue;
+      } else {
+        values[offset] = this.baseColors[offset]!;
+        values[offset + 1] = this.baseColors[offset + 1]!;
+        values[offset + 2] = this.baseColors[offset + 2]!;
+        values[offset + 3] = finalAlpha;
+      }
+    }
+    color.needsUpdate = true;
   }
 
   private renderFrame = (now: number): void => {
@@ -682,6 +963,7 @@ export class FaceRenderer {
       if (uv && this.gazeWarper) { uv.array.set(this.gazeWarper.update(null)); uv.needsUpdate = true; }
       this.lastEyeGaze = null;
       this.updateLiveMouth(elapsed, true, expression);
+      this.applyRuntimeMaskControls();
       this.renderStartMs = performance.now();
       this.renderer?.render(this.scene!, this.camera!);
       this.renderEndMs = performance.now();
@@ -716,7 +998,21 @@ export class FaceRenderer {
         this.expressionEnvelope ?? NEUTRAL_EXPRESSION, this.clampedExpression, this.expressionClamped);
       this.expressionApplied = this.clampedExpression;
       const expressionTarget = expressionLost ? NEUTRAL_EXPRESSION : expression ? this.clampedExpression : this.expressionState;
-      smoothExpressionInto(this.expressionState, expressionTarget, elapsed, this.expressionState);
+      if (expression && !expressionLost) {
+        const gain = responseGain(this.options.controls?.current.tracking.facialResponse ?? 70, 70);
+        this.responseExpression.eyes = expressionTarget.eyes;
+        this.responseExpression.mouth = expressionTarget.mouth;
+        this.responseExpression.nose = expressionTarget.nose;
+        for (const key of EXPRESSION_KEYS) {
+          // Preserve blink timing; the response control tunes mouth, smile and brow movement.
+          this.responseExpression[key] = key.startsWith("blink")
+            ? expressionTarget[key]
+            : expressionTarget[key] * gain;
+        }
+        smoothExpressionInto(this.expressionState, this.responseExpression, elapsed, this.expressionState);
+      } else {
+        smoothExpressionInto(this.expressionState, expressionTarget, elapsed, this.expressionState);
+      }
       this.expressionApplied = this.expressionState;
       const deformationStarted = performance.now();
       this.deformer?.update(this.expressionState);
@@ -736,7 +1032,7 @@ export class FaceRenderer {
             this.deformer.basePositions,
             positions,
             this.projectionBindings,
-            faceFrame.landmarks,
+            faceFrame.stabilizedLandmarks,
             faceFrame.livePlacement.center,
             faceFrame.livePlacement.width,
             faceFrame.trackingAspect,
@@ -774,7 +1070,8 @@ export class FaceRenderer {
        */
       const rendered = rendererMotionFromPose(this.pose);
       this.renderedMotion = rendered;
-      const flip = mirrorScaleX(this.options.mirror ?? "selfie");
+      const mirror = typeof this.options.mirror === "object" ? this.options.mirror.current : this.options.mirror ?? "selfie";
+      const flip = mirrorScaleX(mirror);
       this.scene.scale.x = flip;
       // Glued framing: where, and how large, the camera preview shows the face.
       // Unmirrored world position; the scene's negative x scale is the one
@@ -799,7 +1096,11 @@ export class FaceRenderer {
           (!rootDebug || rootDebug.mode === "tracking" || rootDebug.mode === "raw-direct")) {
         // Use the current mapped raw face width as the global scale. Calibration
         // continues to define local source proportions, never screen size.
-        world = { ...world, scale: (placement.viewport.width * 2 / canvas.clientHeight) / 0.44 };
+        const rawScale = faceFrame?.rawScaleRatio ?? 1;
+        const scaleFollow = this.options.controls?.current.tracking.scaleFollow ?? 72;
+        const adjustedRatio = scaleFollowRatio(rawScale, scaleFollow);
+        const correction = rawScale > 0 ? adjustedRatio / rawScale : 1;
+        world = { ...world, scale: (placement.viewport.width * 2 / canvas.clientHeight) / 0.44 * correction };
       }
       if (rootDebug && rootDebug.mode !== "tracking" && rootDebug.mode !== "raw-direct") {
         const neutralWorld = faceWorldTransform(NEUTRAL_FACE_RENDER_POSE, this.meshEyeSpan,
@@ -825,14 +1126,32 @@ export class FaceRenderer {
           rootRotation = { ...rendered, rotationX: 0, rotationY: 0, rotationZ: roll };
         }
       }
+      const fit = this.options.controls?.current.faceFit;
+      if (fit) {
+        const safe = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;
+        const viewportAspect = (canvas.clientWidth || canvas.width) / Math.max(1, canvas.clientHeight || canvas.height);
+        world = {
+          ...world,
+          x: world.x + safe(fit.x, 0) / 100 * viewportAspect * 0.12,
+          y: world.y + safe(fit.y, 0) / 100 * 0.24,
+          scale: world.scale * Math.max(0.7, Math.min(1.3, safe(fit.scale, 100) / 100)),
+        };
+        rootRotation = { ...rootRotation, rotationZ: rootRotation.rotationZ + safe(fit.rotation, 0) * Math.PI / 180 };
+      }
       this.worldTransform = world;
       this.faceRoot.position.set(world.x, world.y, 0);
-      this.faceRoot.scale.setScalar(world.scale);
+      this.faceRoot.scale.set(
+        world.scale * Math.max(0.7, Math.min(1.3, fit ? fit.width / 100 : 1)),
+        world.scale * Math.max(0.7, Math.min(1.3, fit ? fit.height / 100 : 1)),
+        world.scale,
+      );
       this.faceRoot.rotation.set(rootRotation.rotationX, rootRotation.rotationY, rootRotation.rotationZ, "XYZ");
       this.updateContourAlignment(faceFrame);
+      this.updateBoundaryHarmonization(faceFrame, now);
       if(this.nostrilMesh && this.nostrilMaterial){
-        this.nostrilMaterial.opacity=nostrilVisibility(this.pose.pitch)*(this.material?.opacity ?? 1);
+        this.nostrilMaterial.opacity=nostrilVisibility(this.pose.pitch)*(this.material?.opacity ?? 1)*(this.options.controls?.current.blending.sourceOpacity ?? 100)/100;
       }
+      this.applyRuntimeMaskControls();
       this.material!.wireframe = this.wireframe || this.showMesh;
       if (this.cavityMaterial) this.cavityMaterial.wireframe = this.material!.wireframe;
       this.renderer.render(this.scene, this.camera);
@@ -884,6 +1203,10 @@ export class FaceRenderer {
       faceFrame: this.options.faceFrame?.current ?? null,
       attachmentProbe: this.getAttachmentProbe(),
       contourAlignment: this.contourAlignment,
+      alphaPipeline: "straight texture/shader → premultiplied framebuffer/canvas",
+      boundaryBlendMs: this.boundaryBlendMs,
+      boundaryColorCorrection: this.boundaryCurrentCorrection,
+      poseAlignment: this.poseAlignmentSummary(),
       depthRange: this.depthRange(),
       dpr: this.renderer?.getPixelRatio() ?? 0,
       contextLossCount: this.contextLossCount,
@@ -1072,7 +1395,7 @@ export class FaceRenderer {
     }
     const regions = [
       ["forehead", 10], ["left-temple", 234], ["right-temple", 454],
-      ["left-cheek", 127], ["right-cheek", 356], ["chin", 152],
+      ["left-cheek", 127], ["right-cheek", 356], ["chin", 152], ["nose-center", 1],
     ] as const;
     scene.updateMatrixWorld(true);
     camera.updateMatrixWorld(true);
@@ -1088,6 +1411,31 @@ export class FaceRenderer {
       const rendered = { x: (local.x + 1) * width / 2, y: (1 - local.y) * height / 2 };
       return [{ region, landmarkIndex, live, rendered, errorPx: Math.hypot(rendered.x - live.x, rendered.y - live.y) }];
     });
+    if (frame.frameId === this.lastAlignmentFrameId || !this.contourAlignment.length) return;
+    this.lastAlignmentFrameId = frame.frameId;
+    const error = this.contourAlignment.reduce((sum, sample) => sum + sample.errorPx, 0) / this.contourAlignment.length;
+    const yawDeg = (frame.globalTransform?.yawDelta ?? 0) * 180 / Math.PI;
+    const pitchDeg = (frame.globalTransform?.pitchDelta ?? 0) * 180 / Math.PI;
+    const direction = Math.abs(yawDeg) >= 8 && Math.abs(yawDeg) <= 60
+      ? yawDeg > 0 ? this.poseAlignmentSamples.leftYaw : this.poseAlignmentSamples.rightYaw
+      : Math.abs(pitchDeg) >= 8 && Math.abs(pitchDeg) <= 60
+        ? pitchDeg < 0 ? this.poseAlignmentSamples.upPitch : this.poseAlignmentSamples.downPitch
+        : null;
+    const angle = direction === this.poseAlignmentSamples.leftYaw ? yawDeg
+      : direction === this.poseAlignmentSamples.rightYaw ? yawDeg
+        : direction === this.poseAlignmentSamples.upPitch ? pitchDeg : pitchDeg;
+    if (direction) {
+      direction.push({ angle, error });
+      if (direction.length > 120) direction.shift();
+    }
+  }
+
+  private poseAlignmentSummary(): FaceRendererStats["poseAlignment"] {
+    return Object.fromEntries(Object.entries(this.poseAlignmentSamples).map(([key, samples]) => [key, {
+      angleDeg: samples.length ? samples.reduce((sum, sample) => sum + sample.angle, 0) / samples.length : null,
+      errorPx: samples.length ? samples.reduce((sum, sample) => sum + sample.error, 0) / samples.length : null,
+      count: samples.length,
+    }])) as FaceRendererStats["poseAlignment"];
   }
 
   private depthRange(): number {
@@ -1123,7 +1471,7 @@ export class FaceRenderer {
     /** Source face width in canvas pixels, so a displacement can be judged. */
     faceWidthPx: number;
   } {
-    const mirror = this.options.mirror ?? "selfie";
+    const mirror = typeof this.options.mirror === "object" ? this.options.mirror.current : this.options.mirror ?? "selfie";
     const flip = mirrorScaleX(mirror);
     const motion = this.renderedMotion;
     const vectors = motion ? faceDirectionVectors(motion) : null;
@@ -1259,7 +1607,7 @@ export class FaceRenderer {
       mouthSharesRoot: !!root && (!this.liveMouthMesh || this.liveMouthMesh.parent === root),
       maskSharesFaceGeometry: !!root && !!skin && skin.geometry === this.geometry,
       featureLayersShareRoot: !!root && [this.nostrilMesh, this.liveMouthMesh].every(layer => !layer || layer.parent === root),
-      debugContoursShareRoot: !!root && [...this.boundaryLines, ...this.faceLockLines].every(({ line }) => isDescendant(line)),
+    debugContoursShareRoot: !!root && [...this.boundaryLines, ...this.faceLockLines, ...this.coveragePreviewLines].every(({ line }) => isDescendant(line)),
     };
   }
 }
@@ -1269,12 +1617,12 @@ async function decodeSourceFrame(
   profile: TransformationSourceProfile,
   sourceVideo: HTMLVideoElement | null,
 ): Promise<ImageBitmap> {
-  if (asset.kind === "image") return createImageBitmap(asset.blob, { imageOrientation: "from-image" });
-  if (profile.preparedFrame) return createImageBitmap(profile.preparedFrame);
+  if (asset.kind === "image") return createImageBitmap(asset.blob, { imageOrientation: "from-image", premultiplyAlpha: "none" });
+  if (profile.preparedFrame) return createImageBitmap(profile.preparedFrame, { premultiplyAlpha: "none" });
   const reader = new VideoFrameReader();
   try {
     await reader.open(asset.blob);
     const timestamp = profile.baseFrameTime ?? profile.referenceFrames.find(frame => frame.angle === 'front')?.timestampSeconds ?? 0;
-    return await createImageBitmap(await reader.frameAt(timestamp));
+    return await createImageBitmap(await reader.frameAt(timestamp), { premultiplyAlpha: "none" });
   } finally { reader.dispose(); }
 }

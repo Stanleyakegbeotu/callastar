@@ -93,4 +93,21 @@ describe("stable upper-face lock", () => {
     const deliberate = stabilizer.update({ ...neutral, translationX: 0.3 }, 66)!;
     expect(deliberate.translationX).toBeGreaterThan(0.22);
   });
+
+  it("applies the Motion Stability setting without freezing the head", () => {
+    const responsive = new HeadMotionStabilizer();
+    const stable = new HeadMotionStabilizer();
+    const neutral: HeadMotion = { translationX: 0, translationY: 0, scaleDelta: 1, yawDelta: 0, pitchDelta: 0, rollDelta: 0 };
+    responsive.update(neutral, 0, 0);
+    stable.update(neutral, 0, 100);
+    const jitter = { ...neutral, translationX: 0.003 };
+    const responsiveJitter = responsive.update(jitter, 33, 0)!;
+    const stableJitter = stable.update(jitter, 33, 100)!;
+    expect(stableJitter.translationX).toBeLessThan(responsiveJitter.translationX);
+    const fast = { ...neutral, translationX: 0.3 };
+    const responsiveFast = responsive.update(fast, 66, 0)!;
+    const stableFast = stable.update(fast, 66, 100)!;
+    expect(stableFast.translationX).toBeGreaterThan(stableJitter.translationX);
+    expect(responsiveFast.translationX).toBeGreaterThan(0.22);
+  });
 });

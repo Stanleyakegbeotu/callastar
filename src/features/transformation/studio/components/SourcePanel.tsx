@@ -178,19 +178,15 @@ export function SourcePanel({ source, profile, storedOptions, profileChoices }: 
             <input
               type="checkbox"
               checked={source.consentGiven}
-              onChange={(event) => source.setConsent(event.target.checked)}
+              onChange={(event) => {
+                source.setConsent(event.target.checked);
+                if (event.target.checked) source.analyze(true);
+              }}
             />
             <span>I confirm I have permission to use this source.</span>
           </label>
 
-          <button
-            type="button"
-            className="studio-primary studio-primary-inline"
-            disabled={!source.consentGiven}
-            onClick={source.analyze}
-          >
-            {source.asset?.kind === "3d-model" ? "Load and analyze model" : "Analyze source"}
-          </button>
+          <p className="studio-note">Analysis starts automatically after you confirm you have permission to use this source.</p>
           <button type="button" className="studio-control" onClick={source.clear}>
             <span>Change source</span>
           </button>

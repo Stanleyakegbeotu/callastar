@@ -51,7 +51,7 @@ describe('M8.2 face-local isolation',()=>{
   expect(m.positions[1*3+2]! - m.positions[234*3+2]!).toBeCloseTo(.09);
   // Face/mouth vertices and the eye-only interior subdivisions are all used.
   expect(new Set(m.indices).size).toBe(m.positions.length / 3);
-  expect(m.eyeInterior).toEqual({ start: 510, count: 258 });
+  expect(m.eyeInterior).toEqual({ start: 546, count: 258 });
  });
  it('closes left/right independently without lid crossing or brow movement',()=>{
   const p=fixture(),mesh=buildSourceFaceMesh(p),d=new ExpressionDeformer(mesh,p);

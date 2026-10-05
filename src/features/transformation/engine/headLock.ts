@@ -120,13 +120,24 @@ export function fitStableHeadAnchors(
 export class HeadMotionStabilizer {
   private value: HeadMotion | null = null;
   private timestampMs: number | null = null;
+  lastUpdateMs = 0;
+  lastLatencyEstimateMs: number | null = null;
 
-  reset(): void { this.value = null; this.timestampMs = null; }
+  reset(): void { this.value = null; this.timestampMs = null; this.lastLatencyEstimateMs = null; }
 
-  update(next: HeadMotion | null, timestampMs: number): HeadMotion | null {
-    if (!next || !Number.isFinite(timestampMs)) { this.reset(); return null; }
+  update(next: HeadMotion | null, timestampMs: number, stability = 72): HeadMotion | null {
+    const startedAt = performance.now();
+    if (!next || !Number.isFinite(timestampMs)) {
+      this.reset();
+      this.lastUpdateMs = performance.now() - startedAt;
+      return null;
+    }
     if (!this.value || this.timestampMs === null || timestampMs <= this.timestampMs) {
-      this.value = { ...next }; this.timestampMs = timestampMs; return this.value;
+      this.value = { ...next };
+      this.timestampMs = timestampMs;
+      this.lastLatencyEstimateMs = 0;
+      this.lastUpdateMs = performance.now() - startedAt;
+      return this.value;
     }
     const dt = Math.min(100, Math.max(8, timestampMs - this.timestampMs));
     const previous = this.value;
@@ -138,7 +149,10 @@ export class HeadMotionStabilizer {
       Math.abs(next.pitchDelta - previous.pitchDelta) * 0.5,
       Math.abs(next.rollDelta - previous.rollDelta) * 0.5,
     );
-    const tau = energy / (dt / 1000) > 0.35 ? 0.018 : 0.075;
+    const boundedStability = Number.isFinite(stability) ? Math.max(0, Math.min(100, stability)) : 72;
+    const tau = energy / (dt / 1000) > 0.35
+      ? 0.010 + boundedStability * 0.000111111
+      : 0.035 + boundedStability * 0.000555556;
     const alpha = 1 - Math.exp(-(dt / 1000) / tau);
     const blend = (from: number, to: number) => from + (to - from) * alpha;
     this.value = {
@@ -150,6 +164,12 @@ export class HeadMotionStabilizer {
       rollDelta: blend(previous.rollDelta, next.rollDelta),
     };
     this.timestampMs = timestampMs;
+    const latency = (Object.keys(next) as (keyof HeadMotion)[]).flatMap(key => {
+      const velocity = Math.abs(next[key] - previous[key]) / (dt / 1000);
+      return velocity > 0.03 ? [Math.abs(next[key] - this.value![key]) / velocity * 1000] : [];
+    }).sort((a, b) => a - b);
+    this.lastLatencyEstimateMs = latency.length ? Math.min(250, latency[Math.floor(latency.length / 2)]!) : 0;
+    this.lastUpdateMs = performance.now() - startedAt;
     return this.value;
   }
 }

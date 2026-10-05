@@ -1,5 +1,6 @@
 import type { BlendshapeScores, Point3 } from "../engine/faceTypes";
 import type { PoseLandmark } from "../engine/poseTypes";
+import type { SourceAppearanceProfile } from "./sourceAppearanceAnalysis";
 
 /**
  * What CallaStar knows about the SOURCE person.
@@ -238,8 +239,8 @@ export interface ReferenceFrame {
  * the shape can stay identical while the numbers in it come to mean something
  * different, and that is the case that silently corrupts a renderer.
  */
-export const SOURCE_ANALYSIS_VERSION = 2;
-export const SOURCE_PROFILE_VERSION = 2;
+export const SOURCE_ANALYSIS_VERSION = 3;
+export const SOURCE_PROFILE_VERSION = 3;
 
 /**
  * PRIVACY.
@@ -269,6 +270,8 @@ export interface TransformationSourceProfile {
   /** Video only. Null for an image. */
   durationSeconds: number | null;
   primaryFace: SourceFaceGeometry;
+  /** Optional because older in-memory profiles predate the pixel appearance analysis. */
+  appearance?: SourceAppearanceProfile;
   /** Compact source expression state. Older in-memory fixtures may omit it. */
   expression?: SourceExpressionProfile;
   primaryPose: SourcePoseGeometry | null;

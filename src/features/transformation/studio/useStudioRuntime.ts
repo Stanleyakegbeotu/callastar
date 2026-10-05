@@ -10,8 +10,12 @@ import {
   type DisplayGeometry,
 } from "../engine/coordinateMapping";
 import { FaceTracker } from "../engine/faceTracker";
-import { fitStableHeadAnchors, stableHeadAnchors } from "../engine/headLock";
+import { fitStableHeadAnchors, HeadMotionStabilizer, stableHeadAnchors } from "../engine/headLock";
+import { responseGain, type TransformationControlsRef } from "../engine/transformationControls";
 import type { FaceFrameSnapshot } from "../engine/faceFrame";
+import { faceBounds } from "../engine/faceGeometry";
+import { LandmarkStabilizer } from "../engine/landmarkStabilizer";
+import { BOUNDARY_SKIN_REGIONS, sampleImageRegion, type BoundaryRgb } from "../engine/rendering/boundaryHarmonization";
 import { computeExpressionMotion, type ExpressionMotion } from "../engine/expressionMotion";
 import type { FaceTrackingResult } from "../engine/faceTypes";
 import { MonotonicClock } from "../engine/monotonicClock";
@@ -152,7 +156,7 @@ export interface StudioRuntime {
 
 const IDLE_CALIBRATION: CalibrationCollectorState = new CalibrationCollector().getState();
 
-export function useStudioRuntime(): StudioRuntime {
+export function useStudioRuntime(controlsRef: TransformationControlsRef): StudioRuntime {
   const [state, dispatch] = useReducer(transformationReducer, initialTransformationState);
   const [summary, setSummary] = useState<StudioSummary>(EMPTY_SUMMARY);
   const [quality, setQualityState] = useState<QualityMode>("balanced");
@@ -274,6 +278,10 @@ export function useStudioRuntime(): StudioRuntime {
     const trackingContext = trackingCanvas.getContext("2d");
     const oralFrame = document.createElement('canvas');
     const oralContext = oralFrame.getContext('2d');
+    const boundarySampleCanvas = document.createElement("canvas");
+    boundarySampleCanvas.width = 96;
+    boundarySampleCanvas.height = 96;
+    const boundarySampleContext = boundarySampleCanvas.getContext("2d", { willReadFrequently: true });
     if (!trackingContext) {
       dispatch({ type: "FAIL", code: "webgl_unavailable", error: "This browser could not create a drawing surface." });
       return;
@@ -289,11 +297,18 @@ export function useStudioRuntime(): StudioRuntime {
     const gazeSmoother = new GazeSmoother();
     const eyeFilter = new EyeControlFilter();
     const hybridCoordinator = new HybridCoordinator();
+    const landmarkStabilizer = new LandmarkStabilizer();
+    const headMotionStabilizer = new HeadMotionStabilizer();
     let lastExpressionTimestamp = Number.NaN;
     let lastEyeProfile: unknown = null;
+    let lastStabilityProfile: unknown = null;
     let lastPublishedFaceTimestamp = Number.NaN;
     let lastPublishedProfile: unknown = null;
     let nextFaceFrameId = 0;
+    let lastBoundarySampleAt = -Infinity;
+    let boundarySkinSamples: (BoundaryRgb | null)[] = BOUNDARY_SKIN_REGIONS.map(() => null);
+    let boundarySkinSampleTimestampMs: number | null = null;
+    let boundarySkinSampleCostMs = 0;
 
     let lastObservedFaceTimestamp = Number.NaN;
     let trackingLostAt: number | null = null;
@@ -321,6 +336,36 @@ export function useStudioRuntime(): StudioRuntime {
       },
       onUpdate: ({ face: faceResult, stats }) => {
         const now = performance.now();
+        if (faceResult && faceResult.timestampMs !== boundarySkinSampleTimestampMs) {
+          if (faceResult.detected && boundarySampleContext && now - lastBoundarySampleAt >= 125) {
+            const sampleStartedAt = performance.now();
+            try {
+              boundarySampleContext.drawImage(trackingCanvas, 0, 0, boundarySampleCanvas.width, boundarySampleCanvas.height);
+              const pixels = boundarySampleContext.getImageData(0, 0, boundarySampleCanvas.width, boundarySampleCanvas.height).data;
+              const center = faceResult.landmarks[1];
+              boundarySkinSamples = BOUNDARY_SKIN_REGIONS.map(({ landmark }) => {
+                const point = faceResult.landmarks[landmark];
+                if (!point || !center) return null;
+                return sampleImageRegion(pixels, boundarySampleCanvas.width, boundarySampleCanvas.height, {
+                  x: point.x + (center.x - point.x) * 0.18,
+                  y: point.y + (center.y - point.y) * 0.18,
+                });
+              });
+              boundarySkinSampleTimestampMs = faceResult.timestampMs;
+              boundarySkinSampleCostMs = performance.now() - sampleStartedAt;
+              lastBoundarySampleAt = now;
+            } catch {
+              boundarySkinSamples = BOUNDARY_SKIN_REGIONS.map(() => null);
+              boundarySkinSampleTimestampMs = faceResult.timestampMs;
+              boundarySkinSampleCostMs = performance.now() - sampleStartedAt;
+              lastBoundarySampleAt = now;
+            }
+          } else if (!faceResult.detected) {
+            boundarySkinSamples = BOUNDARY_SKIN_REGIONS.map(() => null);
+            boundarySkinSampleTimestampMs = faceResult.timestampMs;
+            boundarySkinSampleCostMs = 0;
+          }
+        }
 
         // The Face Landmarker is configured for one active controller. If it
         // loses that face and a clear face returns after a brief stable window,
@@ -362,7 +407,32 @@ export function useStudioRuntime(): StudioRuntime {
         // is intentionally outside React so a renderer can consume every
         // tracker update without a second inference loop or 60 renders/sec.
         const profile = calibrationCollector.getState().profile;
-        const currentMotion = computeRelativeMotion(profile, faceResult, null);
+        if (profile !== lastStabilityProfile) {
+          landmarkStabilizer.reset();
+          headMotionStabilizer.reset();
+          lastStabilityProfile = profile;
+        }
+        const rawMotion = computeRelativeMotion(profile, faceResult, null);
+        const control = controlsRef.current.tracking;
+        landmarkStabilizer.setStability(control.stability);
+        const stabilizedHead = headMotionStabilizer.update(rawMotion.head, faceResult?.timestampMs ?? now, control.stability);
+        const selectedHead = control.faceLock ? stabilizedHead : rawMotion.head;
+        const currentMotion = {
+          ...rawMotion,
+          head: selectedHead ? {
+            ...selectedHead,
+            yawDelta: selectedHead.yawDelta * responseGain(control.yawResponse, 70),
+            pitchDelta: selectedHead.pitchDelta * responseGain(control.pitchResponse, 70),
+            scaleDelta: 1 + (selectedHead.scaleDelta - 1) * responseGain(control.scaleFollow, 72),
+          } : null,
+        };
+        const filteredLandmarks = landmarkStabilizer.update(
+          faceResult?.detected ? faceResult.landmarks : null,
+          faceResult?.timestampMs ?? now,
+        );
+        const stabilizedLandmarks = control.rawDirect
+          ? faceResult?.detected ? faceResult.landmarks : null
+          : control.faceLock ? filteredLandmarks : faceResult?.detected ? faceResult.landmarks : null;
         motionRef.current = currentMotion;
         const eyeProfile = profile;
         if (lastEyeProfile !== eyeProfile) { eyeFilter.reset(); blinkState.reset(); gazeSmoother.reset(); lastEyeProfile = eyeProfile; lastExpressionTimestamp = Number.NaN; }
@@ -417,22 +487,42 @@ export function useStudioRuntime(): StudioRuntime {
           lastPublishedProfile = profile;
           const trackedHead = faceResult.detected ? currentMotion.head : null;
           const currentAnchors = faceResult.detected ? stableHeadAnchors(faceResult.landmarks) ?? [] : [];
-          const fit = profile?.face.stableAnchors && currentAnchors.length
+          const rawFit = profile?.face.stableAnchors && currentAnchors.length
             ? fitStableHeadAnchors(profile.face.stableAnchors, currentAnchors, profile.face.center,
               trackingCanvas.width / Math.max(1, trackingCanvas.height))
             : null;
-          const rawScaleRatio = fit?.scale ?? currentMotion.head?.scaleDelta ?? null;
+          const rawScaleRatio = rawFit?.scale ?? rawMotion.head?.scaleDelta ?? null;
+          const renderAnchors = stabilizedLandmarks ? stableHeadAnchors(stabilizedLandmarks) ?? [] : [];
+          const renderFit = profile?.face.stableAnchors && renderAnchors.length
+            ? fitStableHeadAnchors(profile.face.stableAnchors, renderAnchors, profile.face.center,
+              trackingCanvas.width / Math.max(1, trackingCanvas.height))
+            : null;
+          const renderBounds = stabilizedLandmarks ? faceBounds(stabilizedLandmarks) : null;
+          const renderCenter = renderFit?.center ?? (renderBounds ? {
+            x: (renderBounds.minX + renderBounds.maxX) / 2,
+            y: (renderBounds.minY + renderBounds.maxY) / 2,
+            z: faceResult.derived?.center.z ?? 0,
+          } : null);
           const frameId = faceResult.frameId ?? ++nextFaceFrameId;
           const viewportTransform = geometry();
-          const viewportPlacement = faceResult.detected && faceResult.derived
-            ? mapFacePlacementToDisplay(faceResult.derived, viewportTransform)
+          const viewportPlacement = faceResult.detected && renderBounds && renderCenter
+            ? mapFacePlacementToDisplay({ center: renderCenter, bounds: renderBounds }, viewportTransform)
             : null;
           faceFrameRef.current = {
             frameId,
             timestampMs: faceResult.timestampMs,
             trackingTimestampMs: stats.faceEndMs ?? now,
             landmarks: faceResult.landmarks,
-            rawGlobalTransform: currentMotion.head,
+            stabilizedLandmarks: stabilizedLandmarks ?? faceResult.landmarks,
+            stabilizationMs: landmarkStabilizer.lastUpdateMs + headMotionStabilizer.lastUpdateMs,
+            stabilizationLatencyEstimateMs: Math.max(
+              landmarkStabilizer.lastLatencyEstimateMs ?? 0,
+              headMotionStabilizer.lastLatencyEstimateMs ?? 0,
+            ),
+            boundarySkinSamples,
+            boundarySkinSampleTimestampMs,
+            boundarySkinSampleCostMs,
+            rawGlobalTransform: rawMotion.head,
             // Screen placement and scale come from this raw camera frame. The
             // calibration fit remains available as a size reference only.
             globalTransform: trackedHead,
@@ -450,14 +540,14 @@ export function useStudioRuntime(): StudioRuntime {
             expressionState: expressionRef.current,
             stableAnchors: currentAnchors,
             referenceAnchors: profile?.face.stableAnchors ?? [],
-            projectedReferenceAnchors: fit?.projectedReference ?? [],
+            projectedReferenceAnchors: rawFit?.projectedReference ?? [],
             livePlacement: {
               frameId,
               timestampMs: faceResult.timestampMs,
-              center: faceResult.detected ? faceResult.derived?.center ?? null : null,
-              width: faceResult.detected && faceResult.derived ? faceResult.derived.bounds.maxX - faceResult.derived.bounds.minX : null,
-              height: faceResult.detected && faceResult.derived ? faceResult.derived.bounds.maxY - faceResult.derived.bounds.minY : null,
-              scale: faceResult.detected ? rawScaleRatio : null,
+              center: faceResult.detected ? renderCenter : null,
+              width: faceResult.detected && renderBounds ? renderBounds.maxX - renderBounds.minX : null,
+              height: faceResult.detected && renderBounds ? renderBounds.maxY - renderBounds.minY : null,
+              scale: faceResult.detected ? renderFit?.scale ?? currentMotion.head?.scaleDelta ?? null : null,
               roll: trackedHead?.rollDelta ?? null,
               yaw: trackedHead?.yawDelta ?? null,
               pitch: trackedHead?.pitchDelta ?? null,

@@ -8,21 +8,20 @@ describe("source face mesh", () => {
   it("keeps source UVs fixed and preserves ImageBitmap row orientation", () => {
     const landmarks = Array.from({ length: 478 }, (_, index) => ({ x: index / 500, y: 0.25, z: 0 }));
     const mesh = buildSourceFaceMesh(landmarks);
-    // Original face/mouth vertices plus 258 eye-only interior subdivisions.
-    expect(mesh.positions).toHaveLength((468 + 21 + 21 + 258) * 3);
+    // Face/mouth vertices, one live-mapped outer feather ring, and eye subdivisions.
+    expect(mesh.positions).toHaveLength((468 + 21 + 21 + 36 + 258) * 3);
     expect(mesh.uvs[1]).toBeCloseTo(0.25);
-    // 852 unchanged face triangles + 448 eye triangles + unchanged mouth fans.
-    expect(mesh.indices.length).toBe(1340 * 3);
+    // 852 face triangles, 72 outer-shell triangles, 448 eye triangles, and mouth fans.
+    expect(mesh.indices.length).toBe(1412 * 3);
     expect(mesh.uvs.length).toBe(mesh.positions.length / 3 * 2);
   });
 
   it("fades the source face perimeter with coverage attached to the mesh vertices", () => {
     const landmarks = Array.from({ length: 478 }, (_, index) => ({ x: index / 500, y: 0.25, z: 0 }));
     const mesh = buildSourceFaceMesh(landmarks);
-    const faceCoverage = mesh.boundaryAlpha.slice(0, FACE_LANDMARK_VERTICES);
     expect(mesh.boundaryAlpha).toHaveLength(mesh.positions.length / 3);
-    expect(Math.min(...faceCoverage)).toBe(0);
-    expect(Math.max(...faceCoverage)).toBe(1);
+    expect(Math.min(...mesh.boundaryAlpha)).toBe(0);
+    expect(Math.max(...mesh.boundaryAlpha)).toBe(1);
     expect(Array.from(mesh.boundaryAlpha).every(value => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true);
   });
 
@@ -35,8 +34,12 @@ describe("source face mesh", () => {
     expect(loop("left-eye").vertices).toHaveLength(16);
     expect(loop("right-eye").vertices).toHaveLength(16);
     expect(loop("mouth").vertices).toHaveLength(20);
-    expect(new Set(loop("outer").vertices)).toEqual(new Set(FACE_RENDER_VERTEX_INDICES.slice(1)));
+    expect(loop("outer").vertices.every(vertex => vertex >= 510)).toBe(true);
     for (const vertex of loop("outer").vertices) expect(mesh.boundaryAlpha[vertex]).toBe(0);
+    for (const vertex of FACE_RENDER_VERTEX_INDICES.slice(1)) {
+      expect(mesh.boundaryAlpha[vertex]).toBeGreaterThan(0);
+      expect(mesh.boundaryAlpha[vertex]).toBeLessThan(1);
+    }
     for (const vertex of [...LEFT_EYE_BOUNDARY, ...RIGHT_EYE_BOUNDARY, ...INNER_LIP_RING]) {
       expect(mesh.boundaryAlpha[vertex], `internal loop vertex ${vertex}`).toBe(1);
     }

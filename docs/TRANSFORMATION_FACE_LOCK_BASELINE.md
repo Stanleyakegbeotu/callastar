@@ -94,3 +94,60 @@ calibration-relative screen placement, an independent HeadLock placement
 system, fixed face-root placement, or renderer-specific pose tracking. Keep the
 eye system locked, preserve current translation and scale behavior, and defer
 major mouth redesign, hair, ears, neck, and body transformation.
+
+## Stability, coverage, and boundary refinement
+
+This section records the follow-on code changes made on top of the pushed
+baseline. It is not a new physical acceptance record. The implementation keeps
+the shared face frame, raw landmarks, Raw Direct placement, and local eye and
+mouth systems. Stabilized landmarks are an additional renderer geometry view;
+raw landmarks still drive current tracking and expression inputs.
+
+- A lightweight One Euro style landmark filter uses an 8 Hz minimum cutoff for
+  stable geometry and 50 Hz for expressive eye, iris, lip, and jaw landmarks.
+  Velocity raises the cutoff while moving. Filter CPU time and a motion-derived
+  lag estimate are exposed in diagnostics; the estimate is not device latency.
+- The single continuous face mesh now has a face-width-scaled regional feather
+  and a connected zero-alpha outer ring. Coverage extends toward forehead,
+  temple, cheek, jaw, and chin regions while remaining attached to the current
+  tracked mesh. The forehead extension is proportion-based; there is no exact
+  hairline landmark or hair segmentation, so hairline clearance needs physical
+  review.
+- Boundary skin samples are taken from the same tracking canvas frame as the
+  MediaPipe result, at a 125 ms cadence. Six regional low-frequency RGB
+  corrections are bounded to 12%, smoothed with a 650 ms time constant, and
+  applied only near the existing outer feather. The source texture and its
+  center appearance remain unchanged.
+- The renderer alpha path is explicit: straight texture/shader values and
+  straight-alpha material blending feed a premultiplied-alpha WebGL canvas.
+  Image bitmaps request no premultiplication. This code audit and browser
+  assertion found no double premultiplication in the configured path; the
+  actual visual cause of previously observed dark edges is not established by
+  that audit.
+- Developer diagnostics now expose per-region contour error and directional
+  left/right yaw and up/down pitch summaries over the latest 120 qualifying
+  frames, plus mask, alpha/feather, boundary color, filter cost, and estimated
+  lag views. The pose summaries are instrumentation; they do not contain
+  operator-recorded physical pose measurements.
+
+### Follow-on verification
+
+- `pnpm.cmd typecheck` — passed.
+- `pnpm.cmd test` — 59 files and 864 tests passed.
+- `pnpm.cmd build` — passed; Vite reported the existing OpenCV browser
+  externalization notices and large-chunk warning.
+- Transformation renderer browser regression — passed, including straight
+  material/texture settings and the premultiplied-alpha context.
+- M8.8 real Studio AUTO lifecycle browser regression — passed with the
+  synthetic camera. It is not a physical camera or performance benchmark.
+
+### Physical acceptance status
+
+The current environment did not provide an operator-run physical camera review
+after these changes. Therefore right yaw, left-yaw non-regression, upward and
+downward pitch, full forehead/temple/cheek/jaw/chin coverage, hairline clearance,
+visible boundary quality, and physical eye/mouth non-regression remain
+**unverified**. No face-FPS improvement or physical latency value is claimed.
+The geometry, blending, and diagnostics are ready for that review, but the
+milestone is not physically accepted until those poses and boundaries are
+checked on the target camera.

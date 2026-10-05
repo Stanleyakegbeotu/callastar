@@ -27,7 +27,16 @@ export interface FaceFrameSnapshot {
   timestampMs: number;
   /** Wall-clock completion time for tracking age diagnostics. */
   trackingTimestampMs: number;
+  /** Untouched MediaPipe observations from this frame. */
   landmarks: readonly Point3[];
+  /** Stabilized stable-skin geometry; expressive landmarks retain live response. */
+  stabilizedLandmarks: readonly Point3[];
+  stabilizationMs: number;
+  stabilizationLatencyEstimateMs: number | null;
+  /** Low-resolution skin samples read from the same downscaled camera frame. */
+  boundarySkinSamples?: readonly ({ r: number; g: number; b: number } | null)[];
+  boundarySkinSampleTimestampMs?: number | null;
+  boundarySkinSampleCostMs?: number;
   /** Unfiltered motion derived from this camera frame, relative to calibration. */
   rawGlobalTransform: HeadMotion | null;
   /** Filtered motion from the same frame; this is the renderer's live pose. */

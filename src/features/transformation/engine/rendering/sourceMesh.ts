@@ -46,6 +46,11 @@ export interface SourceFaceMeshData {
   eyeInterior?: { start: number; count: number };
   /** Ordered open-edge components, classified from the projected face geometry. */
   boundaryLoops: FaceBoundaryLoop[];
+  /** Paired original-contour and outer feather-ring vertex ids, in loop order. */
+  coverageBoundaryVertices?: number[];
+  coverageExtensionVertices?: number[];
+  /** Region ids for each paired edge: forehead, temple, jaw, chin. */
+  coverageExtensionRegions?: Uint8Array;
 }
 
 export interface FaceBoundaryLoop {
@@ -82,7 +87,7 @@ function polygonContains(loop: readonly number[], landmarks: readonly Point3[], 
   return inside;
 }
 
-function faceBoundaryCoverage(localLandmarks: readonly Point3[]): { alpha: Float32Array; loops: FaceBoundaryLoop[] } {
+function faceBoundaryCoverage(localLandmarks: readonly Point3[]): { alpha: Float32Array; loops: FaceBoundaryLoop[]; outerVertices: number[] } {
   const neighbors = Array.from({ length: FACE_LANDMARK_VERTICES }, () => new Set<number>());
   const edgeUse = new Map<string, { a: number; b: number; count: number }>();
   for (const [a, b, c] of DENSE_FACE_TRIANGLES) {
@@ -156,23 +161,62 @@ function faceBoundaryCoverage(localLandmarks: readonly Point3[]): { alpha: Float
     else if (sameVertices(loop.vertices, RIGHT_EYE_BOUNDARY)) loop.kind = "right-eye";
   }
 
-  const distance = new Int16Array(FACE_LANDMARK_VERTICES).fill(-1);
-  const queue: number[] = [];
+  const faceMinX = Math.min(...localLandmarks.slice(0, FACE_LANDMARK_VERTICES).map(point => point.x));
+  const faceMaxX = Math.max(...localLandmarks.slice(0, FACE_LANDMARK_VERTICES).map(point => point.x));
+  const faceMinY = Math.min(...localLandmarks.slice(0, FACE_LANDMARK_VERTICES).map(point => point.y));
+  const faceMaxY = Math.max(...localLandmarks.slice(0, FACE_LANDMARK_VERTICES).map(point => point.y));
+  const faceWidth = Math.max(1e-6, Math.abs(localLandmarks[454]!.x - localLandmarks[234]!.x));
+  const faceHeight = Math.max(1e-6, faceMaxY - faceMinY);
+  const featherWidth = (vertex: number) => {
+    const point = localLandmarks[vertex]!;
+    const fromTop = (point.y - faceMinY) / faceHeight;
+    const lateral = Math.abs(point.x - (faceMinX + faceMaxX) / 2) / faceWidth;
+    if (fromTop < 0.18) return 0.072 * faceWidth; // forehead toward the hairline
+    if (fromTop > 0.78) return 0.068 * faceWidth; // lower jaw and chin
+    if (lateral > 0.34) return 0.060 * faceWidth; // temples / pre-auricular edge
+    return 0.048 * faceWidth; // lateral cheeks
+  };
+  const extensionWidth = (vertex: number) => {
+    const point = localLandmarks[vertex]!;
+    const fromTop = (point.y - faceMinY) / faceHeight;
+    const lateral = Math.abs(point.x - (faceMinX + faceMaxX) / 2) / faceWidth;
+    if (fromTop < 0.18) return 0.036 * faceWidth;
+    if (fromTop > 0.78) return 0.031 * faceWidth;
+    if (lateral > 0.34) return 0.030 * faceWidth;
+    return 0.021 * faceWidth;
+  };
+  const distance = new Float64Array(FACE_LANDMARK_VERTICES).fill(Infinity);
+  const featherByVertex = new Float64Array(FACE_LANDMARK_VERTICES).fill(0.05 * faceWidth);
+  const pending: number[] = [];
   for (const vertex of external.vertices) {
     distance[vertex] = 0;
-    queue.push(vertex);
+    featherByVertex[vertex] = featherWidth(vertex);
+    pending.push(vertex);
   }
-  for (let cursor = 0; cursor < queue.length; cursor++) {
-    const vertex = queue[cursor]!;
+  const visited = new Uint8Array(FACE_LANDMARK_VERTICES);
+  while (pending.length) {
+    let bestAt = 0;
+    for (let i = 1; i < pending.length; i++) if (distance[pending[i]!]! < distance[pending[bestAt]!]!) bestAt = i;
+    const vertex = pending.splice(bestAt, 1)[0]!;
+    if (visited[vertex]) continue;
+    visited[vertex] = 1;
     for (const neighbor of neighbors[vertex]!) {
-      if (distance[neighbor] !== -1) continue;
-      distance[neighbor] = distance[vertex]! + 1;
-      queue.push(neighbor);
+      if (visited[neighbor]) continue;
+      const a = localLandmarks[vertex]!, b = localLandmarks[neighbor]!;
+      const candidate = distance[vertex]! + Math.hypot(a.x - b.x, a.y - b.y);
+      if (candidate >= distance[neighbor]!) continue;
+      distance[neighbor] = candidate;
+      featherByVertex[neighbor] = featherByVertex[vertex]!;
+      pending.push(neighbor);
     }
   }
 
-  const ramp = [0, 0.2, 0.48, 0.76, 1] as const;
-  return { alpha: Float32Array.from(distance, d => ramp[Math.min(ramp.length - 1, Math.max(0, d))]!), loops };
+  const alpha = Float32Array.from(distance, (d, vertex) => {
+    const outerReach = external.vertices.includes(vertex) ? extensionWidth(vertex) : 0;
+    const t = Math.max(0, Math.min(1, (d + outerReach) / Math.max(1e-6, featherByVertex[vertex]!)));
+    return t * t * (3 - 2 * t);
+  });
+  return { alpha, loops, outerVertices: [...external.vertices] };
 }
 
 /** Measured source depth, with fixed topology and original source UVs.
@@ -198,7 +242,8 @@ export function buildSourceFaceMesh(
     throw new Error("The selected source does not contain the fixed face topology.");
   }
   const localLandmarks = canonicalFaceLandmarks(landmarks, pose, aspect);
-  const { alpha: faceCoverage, loops: rawBoundaryLoops } = faceBoundaryCoverage(localLandmarks);
+  const { alpha: faceCoverage, loops: rawBoundaryLoops, outerVertices } = faceBoundaryCoverage(localLandmarks);
+  const coverageBoundaryVertices = [...outerVertices];
   const width = Math.abs(localLandmarks[454]!.x - localLandmarks[234]!.x);
   const scale = width > .001 ? .44 / width : 1;
   for (const p of localLandmarks) { p.x *= scale; p.y *= scale; p.z *= scale; }
@@ -233,8 +278,8 @@ export function buildSourceFaceMesh(
   const cavityStart = fillStart + fillCount;
   const cavityCount = OUTER_LIP_RING.length + 1;
   const vertexCount = cavityStart + cavityCount;
-  const positions = new Float32Array(vertexCount * 3);
-  const uvs = new Float32Array(vertexCount * 2);
+  let positions = new Float32Array(vertexCount * 3);
+  let uvs = new Float32Array(vertexCount * 2);
   for (let i = 0; i < FACE_LANDMARK_VERTICES; i++) {
     const p = localLandmarks[i]!;
     positions.set([p.x, -p.y, -p.z], i * 3);
@@ -273,10 +318,91 @@ export function buildSourceFaceMesh(
   const cavityIndexStart = indices.length;
   addFan(OUTER_LIP_RING, cavityStart, MOUTH_CAVITY_DEPTH);
   const cavityIndexCount = indices.length - cavityIndexStart;
+  const extensionStart = positions.length / 3;
+  const extensionPositions: number[] = [];
+  const extensionUvs: number[] = [];
+  let uvMinX = Infinity, uvMaxX = -Infinity, uvMinY = Infinity, uvMaxY = -Infinity;
+  for (let i = 0; i < FACE_LANDMARK_VERTICES; i++) {
+    const point = landmarks[i]!;
+    uvMinX = Math.min(uvMinX, point.x); uvMaxX = Math.max(uvMaxX, point.x);
+    uvMinY = Math.min(uvMinY, point.y); uvMaxY = Math.max(uvMaxY, point.y);
+  }
+  const uvCenter = { x: (uvMinX + uvMaxX) / 2, y: (uvMinY + uvMaxY) / 2 };
+  const sourceWidth = Math.max(1e-6, Math.abs(landmarks[454]!.x - landmarks[234]!.x));
+  const sourceHeight = Math.max(1e-6, uvMaxY - uvMinY);
+  for (const [edgeIndex, landmarkIndex] of outerVertices.entries()) {
+    const source = landmarks[landmarkIndex]!;
+    const local = localLandmarks[landmarkIndex]!;
+    const uvDx = source.x - uvCenter.x, uvDy = source.y - uvCenter.y;
+    const uvLength = Math.hypot(uvDx, uvDy) || 1;
+    const localDx = local.x, localDy = local.y;
+    const localLength = Math.hypot(localDx, localDy) || 1;
+    const fromTop = (source.y - uvMinY) / sourceHeight;
+    const lateral = Math.abs(source.x - uvCenter.x) / sourceWidth;
+    const extensionRatio = fromTop < 0.18 ? 0.036
+      : fromTop > 0.78 ? 0.031
+        : lateral > 0.34 ? 0.030 : 0.021;
+    const extensionUv = extensionRatio * sourceWidth;
+    const extensionLocal = extensionRatio * 0.44;
+    // The extension ring samples a small step back into the source face. The
+    // ring geometry reaches outward, but its texels must not pull in background
+    // or scalp pixels at the forehead and temples.
+    const sourceSkinInset = extensionUv * 0.28;
+    extensionUvs.push(
+      Math.max(0, Math.min(1, source.x - uvDx / uvLength * sourceSkinInset)),
+      Math.max(0, Math.min(1, source.y - uvDy / uvLength * sourceSkinInset)),
+    );
+    extensionPositions.push(
+      positions[landmarkIndex * 3]! + localDx / localLength * extensionLocal,
+      positions[landmarkIndex * 3 + 1]! - localDy / localLength * extensionLocal,
+      positions[landmarkIndex * 3 + 2]!,
+    );
+    const current = landmarkIndex;
+    const next = outerVertices[(edgeIndex + 1) % outerVertices.length]!;
+    const currentExtended = extensionStart + edgeIndex;
+    const nextExtended = extensionStart + (edgeIndex + 1) % outerVertices.length;
+    indices.push(current, next, nextExtended, current, nextExtended, currentExtended);
+  }
+  positions = Float32Array.from([...positions, ...extensionPositions]);
+  uvs = Float32Array.from([...uvs, ...extensionUvs]);
+  const extendedVertexCount = vertexCount + outerVertices.length;
+  const coverageExtensionVertices = outerVertices.map((_vertex, index) => extensionStart + index);
+  const coverageExtensionRegions = Uint8Array.from(outerVertices, landmarkIndex => {
+    const point = landmarks[landmarkIndex]!;
+    const fromTop = (point.y - uvMinY) / sourceHeight;
+    const lateral = Math.abs(point.x - uvCenter.x) / sourceWidth;
+    if (fromTop < 0.2) return 0; // forehead / estimated hairline side
+    if (fromTop > 0.91) return 3; // chin
+    if (fromTop > 0.76) return 2; // jaw
+    if (lateral > 0.32) return 1; // temples; ears remain outside the loop
+    return 1;
+  });
+  const outerLoop = boundaryLoops.find(loop => loop.kind === "outer")!;
+  outerLoop.vertices = outerVertices.map((_vertex, index) => extensionStart + index);
+  const extendedPoints = outerVertices.map((_vertex, index) => ({
+    x: extensionPositions[index * 3]!, y: extensionPositions[index * 3 + 1]!,
+  }));
+  let outerTwiceArea = 0, outerCx = 0, outerCy = 0, outerPerimeter = 0;
+  for (let i = 0; i < extendedPoints.length; i++) {
+    const a = extendedPoints[i]!, b = extendedPoints[(i + 1) % extendedPoints.length]!;
+    const cross = a.x * b.y - b.x * a.y;
+    outerTwiceArea += cross; outerCx += (a.x + b.x) * cross; outerCy += (a.y + b.y) * cross;
+    outerPerimeter += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  if (Math.abs(outerTwiceArea) > 1e-10) {
+    outerLoop.centroid = { x: outerCx / (3 * outerTwiceArea), y: outerCy / (3 * outerTwiceArea) };
+    outerLoop.area = Math.abs(outerTwiceArea) / 2;
+    outerLoop.perimeter = outerPerimeter;
+    outerLoop.bounds = {
+      minX: Math.min(...extendedPoints.map(point => point.x)), maxX: Math.max(...extendedPoints.map(point => point.x)),
+      minY: Math.min(...extendedPoints.map(point => point.y)), maxY: Math.max(...extendedPoints.map(point => point.y)),
+    };
+  }
   // Interior texture motion needs interior UVs. Subdivide only the existing
   // eye fans twice; every aperture boundary and all other geometry are kept.
   const eyePositions = Array.from(positions), eyeUvs = Array.from(uvs);
-  const eyeCoverage = Array.from({ length: vertexCount }, (_, i) => i < FACE_LANDMARK_VERTICES ? faceCoverage[i]! : 1);
+  const eyeCoverage = Array.from({ length: extendedVertexCount }, (_, i) =>
+    i < FACE_LANDMARK_VERTICES ? faceCoverage[i]! : i < vertexCount ? 1 : 0);
   const midpoints = new Map<string, number>();
   const midpoint = (a: number, b: number) => {
     const key = a < b ? `${a}/${b}` : `${b}/${a}`;
@@ -304,7 +430,10 @@ export function buildSourceFaceMesh(
       fillStart, fillCount, fillIndexStart, fillIndexCount, cavityStart, cavityCount,
       cavityIndexStart, cavityIndexCount,
     },
-    eyeInterior: { start: vertexCount, count: eyePositions.length / 3 - vertexCount },
+    eyeInterior: { start: extendedVertexCount, count: eyePositions.length / 3 - extendedVertexCount },
     boundaryLoops,
+    coverageBoundaryVertices,
+    coverageExtensionVertices,
+    coverageExtensionRegions,
   };
 }

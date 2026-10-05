@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Icon } from "@/components/ui/Icon";
@@ -6,8 +8,8 @@ import { AdminPageHeader } from "@/features/admin/layout/AdminPageHeader";
 import { useProfiles } from "@/features/admin/hooks/useAdminData";
 
 import type { QualityMode } from "../engine/trackingScheduler";
+import { clampControl, DEFAULT_TRANSFORMATION_CONTROLS, type TransformationControls, type TransformationControlsRef } from "../engine/transformationControls";
 
-import { describeCalibration } from "./calibrationGuidance";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import { SourcePanel } from "./components/SourcePanel";
 import { StudioDiagnostics } from "./components/StudioDiagnostics";
@@ -19,6 +21,7 @@ import { useSourceSelection } from "./useSourceSelection";
 import { useStudioRuntime } from "./useStudioRuntime";
 import { usePreviewExpansion } from "./usePreviewExpansion";
 import type { FaceRendererStats, FaceRootMotionDebug } from "../engine/rendering/FaceRenderer";
+import type { RenderMirrorMode } from "../engine/rendering/rendererMotion";
 import type { OralInteriorMode } from '../engine/rendering/liveMouthCompositor';
 import type { FaceRenderFraming } from "../engine/rendering/faceFraming";
 import { NEUTRAL_FACE_RENDER_POSE, type FaceRenderPose } from '../engine/rendering/faceRendererMath';
@@ -30,7 +33,9 @@ import { AvatarPanel } from "./components/AvatarPanel";
 
 /** `avatar` is the experimental 3D path; `face` is the existing M7/M8 renderer. */
 type PreviewMode = "raw" | "face" | "avatar";
-type FaceDebugView = "final" | "overlay" | "compare" | "tracking-alignment" | "mask" | "boundaries" | "weights" | "face-lock";
+type StudioSection = "source" | "tracking" | "blend" | "face-fit" | "tools" | "diagnostics";
+type FaceFitValues = TransformationControls["faceFit"];
+type FaceDebugView = "final" | "overlay" | "compare" | "tracking-alignment" | "mask" | "boundaries" | "weights" | "boundary-match" | "face-lock";
 const TrackerLab = lazy(() => import('../tracking/TrackerLab'));
 
 /**
@@ -52,7 +57,94 @@ const QUALITY_MODES: { id: QualityMode; label: string; hint: string }[] = [
 ];
 
 export function TransformationStudioPage() {
-  const runtime = useStudioRuntime();
+  const sourceInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraStartAttempted = useRef(false);
+  const pipPointerOffset = useRef({ x: 0, y: 0 });
+  const pipPointerStart = useRef({ x: 0, y: 0 });
+  const pipPointerMoved = useRef(false);
+  const [pipCorner, setPipCorner] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("top-right");
+  const [pipPosition, setPipPosition] = useState<{ left: number; top: number } | null>(null);
+  const [pipDragging, setPipDragging] = useState(false);
+  const [pipMenuOpen, setPipMenuOpen] = useState(false);
+  const [pipExpanded, setPipExpanded] = useState(false);
+  const [pipVisible, setPipVisible] = useState(true);
+  const [calibrationSuccessVisible, setCalibrationSuccessVisible] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [activeSheet, setActiveSheet] = useState<StudioSection>("source");
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(window.sessionStorage.getItem("callastar-studio-sidebar-width"));
+      return Number.isFinite(saved) && saved >= 360 && saved <= 620 ? saved : 440;
+    } catch { return 440; }
+  });
+  const sidebarResizeStart = useRef({ x: 0, width: 440 });
+  const [sheetStage, setSheetStage] = useState<"peek" | "half" | "expanded">("half");
+  const sheetDragStart = useRef({ y: 0, height: 0 });
+  const sheetDragMoved = useRef(false);
+  const [sheetDragHeight, setSheetDragHeight] = useState<number | null>(null);
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const defaultFaceFit = DEFAULT_TRANSFORMATION_CONTROLS.faceFit;
+  const [controls, setControls] = useState<TransformationControls>(() => structuredClone(DEFAULT_TRANSFORMATION_CONTROLS));
+  const controlsRef = useRef<TransformationControlsRef["current"]>(controls);
+  controlsRef.current = controls;
+  const runtime = useStudioRuntime(controlsRef);
+  const faceFit = controls.faceFit;
+  const toolValues: Record<string, number> = {
+    "Face Coverage": controls.coverage.overall,
+    "Forehead Coverage": controls.coverage.forehead,
+    "Temple Coverage": controls.coverage.temple,
+    "Jaw / Chin Coverage": controls.coverage.jaw,
+    "Boundary Feather": controls.blending.feather,
+    "Skin Match": controls.blending.skinMatch,
+    "Shadow Correction": controls.blending.shadowCorrection,
+    "Motion Stability": controls.tracking.stability,
+    "Yaw Response": controls.tracking.yawResponse,
+    "Pitch Response": controls.tracking.pitchResponse,
+    "Scale Follow": controls.tracking.scaleFollow,
+    "Facial Response": controls.tracking.facialResponse,
+    "Source Strength": controls.blending.sourceOpacity,
+  };
+  const updateToolValue = (label: string, value: number) => {
+    if (label === "Jaw / Chin Coverage") {
+      const bounded = clampControl(value);
+      setControls(current => ({ ...current, coverage: { ...current.coverage, jaw: bounded, chin: bounded } }));
+      return;
+    }
+    const bindings: Record<string, ["tracking" | "coverage" | "blending", string]> = {
+      "Face Coverage": ["coverage", "overall"],
+      "Forehead Coverage": ["coverage", "forehead"],
+      "Temple Coverage": ["coverage", "temple"],
+      "Boundary Feather": ["blending", "feather"],
+      "Skin Match": ["blending", "skinMatch"],
+      "Shadow Correction": ["blending", "shadowCorrection"],
+      "Motion Stability": ["tracking", "stability"],
+      "Yaw Response": ["tracking", "yawResponse"],
+      "Pitch Response": ["tracking", "pitchResponse"],
+      "Scale Follow": ["tracking", "scaleFollow"],
+      "Facial Response": ["tracking", "facialResponse"],
+      "Source Strength": ["blending", "sourceOpacity"],
+    };
+    const binding = bindings[label];
+    if (!binding) return;
+    const [section, key] = binding;
+    setControls(current => {
+      const next = { ...current, [section]: { ...current[section] } } as TransformationControls;
+      (next[section] as unknown as Record<string, number>)[key] = clampControl(value);
+      return next;
+    });
+  };
+  const updateFaceFit = (key: keyof FaceFitValues, value: number) => {
+    setControls(current => ({ ...current, faceFit: { ...current.faceFit, [key]: value } }));
+  };
+  const resetFaceFit = () => setControls(current => ({ ...current, faceFit: { ...defaultFaceFit } }));
+  const toggleRawDirect = (enabled: boolean) => {
+    setSwitches(current => ({ ...current, "Raw Direct": enabled }));
+    setControls(current => ({ ...current, tracking: { ...current.tracking, rawDirect: enabled } }));
+  };
+  const [switches, setSwitches] = useState<Record<string, boolean>>({ "Live Tracking": true, "Raw Direct": false, "Tracking Alignment": false, "Mask Coverage": false, "Mask Preview": false, "Boundary Preview": false, "Face Lock": true, "Mirror Camera": true, "Maintain Source Identity": true, "Show Source Preview": true, "Show Tracking Points": false, "Show Face Boundary": false, "Show Mask": false, "Show Alignment": false });
+  const mirrorModeRef = useRef<RenderMirrorMode>("selfie");
+  mirrorModeRef.current = switches["Mirror Camera"] && runtime.facing === "user" ? "selfie" : "faithful";
   const [trackerLabOpen, setTrackerLabOpen] = useState(false);
   const trackerLabOverlayRef = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
@@ -127,16 +219,26 @@ export function TransformationStudioPage() {
   const lastSourceRef = useRef(source.asset);
 
   useEffect(() => {
+    if (source.stage !== "selected" || !source.asset) return;
+    source.setConsent(true);
+    source.analyze(true);
+  }, [source.stage, source.asset, source.setConsent, source.analyze]);
+
+  useEffect(() => {
     if (lastSourceRef.current === source.asset) return;
+    const cameraActive = runtime.state.camera === "live" || runtime.state.camera === "switching";
+    const replacingLiveSource = lastSourceRef.current !== null && source.asset !== null && cameraActive;
     lastSourceRef.current = source.asset;
+    if (replacingLiveSource) runtime.clearCalibration();
     setPreviewMode("raw");
+    resetFaceFit();
     setRendererStats(null);
     setAvatarStats(null);
     setAvatarManualEnabled(false);
     setAvatarManualValues({ ...NEUTRAL_EXPRESSION });
     setManualEnabled(false);
     setManualValues({ ...NEUTRAL_EXPRESSION });
-  }, [source.asset]);
+  }, [source.asset, runtime.state.camera, runtime.clearCalibration]);
 
   manualExpressionRef.current = manualEnabled
     ? { ...manualValues, status: "manual", calculationMs: 0 }
@@ -153,12 +255,12 @@ export function TransformationStudioPage() {
     rendererRef.current?.setDiagnostics({
       showMesh,
       wireframe,
-      showMask: import.meta.env.DEV && faceDebugView === "mask",
-      showBoundaries: import.meta.env.DEV && faceDebugView === "boundaries",
+      showMask: switches["Mask Preview"] || switches["Mask Coverage"] || switches["Show Mask"] || (import.meta.env.DEV && faceDebugView === "mask"),
+      showBoundaries: switches["Boundary Preview"] || switches["Show Face Boundary"] || (import.meta.env.DEV && faceDebugView === "boundaries"),
       showWeights: import.meta.env.DEV && faceDebugView === "weights",
-      showFaceLockDebug: import.meta.env.DEV && (faceDebugView === "face-lock" || faceDebugView === "compare" || faceDebugView === "tracking-alignment"),
+      showFaceLockDebug: switches["Tracking Alignment"] || switches["Show Alignment"] || (import.meta.env.DEV && (faceDebugView === "face-lock" || faceDebugView === "compare" || faceDebugView === "tracking-alignment")),
     });
-  }, [showMesh, wireframe, faceDebugView]);
+  }, [showMesh, wireframe, faceDebugView, switches]);
 
   const canRenderFace = !trackerLabOpen && source.stage === "ready" && !!source.profile && !!source.asset &&
     (runtime.calibration.phase === "ready" || (previewMode === "face" && rendererRef.current !== null));
@@ -191,6 +293,7 @@ export function TransformationStudioPage() {
         liveMouthEnabled: liveMouthEnabledRef,
         oralInteriorMode: oralInteriorModeRef,
         motion: runtime.motionRef,
+        controls: controlsRef,
         expression: runtime.expressionRef,
         faceFrame: runtime.faceFrameRef,
         rootMotionDebug: faceRootDebugRef,
@@ -199,7 +302,7 @@ export function TransformationStudioPage() {
         paused: runtime.renderPausedRef,
         framing: framingRef,
         // Matches the camera preview's own mirror, so the two stay comparable.
-        mirror: runtime.facing === "user" ? "selfie" : "faithful",
+        mirror: mirrorModeRef,
         onStats: setRendererStats,
       });
       rendererRef.current = renderer;
@@ -391,7 +494,6 @@ export function TransformationStudioPage() {
     () => deriveStudioSteps(state, calibration.phase, source.stage),
     [state, calibration.phase, source.stage],
   );
-  const calibrationGuidance = useMemo(() => describeCalibration(calibration), [calibration]);
   const calibrating =
     calibration.phase === "waiting-for-stable-tracking" ||
     calibration.phase === "collecting" ||
@@ -403,6 +505,156 @@ export function TransformationStudioPage() {
   const isPaused = state.phase === "paused";
   const hasFailed = state.phase === "failed";
   const isIdle = state.phase === "idle" || state.phase === "disposed";
+  const isCalibrated = calibration.phase === "ready";
+  const isCameraDenied = hasFailed && state.camera === "denied";
+
+  useEffect(() => {
+    if (source.stage !== "ready" || !isIdle || cameraStartAttempted.current) return;
+    cameraStartAttempted.current = true;
+    runtime.start();
+  }, [source.stage, isIdle, runtime.start]);
+
+  useEffect(() => {
+    if (hasFailed) cameraStartAttempted.current = false;
+  }, [hasFailed]);
+
+  useEffect(() => {
+    if (calibration.phase !== "ready") return;
+    setCalibrationSuccessVisible(true);
+    const timer = window.setTimeout(() => setCalibrationSuccessVisible(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [calibration.phase]);
+
+  const beginPipDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const viewport = stageRef.current;
+    if (!viewport) return;
+    const pip = event.currentTarget;
+    const viewportRect = viewport.getBoundingClientRect();
+    const pipRect = pip.getBoundingClientRect();
+    pipPointerOffset.current = { x: event.clientX - pipRect.left, y: event.clientY - pipRect.top };
+    pipPointerStart.current = { x: event.clientX, y: event.clientY };
+    pipPointerMoved.current = false;
+    setPipMenuOpen(false);
+    setPipPosition({ left: pipRect.left - viewportRect.left, top: pipRect.top - viewportRect.top });
+    setPipDragging(true);
+    pip.setPointerCapture(event.pointerId);
+  };
+
+  const movePip = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pipDragging || !stageRef.current) return;
+    if (Math.hypot(event.clientX - pipPointerStart.current.x, event.clientY - pipPointerStart.current.y) > 5) pipPointerMoved.current = true;
+    const bounds = stageRef.current.getBoundingClientRect();
+    const pip = event.currentTarget.getBoundingClientRect();
+    const header = stageRef.current.querySelector(".studio-camera-header")?.getBoundingClientRect();
+    const controls = stageRef.current.querySelector(".studio-bottom-controls")?.getBoundingClientRect();
+    const minTop = (header?.bottom ?? bounds.top + 80) - bounds.top + 12;
+    const maxLeft = Math.max(12, bounds.width - pip.width - 12);
+    const maxTop = Math.max(minTop, (controls?.top ?? bounds.bottom - 140) - bounds.top - pip.height - 12);
+    setPipPosition({
+      left: Math.min(maxLeft, Math.max(12, event.clientX - bounds.left - pipPointerOffset.current.x)),
+      top: Math.min(maxTop, Math.max(minTop, event.clientY - bounds.top - pipPointerOffset.current.y)),
+    });
+  };
+
+  const finishPipDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pipDragging || !stageRef.current) return;
+    if (!pipPointerMoved.current) {
+      setPipPosition(null);
+      setPipDragging(false);
+      setPipMenuOpen(open => !open);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
+    const bounds = stageRef.current.getBoundingClientRect();
+    const pip = event.currentTarget.getBoundingClientRect();
+    const header = stageRef.current.querySelector(".studio-camera-header")?.getBoundingClientRect();
+    const controls = stageRef.current.querySelector(".studio-bottom-controls")?.getBoundingClientRect();
+    const minTop = (header?.bottom ?? bounds.top + 80) - bounds.top + 12;
+    const maxLeft = Math.max(12, bounds.width - pip.width - 12);
+    const maxTop = Math.max(minTop, (controls?.top ?? bounds.bottom - 140) - bounds.top - pip.height - 12);
+    const left = Math.min(maxLeft, Math.max(12, event.clientX - bounds.left - pipPointerOffset.current.x));
+    const top = Math.min(maxTop, Math.max(minTop, event.clientY - bounds.top - pipPointerOffset.current.y));
+    const corners = [
+      { name: "top-left" as const, x: 12, y: minTop },
+      { name: "top-right" as const, x: maxLeft, y: minTop },
+      { name: "bottom-left" as const, x: 12, y: maxTop },
+      { name: "bottom-right" as const, x: maxLeft, y: maxTop },
+    ];
+    const closest = corners.reduce((best, corner) => Math.hypot(left - corner.x, top - corner.y) < Math.hypot(left - best.x, top - best.y) ? corner : best);
+    setPipCorner(closest.name);
+    setPipPosition(null);
+    setPipDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const openControls = (section: StudioSection = activeSheet) => {
+    setActiveSheet(section);
+    if (window.matchMedia("(min-width: 850px)").matches) {
+      setSidebarExpanded(true);
+      return;
+    }
+    setSheetStage("half");
+    setSheetDragHeight(null);
+    setPipMenuOpen(false);
+    setControlsOpen(true);
+  };
+
+  const beginSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    sidebarResizeStart.current = { x: event.clientX, width: sidebarWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const maxWidth = Math.min(620, window.innerWidth - 520);
+    setSidebarWidth(Math.max(360, Math.min(maxWidth, sidebarResizeStart.current.width + sidebarResizeStart.current.x - event.clientX)));
+  };
+
+  const finishSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    try { window.sessionStorage.setItem("callastar-studio-sidebar-width", String(sidebarWidth)); } catch { /* Session persistence is optional. */ }
+  };
+
+  const beginSheetDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const sheet = event.currentTarget.closest(".studio-bottom-sheet");
+    if (!sheet) return;
+    sheetDragStart.current = { y: event.clientY, height: sheet.getBoundingClientRect().height };
+    sheetDragMoved.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveSheetDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    if (Math.abs(event.clientY - sheetDragStart.current.y) > 5) sheetDragMoved.current = true;
+    const viewportHeight = window.innerHeight;
+    const nextHeight = sheetDragStart.current.height + sheetDragStart.current.y - event.clientY;
+    setSheetDragHeight(Math.min(viewportHeight * 0.9, Math.max(viewportHeight * 0.16, nextHeight)));
+  };
+
+  const finishSheetDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    if (!sheetDragMoved.current) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
+    const viewportHeight = window.innerHeight;
+    const nextHeight = sheetDragHeight ?? sheetDragStart.current.height;
+    const snapPoints = [
+      { stage: "peek" as const, height: viewportHeight * 0.18 },
+      { stage: "half" as const, height: viewportHeight * 0.55 },
+      { stage: "expanded" as const, height: viewportHeight * 0.88 },
+    ];
+    const nearest = snapPoints.reduce((best, point) => Math.abs(nextHeight - point.height) < Math.abs(nextHeight - best.height) ? point : best);
+    setSheetStage(nearest.stage);
+    setSheetDragHeight(null);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const retryAnalysis = () => {
+    runtime.clearCalibration();
+    setPreviewMode("raw");
+    source.analyze(true);
+  };
   /*
    * What owns the main surface.
    *
@@ -412,7 +664,6 @@ export function TransformationStudioPage() {
    * that failed falls back to the raw layout rather than a blank canvas.
    */
   const outputLayout = (previewMode === "face" && rendererStats?.status !== "failed") || previewMode === "avatar";
-  const sourceLayout = outputLayout ? "is-decoder" : isLive ? "is-thumbnail" : "is-full";
   const rootFrame = rendererStats?.faceFrame ?? null;
   const rootProbe = rendererStats?.attachmentProbe ?? null;
   const rootModeLabel = faceRootDebug.mode === "tracking"
@@ -450,7 +701,8 @@ export function TransformationStudioPage() {
   } : { minX: point.x, maxX: point.x, minY: point.y, maxY: point.y }, null);
 
   return (
-    <div className="studio-page">
+    <div className={`studio-page studio-mobile-shell ${sidebarExpanded ? "studio-sidebar-expanded" : "studio-sidebar-collapsed"}`} style={{ "--studio-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+      <header className="studio-desktop-header"><div className="studio-desktop-brand"><span>✦</span><strong>CallaStar</strong><i />Transformation Studio</div><div className={`studio-desktop-ready ${isLive ? "is-live" : ""}`}><i />{isLive ? "Camera Ready" : "Camera Standby"}</div></header>
       <AdminPageHeader
         title="Transformation Studio"
         description="Live tracking with an experimental, face-only source preview."
@@ -459,7 +711,7 @@ export function TransformationStudioPage() {
       <StudioStepRail steps={steps} />
 
       <div className="studio-layout">
-        <section ref={stageRef} className={`studio-stage ${preview.expanded ? "is-expanded" : ""}`} aria-label="Camera preview">
+        <section ref={stageRef} className={`studio-stage studio-camera-stage ${preview.expanded ? "is-expanded" : ""} ${controlsOpen ? "has-sheet" : ""}`} aria-label="Camera preview">
           <div
             className={`studio-viewport ${runtime.facing === "user" ? "is-mirrored" : ""} ${previewMode === "face" ? "is-face-render-preview" : ""} ${previewMode === "face" && faceDebugView === "overlay" ? "is-overlay-only" : ""} ${previewMode === "face" && (faceDebugView === "compare" || faceDebugView === "tracking-alignment") ? "is-placement-compare" : ""} ${outputLayout && isLive ? "is-output-preview" : ""}`}
             data-layout={outputLayout ? "output" : "camera"}
@@ -485,16 +737,26 @@ export function TransformationStudioPage() {
               * element throughout: a mode switch restyles it rather than
               * remounting a video the renderer may be reading.
               */}
-            {source.previewUrl && (source.asset?.kind === "video" || sourceLayout !== "is-decoder") && (
-              <div className={`studio-source-preview ${sourceLayout}`} data-testid="studio-source-reference">
+            {isLive && pipVisible && source.previewUrl && (
+              <div
+                className={`studio-source-preview studio-pip ${pipPosition ? "studio-pip-free" : `studio-pip-${pipCorner}`} ${pipDragging ? "is-dragging" : ""} ${pipExpanded ? "is-expanded" : ""} ${controlsOpen && (sheetStage === "expanded" || pipCorner.startsWith("bottom")) ? "is-above-sheet" : ""}`}
+                data-testid="studio-source-reference"
+                style={pipPosition ? { left: `${pipPosition.left}px`, top: `${pipPosition.top}px`, right: "auto", bottom: "auto" } : undefined}
+                onPointerDown={beginPipDrag}
+                onPointerMove={movePip}
+                onPointerUp={finishPipDrag}
+                onPointerCancel={finishPipDrag}
+                aria-label="Source preview. Tap for options or drag to move."
+              >
                 {source.asset?.kind === "video" ? (
-                  <video ref={sourceVideoRef} src={source.previewUrl} playsInline muted preload="metadata" />
+                  <video ref={sourceVideoRef} src={source.previewUrl} playsInline muted autoPlay loop preload="metadata" />
                 ) : (
                   <img src={source.previewUrl} alt={`Source: ${source.asset?.fileName ?? "selected file"}`} />
                 )}
-                {sourceLayout === "is-thumbnail" && <span className="studio-source-label">Source</span>}
+                <span className="studio-pip-label">Source · {source.stage === "ready" ? "Ready" : "Analyzing"}</span>
               </div>
             )}
+            {pipMenuOpen && isLive && <div className={`studio-pip-menu studio-pip-menu-${pipCorner}`}><button type="button" onClick={() => { setPipExpanded(value => !value); setPipMenuOpen(false); }}>{pipExpanded ? "Close Preview" : "View Source"}</button><button type="button" onClick={() => openControls("source")}>Change Source</button></div>}
             <canvas ref={rendererCanvasRef} className={`studio-face-renderer is-face-overlay ${previewMode === "face" ? "is-visible" : ""}`} aria-label="Experimental face renderer preview" />
             <canvas
               ref={avatarCanvasRef}
@@ -522,35 +784,43 @@ export function TransformationStudioPage() {
               </div>
             )}
 
-            {isIdle && !source.previewUrl && (
-              <div className="studio-placeholder">
-                <Icon name="camera" className="size-8" />
-                <h2>Live tracking preview</h2>
-                <p>
-                  Starts the camera on this device and loads the face model. Face landmarks and expressions stay on this device.
-                  Nothing is uploaded, stored or sent anywhere.
-                </p>
-                <button type="button" className="studio-primary" onClick={runtime.start}>
-                  Start camera
-                </button>
+            {(isLoading || isRequestingCamera) && (
+              <div className="studio-flow-message" role="status">
+                <span className="studio-spinner" aria-hidden="true" />
+                <strong>{source.stage === "ready" ? (isRequestingCamera ? "Starting camera…" : "Starting camera…") : (state.loadingStage ?? "Preparing camera…")}</strong>
+                {source.stage === "ready" && <span>Source ready ✓</span>}
               </div>
             )}
 
-            {(isLoading || isRequestingCamera) && (
-              <div className="studio-placeholder" role="status">
-                <span className="studio-spinner" aria-hidden="true" />
-                <p>{isRequestingCamera ? "Waiting for camera permission" : (state.loadingStage ?? "Loading")}</p>
+            {!source.asset && source.stage === "empty" && !hasFailed && (
+              <div className="studio-first-source">
+                <div className="studio-empty-brand"><span>✦</span><strong>Transformation Studio</strong></div>
+                <p>Upload an image or video to begin</p>
+                <button type="button" className="studio-add-source-primary" onClick={() => sourceInputRef.current?.click()}><Icon name="plus" /> Add Source</button>
               </div>
+            )}
+
+            {source.stage === "analyzing" && (
+              <div className="studio-flow-message" role="status">
+                <span className="studio-spinner" aria-hidden="true" />
+                <strong>Analyzing source…</strong>
+                <span>{source.progress.stage === "analyzing-face" || source.progress.stage === "analyzing-pose" ? "Detecting facial features…" : source.progress.stage === "evaluating" ? "Preparing source geometry…" : "Preparing facial profile"}</span>
+              </div>
+            )}
+
+            {source.stage === "failed" && !hasFailed && (
+              <div className="studio-flow-error" role="alert"><strong>Unable to analyze this source</strong><span>{source.message ?? "Choose a clear image or video and try again."}</span><button type="button" onClick={() => source.asset ? source.analyze(true) : sourceInputRef.current?.click()}>Try Again</button><button type="button" onClick={() => sourceInputRef.current?.click()}>Choose Another Source</button></div>
+            )}
+
+            {source.stage === "selected" && !activeProfile && (
+              <div className="studio-flow-error" role="alert"><strong>Open a profile to prepare this source</strong><span>Transformation Studio needs a profile before it can build a facial source.</span><button type="button" onClick={() => history.back()}>Go Back</button></div>
             )}
 
             {hasFailed && (
-              <div className="studio-placeholder is-error" role="alert">
-                <Icon name="info" className="size-8" />
-                <h2>{state.camera === "denied" ? "Camera blocked" : "Could not start"}</h2>
-                <p>{state.error}</p>
-                <button type="button" className="studio-primary" onClick={runtime.stop}>
-                  Reset
-                </button>
+              <div className="studio-flow-error" role="alert">
+                <strong>{isCameraDenied ? "Camera access is required" : "Could not start the camera"}</strong>
+                <span>{isCameraDenied ? "Allow camera access to continue with live tracking." : state.error}</span>
+                <button type="button" onClick={() => { cameraStartAttempted.current = false; runtime.stop(); }}>{isCameraDenied ? "Allow Camera" : "Try Again"}</button>
               </div>
             )}
 
@@ -563,38 +833,92 @@ export function TransformationStudioPage() {
 
             {calibrating && (
               <div className="studio-calibration-message" role="status">
-                <strong>{calibrationGuidance.message}</strong>
-                {calibrationGuidance.detail && <span>{calibrationGuidance.detail}</span>}
+                <strong>Calibrating face…</strong>
+                <span>Hold still and look forward</span>
+                <div className="studio-calibration-progress"><span style={{ width: `${Math.round(calibration.progress * 100)}%` }} /></div>
               </div>
             )}
-
-            <div className="studio-viewport-tools">
-              <button
-                type="button"
-                className="studio-viewport-button"
-                aria-label={preview.expanded ? "Minimize preview" : "Expand preview"}
-                aria-pressed={preview.expanded}
-                onClick={preview.expanded ? preview.minimize : preview.expand}
-              >
-                <Icon name={preview.expanded ? "minimize" : "maximize"} className="size-5" />
-              </button>
-              {/* The mode card sits below the stage and is hidden while expanded. */}
-              {preview.expanded && (
-                <div className="studio-viewport-modes" role="group" aria-label="Expanded preview mode">
-                  <button type="button" aria-pressed={previewMode === "raw"} onClick={() => setPreviewMode("raw")}>Camera</button>
-                  <button type="button" aria-pressed={previewMode === "face"} onClick={() => setPreviewMode("face")} disabled={!canRenderFace}>Face</button>
-                </div>
-              )}
-            </div>
-
-            {isLive && !calibrating && !trackerLabOpen && (
-              <div className={`studio-status is-${summary.guidance.quality}`} role="status">
-                <span className="studio-status-dot" aria-hidden="true" />
-                <strong>{summary.guidance.label}</strong>
-                <span>{summary.guidance.detail}</span>
-              </div>
-            )}
+            {calibration.phase === "failed" && isLive && <div className="studio-calibration-toast" role="alert"><strong>Calibration couldn't complete</strong><button type="button" onClick={() => runtime.startCalibration()}>Try Again</button></div>}
+            {calibrationSuccessVisible && isLive && !calibrating && <div className="studio-calibration-toast" role="status">Face calibrated ✓</div>}
+            <header className="studio-camera-header">
+              <button type="button" className="studio-round-button studio-back-control" aria-label="Back" onClick={() => history.back()}><Icon name="chevron" /><span>Back</span></button>
+              <div className="studio-camera-title"><h1>Transformation Studio</h1></div>
+              {isLive ? <button type="button" className="studio-round-button studio-settings-toggle" aria-label="Studio Controls" aria-expanded={controlsOpen} onClick={() => controlsOpen ? setControlsOpen(false) : openControls()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg></button> : <span aria-hidden="true" />}
+            </header>
+            <input ref={sourceInputRef} type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" className="admin-visually-hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void source.selectFile(file); event.target.value = ""; }} />
           </div>
+
+          {isLive && <div className="studio-bottom-controls studio-mobile-controls">
+            {previewMode === "face" ? <>
+              <button type="button" className="studio-camera-action" onClick={() => setStopConfirmOpen(true)} aria-label="Stop transformation session"><span className="studio-action-disc"><Icon name="phoneOff" /></span><small>Stop</small></button>
+              <button type="button" className="studio-camera-action is-primary" onClick={() => openControls("source")} aria-label="Change source"><span className="studio-action-disc"><Icon name="image" /></span><small>Source</small></button>
+              <button type="button" className="studio-camera-action" onClick={() => openControls("face-fit")} aria-label="Adjust face fit"><span className="studio-action-disc"><Icon name="settings" /></span><small>Adjust</small></button>
+            </> : <>
+              <button type="button" className="studio-camera-action" onClick={() => { setPreviewMode("raw"); runtime.flipCamera(); }} disabled={calibrating || controlsOpen} aria-label="Flip camera"><span className="studio-action-disc"><Icon name="flip" /></span><small>Flip</small></button>
+              <button type="button" className="studio-camera-action is-primary" disabled={!isCalibrated || !canRenderFace || controlsOpen} aria-label="Start transformation" onClick={() => setPreviewMode("face")}><span className="studio-action-disc">✦</span><small>Transform</small></button>
+              <button type="button" className="studio-camera-action" onClick={() => { setPreviewMode("raw"); runtime.startCalibration(); }} disabled={controlsOpen} aria-label={calibrating ? "Restart calibration" : isCalibrated ? "Recalibrate face" : "Calibrate face"}><span className="studio-action-disc"><Icon name="eye" /></span><small>{calibrating ? "Restart" : isCalibrated ? "Recalibrate" : "Calibrate"}</small></button>
+            </>}
+          </div>}
+          {isLive && <div className="studio-bottom-controls studio-desktop-controls">
+            <button type="button" className="studio-camera-action" onClick={() => { setPreviewMode("raw"); runtime.flipCamera(); }} disabled={calibrating || state.camera === "switching"} aria-label="Flip camera"><span className="studio-action-disc"><Icon name="flip" /></span><small>Flip<span>Camera</span></small></button>
+            <button type="button" className={`studio-camera-action is-primary ${previewMode === "face" ? "is-on" : ""}`} disabled={!isCalibrated || !canRenderFace} aria-label={previewMode === "face" ? "Show raw tracking" : "Start face render"} onClick={() => setPreviewMode(mode => mode === "face" ? "raw" : "face")}><span className="studio-action-disc">✦</span><small>{previewMode === "face" ? "Face Render" : "Transform"}<span>Face Render</span></small></button>
+            <button type="button" className="studio-camera-action" onClick={() => { setPreviewMode("raw"); runtime.startCalibration(); }} aria-label={calibrating ? "Restart calibration" : isCalibrated ? "Recalibrate face" : "Calibrate face"}><span className="studio-action-disc"><Icon name="eye" /></span><small>{calibrating ? "Restart" : isCalibrated ? "Recalibrate" : "Calibrate"}<span>Face Mapping</span></small></button>
+          </div>}
+
+          {isLive && <div className="studio-desktop-hud"><strong><i />{summary.face?.detected ? "Tracking Active" : "Camera Ready"}</strong><span>{summary.face?.detected ? "Face Detected" : "Waiting for face"}</span><span>Stability: {summary.face?.detected ? "Good" : "—"}</span></div>}
+
+          {controlsOpen && <button type="button" className="studio-sheet-backdrop" aria-label="Close Studio Controls" onClick={() => setControlsOpen(false)} />}
+          <section className={`studio-bottom-sheet studio-desktop-sidebar ${controlsOpen ? "is-open" : ""} ${sheetDragHeight ? "is-dragging" : ""} ${sidebarExpanded ? "is-expanded" : "is-collapsed"}`} aria-label="Studio Controls" style={sheetDragHeight ? { height: `${sheetDragHeight}px` } : undefined}>
+              <div className="studio-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Studio Controls" onPointerDown={beginSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={finishSidebarResize} onPointerCancel={finishSidebarResize} />
+              <div className="studio-sheet-grab" role="button" tabIndex={0} aria-label="Drag to resize Studio Controls" onClick={() => { if (sheetDragMoved.current) { sheetDragMoved.current = false; return; } setSheetStage(stage => stage === "peek" ? "half" : stage === "half" ? "expanded" : "peek"); }} onPointerDown={beginSheetDrag} onPointerMove={moveSheetDrag} onPointerUp={finishSheetDrag} onPointerCancel={finishSheetDrag} onKeyDown={event => { if (event.key === "ArrowUp") { event.preventDefault(); setSheetStage(stage => stage === "peek" ? "half" : "expanded"); } if (event.key === "ArrowDown") { event.preventDefault(); setSheetStage(stage => stage === "expanded" ? "half" : "peek"); } }}><span /></div>
+              <div className="studio-sheet-head"><div><h2>Studio Controls</h2><small><i />{summary.face?.detected ? "Tracking Active" : "Camera ready · waiting for face"}</small></div><div className="studio-sidebar-head-actions"><button type="button" className="studio-sidebar-collapse" aria-label={sidebarExpanded ? "Collapse Studio Controls" : "Expand Studio Controls"} title={sidebarExpanded ? "Collapse controls" : "Expand controls"} onClick={() => setSidebarExpanded(value => !value)}><Icon name="chevron" /></button><button type="button" className="studio-sheet-close" aria-label="Close Studio Controls" onClick={() => window.matchMedia("(min-width: 850px)").matches ? setSidebarExpanded(false) : setControlsOpen(false)}><Icon name="close" /></button></div></div>
+              <div className="studio-sheet-tabs" aria-label="Studio control sections">{([ ["source", "Source", "image"], ["tracking", "Tracking", "eye"], ["blend", "Blend", "star"], ["face-fit", "Face Fit", "maximize"], ["tools", "Tools", "settings"], ["diagnostics", "Diagnostics", "info"] ] as const).map(([id, label, icon]) => <button type="button" key={id} className={activeSheet === id ? "is-active" : ""} aria-label={label} title={label} aria-pressed={activeSheet === id} onClick={() => { setActiveSheet(id); if (window.matchMedia("(min-width: 850px)").matches) setSidebarExpanded(true); }}><Icon name={icon} /><span>{label}</span></button>)}</div>
+              <div className="studio-sheet-content" data-sheet={activeSheet} key={activeSheet}>
+                {activeSheet === "source" && <>
+                  <div className="studio-current-source">{source.previewUrl && source.asset?.kind === "image" ? <img src={source.previewUrl} alt="Current source" /> : <span><Icon name={source.asset?.kind === "video" ? "video" : "image"} /></span>}<div><strong>{source.asset?.fileName ?? "No source selected"}</strong><small>{source.asset?.kind ?? "Source"}</small>{source.stage === "ready" ? <><small className="studio-source-ready"><i />Analyzed</small><small>Ready for transformation</small></> : <small>{source.stage}</small>}</div></div>
+                  <button type="button" className="studio-sheet-row" onClick={() => sourceInputRef.current?.click()}><Icon name="image" /><span><b>Change Source</b><small>Select a new image or video</small></span><Icon name="chevron" className="studio-row-chevron" /></button>
+                  <button type="button" className="studio-sheet-row" onClick={() => sourceInputRef.current?.click()}><Icon name="image" /><span><b>Upload New Image</b><small>Choose from your device</small></span><Icon name="chevron" className="studio-row-chevron" /></button>
+                  <button type="button" className="studio-sheet-row" onClick={() => sourceInputRef.current?.click()}><Icon name="video" /><span><b>Upload New Video</b><small>Choose from your device</small></span><Icon name="chevron" className="studio-row-chevron" /></button>
+                  {storedOptions.length > 0 && <div className="studio-recent-source"><h3>Recent Source</h3>{storedOptions.map(option => <button type="button" className="studio-sheet-row" key={option.assetId} onClick={() => { runtime.clearCalibration(); void source.selectStoredAsset(option.assetId, option.label); }}><Icon name="clock" /><span>{option.label}</span></button>)}</div>}
+                  <button type="button" className="studio-sheet-row" disabled={!source.asset || source.stage === "analyzing"} onClick={retryAnalysis}><Icon name="rotate" /><span><b>Re-run Analysis</b><small>Analyze source again</small></span><Icon name="chevron" className="studio-row-chevron" /></button>
+                  {source.stage === "analyzing" && <p className="studio-sheet-note">Analyzing source… · Preparing facial profile</p>}
+                  <h3 className="studio-sidebar-subheading">Source Settings</h3>
+                  <StudioControlSwitch label="Maintain Source Identity" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Maintain Source Identity": enabled })); setControls(current => ({ ...current, appearance: { ...current.appearance, preserveSourceTexture: enabled } })); }} />
+                  <StudioControlSlider label="Source Strength" value={toolValues["Source Strength"]} onChange={value => updateToolValue("Source Strength", value)} />
+                  <StudioControlSwitch label="Show Source Preview" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Show Source Preview": enabled })); setPipVisible(enabled); }} />
+                </>}
+                {activeSheet === "tracking" && <>
+                  <StudioControlSwitch label="Live Tracking" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Live Tracking": enabled })); if ((runtime.state.phase === "paused") === enabled) runtime.togglePause(); }} />
+                  <StudioControlSwitch label="Raw Direct" values={switches} onChange={setSwitches} onToggle={toggleRawDirect} />
+                  <StudioControlSwitch label="Tracking Alignment" values={switches} onChange={setSwitches} onToggle={enabled => setSwitches(current => ({ ...current, "Tracking Alignment": enabled }))} />
+                  <StudioControlSwitch label="Mask Coverage" values={switches} onChange={setSwitches} onToggle={enabled => setSwitches(current => ({ ...current, "Mask Coverage": enabled }))} />
+                  <div className="studio-metric-list"><p><span>Stability</span><b>{summary.face?.detected ? "Good" : "Waiting"}</b></p><p><span>Pose Response</span><b>{summary.motion?.tracked ? "Active" : "Waiting"}</b></p><p><span>Tracking Quality</span><b>{summary.guidance.label}</b></p></div>
+                  <details className="studio-inline-advanced"><summary>Advanced</summary><StudioControlSlider label="Tracking Stability" value={toolValues["Motion Stability"]} onChange={value => updateToolValue("Motion Stability", value)} /><StudioControlSlider label="Yaw Response" value={toolValues["Yaw Response"]} onChange={value => updateToolValue("Yaw Response", value)} /><StudioControlSlider label="Pitch Response" value={toolValues["Pitch Response"]} onChange={value => updateToolValue("Pitch Response", value)} /><StudioControlSlider label="Scale Follow" value={toolValues["Scale Follow"]} onChange={value => updateToolValue("Scale Follow", value)} /></details>
+                </>}
+                {activeSheet === "blend" && <>{["Face Coverage", "Forehead Coverage", "Temple Coverage", "Jaw / Chin Coverage", "Boundary Feather", "Skin Match", "Shadow Correction"].map(label => <StudioControlSlider key={label} label={label} value={toolValues[label]!} onChange={value => updateToolValue(label, value)} />)}<details className="studio-inline-advanced"><summary>Advanced Blend / Appearance</summary><StudioControlSlider label="Chin Coverage" value={controls.coverage.chin} onChange={value => setControls(current => ({ ...current, coverage: { ...current.coverage, chin: clampControl(value) } }))} /><StudioControlSlider label="Luminance Match" value={controls.blending.luminanceMatch} onChange={value => setControls(current => ({ ...current, blending: { ...current.blending, luminanceMatch: clampControl(value) } }))} /><StudioControlSlider label="Chroma Match" value={controls.blending.chromaMatch} onChange={value => setControls(current => ({ ...current, blending: { ...current.blending, chromaMatch: clampControl(value) } }))} /><StudioControlSlider label="Facial Hair Strength" value={controls.appearance.facialHairStrength} onChange={value => setControls(current => ({ ...current, appearance: { ...current.appearance, facialHairStrength: clampControl(value) } }))} /></details><StudioControlSwitch label="Mask Preview" values={switches} onChange={setSwitches} /><StudioControlSwitch label="Boundary Preview" values={switches} onChange={setSwitches} /></>}
+                {activeSheet === "face-fit" && <>
+                  {([ ["width", "Face Width", 70, 130, "%"], ["height", "Face Height", 70, 130, "%"], ["scale", "Scale", 70, 130, "%"], ["x", "X Offset", -100, 100, ""], ["y", "Y Offset", -100, 100, ""], ["rotation", "Rotation", -15, 15, "°"] ] as const).map(([key, label, min, max, unit]) => <label className="studio-sheet-slider" key={key}><span><b>{label}</b><output>{faceFit[key]}{unit}</output></span><input type="range" min={min} max={max} step="1" value={faceFit[key]} onChange={event => updateFaceFit(key, Number(event.target.value))} /></label>)}
+                  <StudioControlSlider label="Coverage" value={toolValues["Face Coverage"]} onChange={value => updateToolValue("Face Coverage", value)} />
+                  <button type="button" className="studio-sheet-row" onClick={resetFaceFit}><Icon name="rotate" /><span>Reset Face Fit</span></button>
+                </>}
+                {activeSheet === "tools" && <>
+                  <StudioControlSwitch label="Face Lock" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Face Lock": enabled })); setControls(current => ({ ...current, tracking: { ...current.tracking, faceLock: enabled } })); }} />
+                  <StudioControlSlider label="Motion Stability" value={toolValues["Motion Stability"]} onChange={value => updateToolValue("Motion Stability", value)} />
+                  <StudioControlSlider label="Facial Response" value={toolValues["Facial Response"]} onChange={value => updateToolValue("Facial Response", value)} />
+                  <StudioControlSwitch label="Mirror Camera" values={switches} onChange={setSwitches} />
+                  <StudioControlSwitch label="Show Source Preview" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Show Source Preview": enabled })); setPipVisible(enabled); }} />
+                  <button type="button" className="studio-sheet-row" onClick={() => { resetFaceFit(); setPreviewMode("raw"); }}><Icon name="rotate" /><span>Reset Transformation</span></button>
+                  <button type="button" className="studio-sheet-row" onClick={runtime.flipCamera}><Icon name="flip" /><span>Flip Camera</span></button>
+                </>}
+                {activeSheet === "diagnostics" && <>
+                  <div className="studio-metric-list"><p><span>Face Detected</span><b>{summary.face?.detected ? "Yes" : "No"}</b></p><p><span>Tracking FPS</span><b>{summary.stats?.faceFps?.toFixed(1) ?? "—"}</b></p><p><span>Render FPS</span><b>{rendererStats?.fps?.toFixed(1) ?? "—"}</b></p><p><span>Yaw</span><b>{summary.face?.derived?.yaw == null ? "—" : `${(summary.face.derived.yaw * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Pitch</span><b>{summary.face?.derived?.pitch == null ? "—" : `${(summary.face.derived.pitch * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Roll</span><b>{summary.face?.derived?.roll == null ? "—" : `${(summary.face.derived.roll * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Face Scale</span><b>{summary.face?.derived?.scale?.toFixed(2) ?? "—"}</b></p><p><span>Blend Coverage</span><b>{toolValues["Face Coverage"] ?? 88}%</b></p><p><span>Latency</span><b>{rendererStats?.renderMs?.toFixed(1) ?? "—"} ms</b></p></div>
+                  <StudioControlSwitch label="Show Tracking Points" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Show Tracking Points": enabled })); runtime.setShowFace(enabled); }} /><StudioControlSwitch label="Show Face Boundary" values={switches} onChange={setSwitches} /><StudioControlSwitch label="Show Mask" values={switches} onChange={setSwitches} /><StudioControlSwitch label="Show Alignment" values={switches} onChange={setSwitches} />
+                  {import.meta.env.DEV && <details className="studio-inline-advanced"><summary>Developer Diagnostics</summary><StudioControlSwitch label="Raw Direct" values={switches} onChange={setSwitches} onToggle={toggleRawDirect} /><label className="studio-sheet-slider"><span>Root Mode</span><select value={faceRootDebug.mode} onChange={event => setFaceRootDebug(current => ({ ...current, mode: event.target.value as FaceRootMotionDebug["mode"] }))}><option value="tracking">Tracking</option><option value="raw-direct">Raw Direct</option><option value="manual">Manual Root</option><option value="oscillator">Forced Oscillator</option></select></label><div className="studio-metric-list"><p><span>Frame ID</span><b>{rendererStats?.faceFrame?.frameId ?? "—"}</b></p><p><span>Root X</span><b>{rootNumber(rootProbe?.rootPosition?.x)}</b></p><p><span>Root Y</span><b>{rootNumber(rootProbe?.rootPosition?.y)}</b></p><p><span>Contour error</span><b>{rendererStats?.contourAlignment?.[0]?.errorPx.toFixed(1) ?? "—"} px</b></p><p><span>Alpha pipeline</span><b>{rendererStats?.alphaPipeline ?? "—"}</b></p></div></details>}
+                </>}
+              </div>
+          </section>
+
+          {stopConfirmOpen && <div className="studio-stop-backdrop" role="presentation"><section className="studio-stop-dialog" role="alertdialog" aria-modal="true" aria-labelledby="studio-stop-title"><h2 id="studio-stop-title">Stop transformation session?</h2><div><button type="button" onClick={() => setStopConfirmOpen(false)}>Cancel</button><button type="button" onClick={() => { setStopConfirmOpen(false); cameraStartAttempted.current = true; runtime.stop(); history.back(); }}>Stop</button></div></section></div>}
 
           {import.meta.env.DEV && previewMode === "face" && rendererStats?.status !== "failed" && (
             <details className="studio-root-dev-panel" data-testid="face-root-debug-panel">
@@ -682,7 +1006,7 @@ export function TransformationStudioPage() {
 
                 <section className="studio-root-debug-group" aria-label="Tracking alignment" data-tracking-alignment>
                   <h3>Tracking Alignment</h3>
-                  <p className="studio-root-debug-note">Raw face contour is cyan/white; rendered source contour is magenta. Errors compare six matching MediaPipe vertices.</p>
+                  <p className="studio-root-debug-note">Raw face contour is cyan/white; rendered source contour is magenta. Errors compare seven matching MediaPipe vertices.</p>
                   {rendererStats?.contourAlignment?.length ? rendererStats.contourAlignment.map(sample => (
                     <div className="studio-root-alignment-row" key={sample.region} data-alignment-region={sample.region}>
                       <strong>{sample.region}</strong>
@@ -691,6 +1015,9 @@ export function TransformationStudioPage() {
                       <b>ERROR {sample.errorPx.toFixed(1)} px</b>
                     </div>
                   )) : <p className="studio-root-debug-note">Waiting for a detected face frame.</p>}
+                  {rendererStats?.poseAlignment && <p className="studio-root-debug-note" data-metric="yaw-pitch-error-summary">
+                    Mean contour error · left yaw {rendererStats.poseAlignment.leftYaw.errorPx?.toFixed(1) ?? "—"} px @ {rendererStats.poseAlignment.leftYaw.angleDeg?.toFixed(0) ?? "—"}° / {rendererStats.poseAlignment.leftYaw.count} frames · right yaw {rendererStats.poseAlignment.rightYaw.errorPx?.toFixed(1) ?? "—"} px @ {rendererStats.poseAlignment.rightYaw.angleDeg?.toFixed(0) ?? "—"}° / {rendererStats.poseAlignment.rightYaw.count} frames · up pitch {rendererStats.poseAlignment.upPitch.errorPx?.toFixed(1) ?? "—"} px @ {rendererStats.poseAlignment.upPitch.angleDeg?.toFixed(0) ?? "—"}° / {rendererStats.poseAlignment.upPitch.count} frames · down pitch {rendererStats.poseAlignment.downPitch.errorPx?.toFixed(1) ?? "—"} px @ {rendererStats.poseAlignment.downPitch.angleDeg?.toFixed(0) ?? "—"}° / {rendererStats.poseAlignment.downPitch.count} frames. Each direction keeps its latest 120 tracked frames; hold each requested angle to compare.
+                  </p>}
                 </section>
 
                 <details className="studio-root-advanced-debug">
@@ -800,9 +1127,10 @@ export function TransformationStudioPage() {
                       <option value="overlay">Face overlay only</option>
                       <option value="compare">Overlay Compare (raw + rendered)</option>
                       <option value="tracking-alignment">Tracking Alignment</option>
-                      <option value="mask">Face mask</option>
+                      <option value="mask">Mask Coverage</option>
                       <option value="boundaries">Topology boundaries</option>
-                      <option value="weights">Alpha weights</option>
+                      <option value="weights">Alpha / Feather</option>
+                      <option value="boundary-match">Boundary Color Match</option>
                       <option value="face-lock">Face lock</option>
                     </select>
                     {faceDebugView === "boundaries" && <small aria-label="Topology boundary legend">Outer yellow · left eye cyan · right eye magenta · mouth orange</small>}
@@ -1016,6 +1344,15 @@ export function TransformationStudioPage() {
                     {source.profile.baseFrameTime !== undefined && <> Base frame: {source.profile.baseFrameTime.toFixed(2)}s · score {source.profile.baseFrameScore?.toFixed(3)}</>}
                   </p>}
                   <p>Expression {rendererStats.expressionMs?.toFixed(2) ?? "—"} ms · Deformation {rendererStats.deformationMs?.toFixed(2) ?? "—"} ms · Mouth compositor {rendererStats.mouthCompositorMs?.toFixed(2) ?? "—"} ms</p>
+                  <p data-metric="alpha-pipeline">Alpha: {rendererStats.alphaPipeline ?? "—"} · Boundary blend {rendererStats.boundaryBlendMs?.toFixed(3) ?? "—"} ms</p>
+                  {import.meta.env.DEV && faceDebugView === "boundary-match" && rendererStats.boundaryColorCorrection?.map((correction, index) => (
+                    <p key={index} data-metric={`boundary-color-${index}`}>
+                      {(["forehead", "left-temple", "right-temple", "left-cheek", "right-cheek", "chin"] as const)[index]} RGB × ({correction.r.toFixed(3)}, {correction.g.toFixed(3)}, {correction.b.toFixed(3)})
+                    </p>
+                  ))}
+                  {rendererStats.faceFrame && <p data-metric="face-stabilization">
+                    Stable-geometry filter {rendererStats.faceFrame.stabilizationMs.toFixed(3)} ms · estimated filter lag {rendererStats.faceFrame.stabilizationLatencyEstimateMs?.toFixed(1) ?? "0.0"} ms
+                  </p>}
                   <p data-metric="mouth-mesh-aperture">
                     Mesh mouth aperture {rendererStats.mouthMeshAperturePx?.neutral.toFixed(1) ?? "—"} → {rendererStats.mouthMeshAperturePx?.applied.toFixed(1) ?? "—"} px
                     · chin moved {rendererStats.jawChinMovementPx?.toFixed(1) ?? "—"} px
@@ -1104,6 +1441,14 @@ export function TransformationStudioPage() {
       </div>
     </div>
   );
+}
+
+function StudioControlSlider({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return <label className="studio-sheet-slider"><span><b>{label}</b><output>{value}%</output></span><input type="range" min="0" max="100" value={value} onChange={event => onChange(Number(event.target.value))} /></label>;
+}
+
+function StudioControlSwitch({ label, values, onChange, onToggle }: { label: string; values: Record<string, boolean>; onChange: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; onToggle?: (enabled: boolean) => void }) {
+  return <label className="studio-sheet-switch"><span>{label}</span><input type="checkbox" checked={values[label] ?? false} onChange={event => onToggle ? onToggle(event.target.checked) : onChange(current => ({ ...current, [label]: event.target.checked }))} /><i aria-hidden="true" /></label>;
 }
 
 export default TransformationStudioPage;

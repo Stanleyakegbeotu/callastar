@@ -31,6 +31,7 @@ import {
 } from "./sourceTypes";
 import { sampleTimestamps } from "./videoSampling";
 import { VideoFrameReader, VideoSeekError } from "./videoFrameReader";
+import { analyzeSourceAppearance } from "./sourceAppearanceAnalysis";
 
 /**
  * Turning a source asset into a profile.
@@ -326,6 +327,7 @@ export class SourceAnalyzer {
       height: bitmap.height,
       aspectRatio: bitmap.height > 0 ? bitmap.width / bitmap.height : 1,
     };
+    const appearance = analyzeSourceAppearance(bitmap, bitmap.width, bitmap.height, faceResult.landmarks);
 
     const evaluation = { face: faceResult.derived, pose: derivedPose, regions, dimensions, angleCount: 1 };
 
@@ -348,6 +350,7 @@ export class SourceAnalyzer {
         dimensions,
         durationSeconds: null,
         primaryFace: faceGeometryFrom(faceResult, faceResult.derived),
+        appearance,
         expression: deriveSourceExpression(faceGeometryFrom(faceResult, faceResult.derived)),
         primaryPose: poseResult
           ? poseGeometryFrom(poseResult, derivedPose, derivedPose?.shoulderCenter ? regions.upperBody : null)
@@ -474,6 +477,7 @@ export class SourceAnalyzer {
     const best = selectNeutralCandidate(candidates)!;
     const primary = this.buildReferenceFrame(best, classifyAngle(best.face)!, scoreNeutralCandidate(best), geometry);
     const preparedCanvas = await reader.frameAt(best.timestampSeconds);
+    const appearance = analyzeSourceAppearance(preparedCanvas, metadata.width, metadata.height, primary.face.landmarks);
     const preparedFrame = await new Promise<Blob>((resolve, reject) => preparedCanvas.toBlob(
       blob => blob ? resolve(blob) : reject(new Error('Unable to prepare the neutral source frame')), 'image/png'));
     if (stale()) return this.fail('cancelled', report);
@@ -516,6 +520,7 @@ export class SourceAnalyzer {
         dimensions,
         durationSeconds: metadata.durationSeconds,
         primaryFace: primary.face,
+        appearance,
         expression: deriveSourceExpression(primary.face),
         primaryPose: primary.pose,
         regions: primary.regions,

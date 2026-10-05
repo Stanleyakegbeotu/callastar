@@ -59,7 +59,7 @@ export interface SourceSelection extends SourceSelectionState {
   selectFile: (file: File) => Promise<void>;
   selectStoredAsset: (assetId: string, fileName: string) => Promise<void>;
   setConsent: (given: boolean) => void;
-  analyze: () => void;
+  analyze: (consentConfirmed?: boolean) => void;
   cancel: () => void;
   clear: () => void;
 }
@@ -205,14 +205,15 @@ export function useSourceSelection(profileId: string | null): SourceSelection {
     setState((previous) => ({ ...previous, consentGiven: given }));
   }, []);
 
-  const analyze = useCallback(() => {
+  const analyze = useCallback((consentConfirmed = false) => {
     const asset = state.asset;
     // Consent is required before the first analysis of a newly supplied source,
     // and there is nothing to analyse without a profile to prepare it for.
-    if (!asset || !state.consentGiven || !profileId) return;
+    if (!asset || (!state.consentGiven && !consentConfirmed) || !profileId) return;
 
     setState((previous) => ({
       ...previous,
+      consentGiven: previous.consentGiven || consentConfirmed,
       stage: "analyzing",
       progress: { stage: "preparing", frame: null, frameCount: null },
       failure: null,
