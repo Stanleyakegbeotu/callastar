@@ -167,6 +167,7 @@ export const fr: TranslationSchema = {
     qualityNote:
       "Toutes les formules CallaStar prennent en charge la qualité vidéo HD disponible. La qualité dépend en définitive des appareils des participants, du réseau et du média source.",
     mostPopular: "Le plus choisi",
+    sessionLength: "{{minutes}} min par session",
     choose: "Choisir {{plan}}",
     paymentTitle: "Finalisez votre abonnement",
     paymentCopy:

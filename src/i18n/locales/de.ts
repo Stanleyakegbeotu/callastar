@@ -167,6 +167,7 @@ export const de: TranslationSchema = {
     qualityNote:
       "Alle CallaStar-Tarife unterstützen die verfügbare HD-Videoqualität. Die Qualität hängt letztlich von den Geräten der Teilnehmenden, der Netzverbindung und dem Ausgangsmaterial ab.",
     mostPopular: "Am beliebtesten",
+    sessionLength: "{{minutes}} Min. pro Sitzung",
     choose: "{{plan}} wählen",
     paymentTitle: "Abonnement abschließen",
     paymentCopy:

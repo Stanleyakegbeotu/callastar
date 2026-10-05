@@ -166,6 +166,7 @@ export const es: TranslationSchema = {
     qualityNote:
       "Todos los planes de CallaStar admiten la calidad de vídeo HD disponible. La calidad depende en última instancia de los dispositivos de los participantes, de la red y del material original.",
     mostPopular: "El más elegido",
+    sessionLength: "{{minutes}} min por sesión",
     choose: "Elegir {{plan}}",
     paymentTitle: "Completa tu suscripción",
     paymentCopy:

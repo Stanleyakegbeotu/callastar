@@ -177,6 +177,7 @@ export const en = {
     qualityNote:
       "All CallaStar plans support available HD video quality. Video quality ultimately depends on the participants' devices, network conditions and source media.",
     mostPopular: "Most Popular",
+    sessionLength: "{{minutes}} min per session",
     choose: "Choose {{plan}}",
     paymentTitle: "Complete your subscription",
     paymentCopy:

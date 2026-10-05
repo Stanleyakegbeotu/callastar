@@ -18,7 +18,12 @@ interface AccessScreenProps {
 }
 
 function formatUsd(cents: number): string {
-  return `$${Math.round(cents / 100)}`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
 }
 
 /**
@@ -47,7 +52,7 @@ function Panel({
   compact?: boolean;
 }) {
   return (
-    <main className="access-screen">
+    <main className={`access-screen ${wide ? "access-screen-plans" : ""}`.trim()}>
       <div className="access-screen-brand">
         <CallaStarLogo inverse />
       </div>
@@ -116,29 +121,37 @@ export function SubscriptionAccessScreen({
   if (gate.status === "selecting_plan") {
     return (
       <Panel labelledBy="access-plans-title" wide>
-        <h1 className="sheet-title" id="access-plans-title">
-          {t("access.plansTitle")}
-        </h1>
-        <p className="sheet-copy">
-          {t("access.plansCopy")}
-        </p>
-
-        <div className="cs-note">
-          <span className="cs-note-icon">
-            <Icon name="info" className="size-6" />
-          </span>
-          <span>{t("access.qualityNote")}</span>
+        <div className="plan-screen-heading">
+          <span className="plan-screen-eyebrow">CallaStar Access</span>
+          <h1 className="sheet-title" id="access-plans-title">
+            {t("access.plansTitle")}
+          </h1>
+          <p className="sheet-copy">{t("access.plansCopy")}</p>
         </div>
 
         {gate.plansLoading ? (
           <p className="sheet-note">{t("common.loading")}</p>
         ) : (
           <ul className="plan-list">
-            {gate.plans.map((plan) => (
-              <PlanCard key={plan.id} plan={plan} onChoose={() => gate.choosePlan(plan)} t={t} />
+            {gate.plans.map((plan, index) => (
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                index={index}
+                total={gate.plans.length}
+                onChoose={() => gate.choosePlan(plan)}
+                t={t}
+              />
             ))}
           </ul>
         )}
+
+        <div className="cs-note plan-quality-note">
+          <span className="cs-note-icon">
+            <Icon name="info" className="size-6" />
+          </span>
+          <span>{t("access.qualityNote")}</span>
+        </div>
 
         <button type="button" className="join-text-action" onClick={onGoHome}>
           {t("common.returnHome")}
@@ -286,34 +299,45 @@ export function SubscriptionAccessScreen({
 
 function PlanCard({
   plan,
+  index,
+  total,
   onChoose,
   t,
 }: {
   plan: SubscriptionPlan;
+  index: number;
+  total: number;
   onChoose: () => void;
   t: (key: string, options?: Record<string, string>) => string;
 }) {
   return (
-    // The tier is carried by the plan's own id, so the three cards read as a
-    // ladder rather than three equal options. "Gold Access" is a product name:
-    // the top tier is treated as the most substantial card, not a gold one.
     <li
       className={`plan-card plan-card-${plan.id} ${plan.isMostPopular ? "plan-card-popular" : ""}`.trim()}
     >
       <div className="plan-card-head">
-        <span className="plan-card-name">
-          {plan.displayName}
-          {plan.isMostPopular && (
-            <span className="plan-badge">
-              <Icon name="star" className="size-4" />
-              {t("access.mostPopular")}
-            </span>
-          )}
-        </span>
+        <div className="plan-card-heading">
+          <span className="plan-card-index" aria-hidden="true">
+            {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+          </span>
+          <h2 className="plan-card-name">{plan.displayName}</h2>
+          <p className="plan-card-description">{plan.description}</p>
+        </div>
         <span className="plan-card-price">
           {formatUsd(plan.priceUsdCents)} <small>USD</small>
         </span>
       </div>
+
+      {plan.isMostPopular && (
+        <span className="plan-badge">
+          <Icon name="star" className="size-4" />
+          {t("access.mostPopular")}
+        </span>
+      )}
+
+      <p className="plan-card-duration">
+        <Icon name="clock" className="size-4" />
+        {t("access.sessionLength", { minutes: String(plan.sessionDurationMinutes) })}
+      </p>
 
       <div className="plan-card-body">
         <ul className="plan-features">
@@ -332,6 +356,7 @@ function PlanCard({
           onClick={onChoose}
         >
           {t("access.choose", { plan: plan.displayName.split(" ")[0] })}
+          <Icon name="arrow" className="size-4" />
         </button>
       </div>
     </li>

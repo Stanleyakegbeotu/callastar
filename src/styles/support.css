@@ -917,53 +917,6 @@
   }
 }
 
-/* ------------------------------------------- compact plans on a phone */
-
-/*
- * Three plans, one screen.
- *
- * The plans were a long vertical list that had to be scrolled to be compared,
- * which is the one thing a chooser must not require. On a phone the cards lose
- * their generous padding and their feature lists tighten, so all three sit in
- * view together and the decision is made by looking rather than by scrolling.
- */
-@media (max-width: 47.99rem) {
-  .plan-list {
-    gap: 0.625rem;
-  }
-
-  .plan-card {
-    padding: 0.875rem 1rem;
-  }
-
-  .plan-features {
-    gap: 0.2rem;
-  }
-
-  .plan-features li {
-    font-size: 0.82rem;
-    line-height: 1.35;
-  }
-
-  /*
-   * Very short viewports.
-   *
-   * Below roughly an iPhone SE's height three cards genuinely cannot fit, so the
-   * feature bullets give way rather than the cards being squeezed to the point
-   * of illegibility. Name, price and duration are what the choice is actually
-   * made on.
-   */
-  @media (max-height: 43rem) {
-    .plan-features {
-      display: none;
-    }
-
-    .plan-card {
-      padding: 0.75rem 1rem;
-    }
-  }
-}
-
 /*
  * The language selector is a real form control.
  *

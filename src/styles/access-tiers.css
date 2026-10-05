@@ -19,6 +19,48 @@
     box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.plan-card-heading {
+  min-width: 0;
+}
+
+.plan-card > .plan-badge {
+  align-self: flex-start;
+  margin-top: 0.45rem;
+}
+
+.plan-card-name {
+  margin: 0;
+}
+
+.plan-card-index,
+.plan-card-description,
+.plan-card-duration,
+.plan-screen-eyebrow {
+  display: none;
+}
+
+.plan-choose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.plan-choose svg {
+  flex: 0 0 auto;
+}
+
+.cs-sheet.access-panel-wide .plan-screen-heading {
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
+@media (min-width: 62rem) {
+  .cs-sheet.access-panel-wide .plan-screen-heading {
+    text-align: center;
+  }
+}
+
 /* Entry tier: the quietest card, and the baseline the others are read against. */
 .plan-card.plan-card-regular {
   background: var(--white);
@@ -63,6 +105,297 @@
 
 .plan-card.plan-card-gold .plan-choose:hover {
   background: oklch(1 0 0 / 0.88);
+}
+
+/* A spacious, scrollable plan chooser on phones. */
+@media (max-width: 47.99rem) {
+  .access-screen.access-screen-plans {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    padding-top: max(1rem, calc(var(--safe-top) + 0.75rem));
+    background:
+      radial-gradient(circle at 50% -10%, #17447f 0%, transparent 54%),
+      linear-gradient(155deg, #091f46, #071735);
+  }
+
+  .access-screen-plans .access-screen-brand {
+    padding-bottom: 1.1rem;
+  }
+
+  .cs-sheet.access-panel-wide {
+    width: 100%;
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
+    border-radius: 2rem 2rem 0 0;
+    padding: 1.6rem 1.15rem max(1.6rem, calc(var(--safe-bottom) + 1.25rem));
+    background: #f5f7fc;
+  }
+
+  .cs-sheet.access-panel-wide .plan-screen-heading {
+    margin-inline: 0;
+  }
+
+  .cs-sheet.access-panel-wide .plan-screen-eyebrow {
+    display: block;
+    margin-bottom: 0.7rem;
+    color: #2873d5;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-title {
+    max-width: 18ch;
+    font-size: clamp(2rem, 8.5vw, 2.7rem);
+    letter-spacing: -0.055em;
+    line-height: 1.05;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-copy {
+    margin-top: 0.65rem;
+    font-size: 0.94rem;
+    line-height: 1.5;
+  }
+
+  .cs-sheet.access-panel-wide .plan-list {
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #e2e9f4;
+    border-radius: 1.5rem;
+    padding: 1.25rem;
+    background: #fff;
+    box-shadow: 0 0.7rem 1.7rem rgb(29 53 94 / 7%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card.plan-card-premium {
+    border-color: #0872e8;
+    background:
+      radial-gradient(circle at 95% 0%, rgb(130 194 255 / 27%), transparent 40%),
+      linear-gradient(155deg, #1787ff 0%, #0865cf 74%, #0755b6 100%);
+    box-shadow: 0 1rem 2.25rem rgb(8 94 203 / 25%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card.plan-card-gold {
+    border-color: #173866;
+    background:
+      radial-gradient(circle at 95% 0%, rgb(67 143 244 / 25%), transparent 48%),
+      linear-gradient(150deg, #102d57 0%, #071b3c 74%, #06152e 100%);
+    box-shadow: 0 1rem 2.2rem rgb(7 29 66 / 24%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-head {
+    display: block;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-index {
+    display: block;
+    color: #537398;
+    font-size: 0.69rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-name {
+    display: block;
+    margin-top: 0.8rem;
+    font-size: 1.55rem;
+    font-weight: 800;
+    letter-spacing: -0.045em;
+    line-height: 1.1;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-description {
+    display: block;
+    max-width: 32ch;
+    margin: 0.45rem 0 0;
+    color: #5d7190;
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-price {
+    display: block;
+    margin-top: 1.15rem;
+    font-size: clamp(2.3rem, 10vw, 2.7rem);
+    line-height: 1;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-price small {
+    margin-left: 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    vertical-align: middle;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-duration {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 0.4rem;
+    margin: 0.85rem 0 0;
+    border: 1px solid #dce9f9;
+    border-radius: var(--radius-pill);
+    padding: 0.4rem 0.7rem;
+    background: #f2f7ff;
+    color: #1c5eaf;
+    font-size: 0.75rem;
+    font-weight: 750;
+    line-height: 1;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card > .plan-badge {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    margin: 0;
+    border: 1px solid rgb(255 255 255 / 42%);
+    padding: 0.35rem 0.6rem;
+    background: rgb(255 255 255 / 19%);
+    color: #fff;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-body {
+    display: flex;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1.1rem;
+    margin-top: 1.15rem;
+    border-top: 1px solid #e7edf5;
+    padding-top: 1.15rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features li {
+    gap: 0.7rem;
+    color: #405879;
+    font-size: 0.86rem;
+    line-height: 1.38;
+  }
+
+  .cs-sheet.access-panel-wide .plan-check {
+    width: 1.3rem;
+    height: 1.3rem;
+    background: #e9f2ff;
+  }
+
+  .cs-sheet.access-panel-wide .plan-choose {
+    width: 100%;
+    min-height: 3.35rem;
+    border: 0;
+    border-radius: 0.95rem;
+    padding: 0 1rem;
+    background: #0b6fe8;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 750;
+    box-shadow: 0 0.4rem 0.8rem rgb(10 112 228 / 15%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-choose:hover {
+    background: #075bc2;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-index,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-index,
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-name,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-name,
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-price,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-price {
+    color: #fff;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-price small,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-price small {
+    color: rgb(255 255 255 / 78%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-description,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-description,
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-features li,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-features li {
+    color: rgb(255 255 255 / 82%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-duration,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-duration {
+    border-color: rgb(255 255 255 / 25%);
+    background: rgb(255 255 255 / 12%);
+    color: #fff;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-body,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-body {
+    border-top-color: rgb(255 255 255 / 23%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-check,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-check {
+    background: rgb(255 255 255 / 18%);
+    color: #fff;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-choose,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-choose {
+    background: #fff;
+    color: #0a5dc8;
+    box-shadow: 0 0.5rem 1.1rem rgb(4 29 68 / 15%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-premium .plan-choose:hover,
+  .cs-sheet.access-panel-wide .plan-card-gold .plan-choose:hover {
+    background: #ecf4ff;
+  }
+
+  .cs-sheet.access-panel-wide .plan-quality-note {
+    align-items: flex-start;
+    margin-top: 1.25rem;
+    border: 0;
+    padding: 0.25rem;
+    background: transparent;
+    color: #667894;
+    font-size: 0.77rem;
+    line-height: 1.45;
+  }
+
+  .cs-sheet.access-panel-wide .plan-quality-note .cs-note-icon {
+    color: #5f86b7;
+  }
+
+  .cs-sheet.access-panel-wide .join-text-action {
+    align-self: center;
+    margin-top: 1.4rem;
+  }
+}
+
+@media (max-width: 23rem) {
+  .cs-sheet.access-panel-wide {
+    padding-inline: 0.9rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card {
+    padding: 1.05rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-name {
+    font-size: 1.4rem;
+  }
 }
 
 /* ------------------------------------------- payment: a short, wide decision */
