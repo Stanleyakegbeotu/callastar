@@ -93,7 +93,7 @@ export function useCallEvidenceScreenshot(options: {
         try {
           let captured: Awaited<ReturnType<typeof captureCallVideoComposition>> | null = null;
           let lastError: unknown;
-          for (let attempt = 0; attempt < 4 && !captured; attempt++) {
+          for (let attempt = 0; attempt < 3 && !captured; attempt++) {
             if (!isOngoing(latestSession.current.status)) break;
             try {
               captured = await captureCallVideoComposition(localStream!, () => latestSession.current.id === id && latestSession.current.status === "active" && latestConnected.current);
@@ -105,7 +105,7 @@ export function useCallEvidenceScreenshot(options: {
                 videos: [...document.querySelectorAll<HTMLVideoElement>(".live-call video")].map((video) => ({ readyState: video.readyState, videoWidth: video.videoWidth, videoHeight: video.videoHeight })),
                 reason: cause instanceof Error ? cause.message : cause,
               });
-              if (attempt < 3 && isOngoing(latestSession.current.status)) await new Promise((resolve) => window.setTimeout(resolve, 300));
+              if (attempt < 2 && isOngoing(latestSession.current.status)) await new Promise((resolve) => window.setTimeout(resolve, 300));
             }
           }
           if (!captured) {
@@ -131,13 +131,23 @@ export function useCallEvidenceScreenshot(options: {
           productionDiagnostic("CALL_EVIDENCE_CAPTURED", { width: captured.width, height: captured.height, size: captured.blob.size });
 
           const latest = latestSession.current;
-          const saved = await callEvidenceRepository.saveLocal({
-            ...withTerminalMetadata(input, latest),
-            width: captured.width,
-            height: captured.height,
-            blob: captured.blob,
-            capturedAt: new Date().toISOString(),
-          });
+          productionDiagnostic("CALL_EVIDENCE_STAGE", { stage: "captured", width: captured.width, height: captured.height, size: captured.blob.size });
+          let saved: Awaited<ReturnType<typeof callEvidenceRepository.saveLocal>>;
+          try {
+            productionDiagnostic("CALL_EVIDENCE_STAGE", { stage: "upload_started" });
+            saved = await callEvidenceRepository.saveLocal({
+              ...withTerminalMetadata(input, latest), width: captured.width, height: captured.height,
+              blob: captured.blob, capturedAt: new Date().toISOString(),
+            });
+            productionDiagnostic("CALL_EVIDENCE_STAGE", { stage: "cloud_ready", success: true });
+          } catch (uploadError) {
+            const reason = uploadError instanceof Error ? uploadError.message : "upload_failed";
+            productionDiagnostic("CALL_EVIDENCE_UPLOAD_FAILED", { kind: "upload" });
+            productionDiagnostic("CALL_EVIDENCE_STAGE", { stage: "upload_failed", success: false });
+            const failed = await callEvidenceRepository.saveCaptureFailure(withTerminalMetadata(input, latestSession.current), reason, "upload");
+            logDiagnostic("CALL_EVIDENCE_UPLOAD_FAILED", { callSessionId: id, status: failed.status });
+            return;
+          }
           logDiagnostic("CALL_EVIDENCE_SAVED", { recordId: saved.record.id, created: saved.created });
           const endedDuringSave = latestSession.current;
           if (!isOngoing(endedDuringSave.status)) {
@@ -154,7 +164,7 @@ export function useCallEvidenceScreenshot(options: {
           // Capture/storage failures are diagnostic only. They never touch call state.
         }
       })();
-    }, 1200);
+    }, 300);
 
     return () => {
       if (captureStarted) return;

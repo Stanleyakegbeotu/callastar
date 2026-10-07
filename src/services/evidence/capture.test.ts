@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { captureCallVideoComposition } from "./capture";
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
-function scene(mainReady: boolean, pipReady = false) {
+function scene(mainReady: boolean, pipReady = false, tainted = false) {
   const drawn: unknown[] = [];
   const bounds = { left: 0, top: 0, right: 640, bottom: 360, width: 640, height: 360 };
   const video = (ready: boolean) => ({ readyState: ready ? 4 : 0, videoWidth: ready ? 640 : 0, videoHeight: ready ? 360 : 0,
@@ -15,7 +15,7 @@ function scene(mainReady: boolean, pipReady = false) {
   vi.stubGlobal("document", { querySelector: () => surface, createElement: () => ({
     width: 0, height: 0,
     getContext: () => ({ fillRect: () => {}, drawImage: (source: unknown) => drawn.push(source) }),
-    toBlob: (cb: (blob: Blob) => void) => cb(new Blob(["jpeg"], { type: "image/jpeg" })),
+    toBlob: (cb: (blob: Blob) => void) => { if (tainted) throw new DOMException("tainted", "SecurityError"); cb(new Blob(["jpeg"], { type: "image/jpeg" })); },
   }) });
   return { main, pip, drawn };
 }
@@ -36,4 +36,10 @@ it("does not encode a frame after the call has ended", async () => {
   vi.useFakeTimers(); const { drawn } = scene(true);
   const assertion = expect(captureCallVideoComposition({} as MediaStream, () => false)).rejects.toThrow("call_video_changed");
   await vi.advanceTimersByTimeAsync(300); await assertion; expect(drawn).toEqual([]);
+});
+it("reports cross-origin canvas taint as a visible capture failure", async () => {
+  vi.useFakeTimers(); scene(true, false, true);
+  const assertion = expect(captureCallVideoComposition({} as MediaStream)).rejects.toThrow("canvas_tainted_cross_origin_media");
+  await vi.advanceTimersByTimeAsync(300);
+  await assertion;
 });

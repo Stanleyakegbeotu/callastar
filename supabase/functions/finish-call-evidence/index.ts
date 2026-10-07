@@ -13,7 +13,9 @@ Deno.serve(async (request) => {
   if (!row) return json({ error: "not_found" }, 404);
   if (body.action === "failed") {
     if (row.evidence_status === "ready") return json({ status: "ready" });
-    await client.from("call_evidence").update({ evidence_status: "failed", failure_reason: String(body.reason ?? "capture_failed").slice(0, 120) }).eq("id", row.id);
+    const uploadFailed = body.failureKind === "upload";
+    const { error } = await client.from("call_evidence").update({ evidence_status: uploadFailed ? "upload_failed" : "failed", failure_reason: String(body.reason ?? (uploadFailed ? "upload_failed" : "capture_failed")).slice(0, 120) }).eq("id", row.id);
+    if (error) return json({ error: "evidence_unavailable" }, 500);
     return json({ status: "failed" });
   }
   if (body.action === "upload") {
@@ -21,27 +23,31 @@ Deno.serve(async (request) => {
     const path = `${row.host_id}/${row.call_session_id}/evidence.jpg`;
     const { data: existingFiles } = await client.storage.from("call-evidence").list(`${row.host_id}/${row.call_session_id}`, { search: "evidence.jpg" });
     if (existingFiles?.some((file) => file.name === "evidence.jpg")) {
-      await client.from("call_evidence").update({ image_path: path, captured_at: body.capturedAt }).eq("id", row.id).eq("evidence_status", "pending");
+      const { error } = await client.from("call_evidence").update({ image_path: path, captured_at: body.capturedAt, evidence_status: "uploading" }).eq("id", row.id).eq("evidence_status", "pending");
+      if (error) return json({ error: "evidence_unavailable" }, 500);
       return json({ path, uploadToken: "", alreadyUploaded: true });
     }
     const { data: ticket, error } = await client.storage.from("call-evidence").createSignedUploadUrl(path, { upsert: false });
     if (error || !ticket) return json({ error: "upload_unavailable" }, 500);
-    await client.from("call_evidence").update({ image_path: path, captured_at: body.capturedAt }).eq("id", row.id).eq("evidence_status", "pending");
+    const { error: updateError } = await client.from("call_evidence").update({ image_path: path, captured_at: body.capturedAt, evidence_status: "uploading" }).eq("id", row.id).eq("evidence_status", "pending");
+    if (updateError) return json({ error: "evidence_unavailable" }, 500);
     return json({ path, uploadToken: ticket.token });
   }
   if (body.action === "complete") {
-    if (row.evidence_status !== "pending" || !row.image_path) return json({ error: "invalid_state" }, 409);
+    if (row.evidence_status !== "uploading" || !row.image_path) return json({ error: "invalid_state" }, 409);
     const { data: files } = await client.storage.from("call-evidence").list(`${row.host_id}/${row.call_session_id}`, { search: "evidence.jpg" });
     if (!files?.some((file) => file.name === "evidence.jpg")) return json({ error: "upload_missing" }, 409);
-    await client.from("call_evidence").update({ evidence_status: "ready" }).eq("id", row.id).eq("evidence_status", "pending");
+    const { error } = await client.from("call_evidence").update({ evidence_status: "ready", failure_reason: null }).eq("id", row.id).eq("evidence_status", "uploading");
+    if (error) return json({ error: "evidence_unavailable" }, 500);
     return json({ status: "ready" });
   }
   if (typeof body.endedAt !== "string" || Number.isNaN(Date.parse(body.endedAt)) ||
       !(body.durationSeconds === null || (Number.isInteger(body.durationSeconds) && body.durationSeconds >= 0 && body.durationSeconds <= 86400)) ||
       typeof body.callStatus !== "string" || body.callStatus.length > 40) return json({ error: "invalid_metadata" }, 400);
-  await client.from("call_evidence").update({
+  const { error: finalizeError } = await client.from("call_evidence").update({
     ended_at: body.endedAt, duration_seconds: body.durationSeconds, call_status: body.callStatus,
     termination_reason: typeof body.terminationReason === "string" ? body.terminationReason.slice(0, 160) : null,
   }).eq("id", row.id);
+  if (finalizeError) return json({ error: "evidence_unavailable" }, 500);
   return json({ status: "updated" });
 });

@@ -14,9 +14,21 @@ import type {
 } from "./types";
 import { isPaymentMethod } from "./paymentMethods";
 import { sendAdminEvent } from "@/services/notifications/adminEvents";
+import type { SupportCustomerIdentity } from "./customerIdentity";
 
 type Row = Record<string, any>;
 const BUCKET = "support-attachments";
+let customerIdentity: SupportCustomerIdentity | null = null;
+
+async function customerAction<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
+  if (!customerIdentity) throw new Error("Customer support identity is unavailable.");
+  const { data, error } = await requireSupabase().functions.invoke("support-customer", {
+    body: { action, email: customerIdentity.normalizedEmail, displayEmail: customerIdentity.email,
+      name: customerIdentity.name, phone: customerIdentity.phone, guestSessionId: customerIdentity.guestSessionId, ...values },
+  });
+  if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Customer support is unavailable.");
+  return data as T;
+}
 
 function newId(): string {
   return typeof crypto.randomUUID === "function"
@@ -27,8 +39,8 @@ function newId(): string {
 function fromConversation(row: Row): SupportConversation {
   return {
     id: row.id,
-    customerEmail: row.customer_email,
-    customerEmailNormalized: row.customer_email_normalized,
+    customerEmail: row.customer_email ?? "",
+    customerEmailNormalized: row.customer_email_normalized ?? "",
     customerName: row.customer_name ?? "",
     subject: row.subject,
     status: row.status,
@@ -111,12 +123,23 @@ function preview(body: string, hasAttachment: boolean): string {
 export const supabaseSupportRepository: SupportRepository = {
   mode: "supabase",
 
+  setCustomerIdentity(identity) { customerIdentity = identity; },
+  async linkGuestConversation() { await customerAction("link_guest"); },
+
   async findConversationByEmail(email) {
+    if (customerIdentity) {
+      const { conversation } = await customerAction<{ conversation: Row | null }>("resolve", { email: email.trim().toLowerCase(), displayEmail: email.trim() });
+      return conversation ? fromConversation(conversation) : null;
+    }
     const conversations = await this.listConversationsByEmail(email);
     return conversations[0] ?? null;
   },
 
   async listConversationsByEmail(email) {
+    if (customerIdentity) {
+      const conversation = await this.findConversationByEmail(email);
+      return conversation ? [conversation] : [];
+    }
     const normalized = email.trim().toLowerCase();
     if (!normalized) return [];
     const { data, error } = await requireSupabase()
@@ -129,6 +152,13 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async startConversation(input: StartConversationInput) {
+    if (customerIdentity) {
+      const { conversation } = await customerAction<{ conversation: Row }>("resolve", {
+        email: input.customerEmail, name: input.customerName, subject: input.subject,
+        subscriptionRequestId: input.subscriptionRequestId ?? null,
+      });
+      return fromConversation(conversation);
+    }
     const id = newId();
     const timestamp = new Date().toISOString();
     const email = input.customerEmail.trim();
@@ -157,6 +187,10 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async getConversation(id) {
+    if (customerIdentity) {
+      const { conversation } = await customerAction<{ conversation: Row | null }>("get", { conversationId: id });
+      return conversation ? fromConversation(conversation) : null;
+    }
     const { data, error } = await requireSupabase()
       .from("support_conversations")
       .select("*")
@@ -180,6 +214,10 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async updateConversation(id, patch) {
+    if (customerIdentity) {
+      const { conversation } = await customerAction<{ conversation: Row | null }>("update", { conversationId: id, patch });
+      return conversation ? fromConversation(conversation) : null;
+    }
     const values = toConversationPatch(patch);
     if (Object.keys(values).length === 0) return this.getConversation(id);
     const { data, error } = await requireSupabase()
@@ -193,6 +231,18 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async listMessages(conversationId) {
+    if (customerIdentity) {
+      const { messages: messageRows, assets: assetRows } = await customerAction<{ messages: Row[]; assets: Row[] }>("messages", { conversationId });
+      const messages = messageRows.map(fromMessage);
+      const assets = assetRows.map(fromAsset);
+      const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+      const byId = new Map(messages.map((message) => [message.id, message]));
+      return messages.map<SupportMessageView>((message) => {
+        const quoted = message.replyToMessageId ? byId.get(message.replyToMessageId) : undefined;
+        return { message, asset: message.attachmentId ? assetById.get(message.attachmentId) ?? null : null,
+          replyTo: quoted ? { id: quoted.id, sender: quoted.sender, body: quoted.body, hasAttachment: quoted.attachmentId !== null } : null };
+      });
+    }
     const client = requireSupabase();
     const [{ data: messageRows, error: messagesError }, { data: assetRows, error: assetsError }] = await Promise.all([
       client.from("support_messages").select("*").eq("conversation_id", conversationId).order("created_at").order("id"),
@@ -218,6 +268,24 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async sendMessage(input: SendMessageInput) {
+    if (customerIdentity && input.sender !== "admin") {
+      if (input.action) throw new Error("Use the structured support action for this selection.");
+      if (input.sender === "assistant" && !input.idempotencyKey) throw new Error("Automated support messages require an idempotency key.");
+      let attachment: Record<string, unknown> | null = null;
+      if (input.attachment) {
+        if (input.attachment.size > SUPPORT_LIMITS.MAX_ATTACHMENT_BYTES || !SUPPORT_LIMITS.ATTACHMENT_MIME_TYPES.includes(input.attachment.type as never)) throw new Error("That image cannot be attached.");
+        const dimensions = await readImageMetadata(input.attachment);
+        const bytes = new Uint8Array(await input.attachment.arrayBuffer());
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        attachment = { base64: btoa(binary), fileName: input.attachment.name, mimeType: input.attachment.type,
+          fileSize: input.attachment.size, width: dimensions.width, height: dimensions.height };
+      }
+      const result = await customerAction<{ message: Row; asset: Row | null; conversation: Row }>("send", {
+        conversationId: input.conversationId, body: input.body, sender: input.sender, idempotencyKey: input.idempotencyKey ?? null, attachment,
+      });
+      return { message: fromMessage(result.message), asset: result.asset ? fromAsset(result.asset) : null, conversation: fromConversation(result.conversation) };
+    }
     if (input.action?.type === "select_payment_method") {
       throw new Error("Payment methods must be selected through the validated payment action.");
     }
@@ -316,6 +384,11 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async selectPaymentMethod(input) {
+    if (customerIdentity) {
+      const { selected } = await customerAction<{ selected: boolean }>("select_payment_method", input);
+      if (selected) sendAdminEvent("payment_method_selected", input.conversationId, `Customer selected ${input.method} as a payment method.`);
+      return selected;
+    }
     const client = requireSupabase();
     const { data, error } = await client.rpc("select_support_payment_method", {
       p_conversation_id: input.conversationId,
@@ -329,6 +402,12 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async getAttachment(assetId) {
+    if (customerIdentity) {
+      const { base64, mimeType } = await customerAction<{ base64: string; mimeType: string }>("attachment", { assetId });
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new Blob([bytes], { type: mimeType });
+    }
     const client = requireSupabase();
     const { data: asset, error: lookupError } = await client.from("support_assets").select("storage_path").eq("id", assetId).maybeSingle();
     if (lookupError) throw lookupError;
@@ -339,6 +418,10 @@ export const supabaseSupportRepository: SupportRepository = {
   },
 
   async markRead(conversationId, reader) {
+    if (customerIdentity && reader === "customer") {
+      await customerAction("mark_read", { conversationId });
+      return;
+    }
     const conversation = await this.getConversation(conversationId);
     if (!conversation) return;
     await this.updateConversation(conversationId, reader === "admin" ? { unreadForAdmin: 0 } : { unreadForCustomer: 0 });

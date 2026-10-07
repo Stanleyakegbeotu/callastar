@@ -11,6 +11,7 @@ import type {
   SupportMessageView,
 } from "./types";
 import type { PaymentMethod } from "./paymentMethods";
+import type { SupportCustomerIdentity } from "./customerIdentity";
 
 /**
  * The seam for customer care. Both sides of a conversation — the customer's
@@ -19,6 +20,8 @@ import type { PaymentMethod } from "./paymentMethods";
  */
 export interface SupportRepository {
   readonly mode: AdminDataMode;
+  setCustomerIdentity?(identity: SupportCustomerIdentity | null): void;
+  linkGuestConversation?(): Promise<void>;
 
   /**
    * Find a customer's most recent thread by email. Format-checked lookup only:

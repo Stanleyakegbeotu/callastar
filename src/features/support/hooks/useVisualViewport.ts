@@ -19,7 +19,7 @@ export function useVisualViewport(enabled = true): void {
     const viewport = window.visualViewport;
 
     const apply = () => {
-      const height = viewport?.height ?? window.innerHeight;
+      const height = Math.min(viewport?.height ?? window.innerHeight, window.innerHeight);
       root.style.setProperty("--app-visual-height", `${Math.round(height)}px`);
       root.style.setProperty("--app-visual-offset", `${Math.round(viewport?.offsetTop ?? 0)}px`);
     };
@@ -28,11 +28,13 @@ export function useVisualViewport(enabled = true): void {
 
     viewport?.addEventListener("resize", apply);
     viewport?.addEventListener("scroll", apply);
+    window.addEventListener("resize", apply);
     window.addEventListener("orientationchange", apply);
 
     return () => {
       viewport?.removeEventListener("resize", apply);
       viewport?.removeEventListener("scroll", apply);
+      window.removeEventListener("resize", apply);
       window.removeEventListener("orientationchange", apply);
       // Hand the height back, so a screen that is not a chat is not constrained
       // by whatever the keyboard last left behind.

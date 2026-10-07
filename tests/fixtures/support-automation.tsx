@@ -76,6 +76,9 @@ function Fixture() {
         title="CallaStar Support"
         subtitle="Customer care"
         onBack={() => setOpen(false)}
+        onPaymentMethodSubmitted={() => undefined}
+        onContinueToWhatsapp={() => { window.open("https://wa.me/123", "_blank", "noopener"); }}
+        onContinueInApp={() => { window.dispatchEvent(new Event("callastar:continue-in-app")); }}
         packagePlan={selectedPlan}
         packageOptions={[plan, proPlan]}
         onSelectPackage={async (planId) => {

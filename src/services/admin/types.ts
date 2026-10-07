@@ -87,10 +87,8 @@ export interface RemoteVideoRow {
 }
 
 /**
- * What the public app is allowed to know about a host. The avatar arrives as a
- * self-contained data URL: it is small, it survives being held in call session
- * state across screens, and it needs no object-URL lifecycle. Video never does
- * this — it is fetched as a Blob, by reference, only when a call goes active.
+ * What the public app is allowed to know about a host. The current public
+ * resolver packages private images as short lived data URLs.
  */
 export interface PublicHostProfile {
   id: string;

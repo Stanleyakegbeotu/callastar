@@ -60,16 +60,25 @@ export async function captureCallVideoComposition(_localStream: MediaStream, sti
       if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) continue;
       const x = (left - bounds.left) * scale; const y = (top - bounds.top) * scale;
       const width = (right - left) * scale; const height = (bottom - top) * scale;
-      if (drawVideo(context, video, x, y, width, height)) {
+      try { if (drawVideo(context, video, x, y, width, height)) {
         drawn++;
         if (video === main) drawnMain = true;
         videoWidth = Math.max(videoWidth, video.videoWidth); videoHeight = Math.max(videoHeight, video.videoHeight);
         readyState = Math.max(readyState, video.readyState);
+      } } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "SecurityError") return reject(new Error("canvas_tainted_cross_origin_media"));
+        return reject(new Error("call_video_draw_failed"));
       }
     }
     if (!drawn || !drawnMain) return reject(new Error("main_call_video_not_ready"));
-    canvas.toBlob((blob) => blob?.size && stillActive()
-      ? resolve({ blob, width: canvas.width, height: canvas.height, videoWidth, videoHeight, readyState })
-      : reject(new Error("jpeg_encode_failed")), "image/jpeg", 0.86);
+    try {
+      canvas.toBlob((blob) => blob?.size && stillActive()
+        ? resolve({ blob, width: canvas.width, height: canvas.height, videoWidth, videoHeight, readyState })
+        : reject(new Error("jpeg_encode_failed")), "image/jpeg", 0.86);
+    } catch (cause) {
+      reject(cause instanceof DOMException && cause.name === "SecurityError"
+        ? new Error("canvas_tainted_cross_origin_media")
+        : new Error("jpeg_encode_failed"));
+    }
   });
 }

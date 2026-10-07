@@ -2,15 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/ui/Icon";
-import { requireSupabase } from "@/lib/supabase/client";
 import { logDiagnostic } from "@/lib/utils";
 import type { SubscriptionPlan, SubscriptionRequest, SupportChannel } from "@/services/subscriptions/types";
-import { formatMinorUnits } from "@/services/subscriptions/money";
 import { supportRepository } from "@/services/support/repository";
 import type { CallerDetails } from "@/types/user";
+import { readSupportCustomerIdentity, setSupportCustomerIdentity } from "@/services/support/customerIdentity";
 
 import { SupportChat } from "./SupportChat";
-import { SupportIdentifyForm } from "./SupportIdentifyForm";
 import { useSupportConversation } from "./hooks/useSupportConversation";
 import { resolveConversation } from "./supportEntry";
 import { announcePackageChange } from "./supportAutomation";
@@ -59,9 +57,16 @@ export function SupportOverlay({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [authChecked, setAuthChecked] = useState(supportRepository.mode !== "supabase");
-  const [magicLinkEmail, setMagicLinkEmail] = useState("");
-  const [supportCustomer, setSupportCustomer] = useState({ email: caller.email, name: caller.fullName });
+  const savedIdentity = readSupportCustomerIdentity();
+  const supportCustomer = {
+    email: caller.email.trim() || savedIdentity.email,
+    name: caller.fullName.trim() || savedIdentity.name,
+    phone: caller.phone.trim() || savedIdentity.phone,
+    normalizedEmail: (caller.email.trim() || savedIdentity.email).toLowerCase(),
+    guestSessionId: savedIdentity.guestSessionId,
+  };
+  setSupportCustomerIdentity(supportCustomer);
+  supportRepository.setCustomerIdentity?.(supportCustomer);
   const confirming = useRef(false);
   const state = useSupportConversation(conversationId, "customer");
 
@@ -75,7 +80,6 @@ export function SupportOverlay({
     (email: string, name: string) => {
       if (opening.current) return;
       opening.current = true;
-      setSupportCustomer({ email, name });
       setBusy(true);
       setFailed(false);
       void resolveConversation({
@@ -101,6 +105,7 @@ export function SupportOverlay({
                 sortOrder: plan.sortOrder,
                 sessionDurationMinutes: plan.sessionDurationMinutes,
                 channel,
+                entryIntent: channel,
                 checkoutIntentId: conversation.checkoutDraft?.planId === plan.id
                   ? conversation.checkoutDraft.checkoutIntentId ?? `${conversation.id}:${plan.id}`
                   : crypto.randomUUID(),
@@ -135,62 +140,44 @@ export function SupportOverlay({
   );
 
   const confirmSubscription = useCallback(async () => {
-    if (!plan || request || confirming.current) return;
-
-    // Open the destination synchronously from the customer's click so browsers
-    // do not treat the later, request-backed navigation as an unsolicited popup.
-    const whatsappWindow = channel === "whatsapp" ? window.open("about:blank", "_blank") : null;
-    if (whatsappWindow) whatsappWindow.opener = null;
+    if (!plan || confirming.current) return;
     confirming.current = true;
     try {
-      const created = await onConfirmSubscription(channel, supportCustomer.email);
-      if (!created) {
-        whatsappWindow?.close();
-        return;
-      }
-
-      await resolveConversation({
-        email: supportCustomer.email,
-        name: supportCustomer.name,
-        subject: `${created.planNameSnapshot} access â€” ${created.reference}`,
-        subscriptionRequestId: created.id,
-      }).catch((error: unknown) => logDiagnostic("support-link-request", error));
+      const created = request ?? await onConfirmSubscription(channel, supportCustomer.email);
+      if (!created) return;
+      if (conversationId) await supportRepository.updateConversation(conversationId, { subscriptionRequestId: created.id });
       state.reload();
-
-      if (channel === "whatsapp") {
-        const message = t("support.whatsappRequest", {
-          plan: created.planNameSnapshot,
-          host: profileName,
-          price: formatMinorUnits(created.amountMinorUnits, created.currencyCode),
-          minutes: String(plan.sessionDurationMinutes),
-          features: plan.features.map((feature) => `- ${feature}`).join("\n"),
-          reference: created.reference,
-        });
-        const link = whatsappLinkFor(created, message);
-        if (link && whatsappWindow) whatsappWindow.location.href = link;
-        else if (link) window.open(link, "_blank", "noopener");
-        else whatsappWindow?.close();
-        onClose();
-      }
     } catch (error) {
       logDiagnostic("support-subscription-confirm", error);
-      whatsappWindow?.close();
     } finally {
       confirming.current = false;
     }
-  }, [
-    channel,
-    onClose,
-    onConfirmSubscription,
-    plan,
-    request,
-    state.reload,
-    supportCustomer.email,
-    supportCustomer.name,
-    t,
-    whatsappLinkFor,
-  ]);
+  }, [channel, conversationId, onConfirmSubscription, plan, request, state.reload, supportCustomer.email]);
 
+  const continueWhatsapp = useCallback(async () => {
+    const method = state.conversation?.checkoutDraft?.selectedPaymentMethod;
+    if (!method || !plan || !whatsappNumber) return;
+    const target = window.open("about:blank", "_blank", "noopener");
+    try {
+      const created = request ?? await onConfirmSubscription("whatsapp", supportCustomer.email);
+      const firstName = supportCustomer.name.trim().split(/\s+/)[0] || "a CallaStar customer";
+      const link = created && whatsappLinkFor(created, `Hello, I'm ${firstName}. I selected ${method.replace(/_/g, " ")} for the ${plan.displayName} plan and would like to continue my payment.`);
+      if (link && target) target.location.href = link;
+      else if (link) window.open(link, "_blank", "noopener");
+      else target?.close();
+      if (created && conversationId) await supportRepository.updateConversation(conversationId, { subscriptionRequestId: created.id });
+    } catch (error) {
+      target?.close();
+      logDiagnostic("support-continue-whatsapp", error);
+    }
+  }, [conversationId, onConfirmSubscription, plan, request, state.conversation?.checkoutDraft?.selectedPaymentMethod, supportCustomer.email, supportCustomer.name, whatsappLinkFor, whatsappNumber]);
+
+  const continueInApp = useCallback(async () => {
+    const conversation = state.conversation;
+    if (!conversation?.checkoutDraft) return;
+    await supportRepository.updateConversation(conversation.id, { checkoutDraft: { ...conversation.checkoutDraft, handoffChoice: "in_app" } });
+    state.reload();
+  }, [state.conversation, state.reload]);
   const selectPackage = useCallback(async (planId: SubscriptionPlan["id"]) => {
     const selected = availablePlans.find((candidate) => candidate.id === planId);
     if (!selected) return;
@@ -226,6 +213,7 @@ export function SupportOverlay({
         sortOrder: selected.sortOrder,
         sessionDurationMinutes: selected.sessionDurationMinutes,
         channel,
+        entryIntent: channel,
         checkoutIntentId: crypto.randomUUID(),
         conversationMode: "payment",
         subscriptionFollowupStatus: "awaiting_decision",
@@ -238,64 +226,10 @@ export function SupportOverlay({
     state.reload();
   }, [availablePlans, channel, onSelectPackage, profileId, profileName, sessionId, state.conversation, state.reload]);
 
-  /**
-   * The caller already gave their email to join the call, so asking for it again
-   * would be asking twice for the same thing. The form is only for somebody who
-   * arrived without one.
-   */
   useEffect(() => {
-    if (conversationId || busy || failed || caller.email.trim().length === 0) return;
-    if (supportRepository.mode !== "supabase") {
-      setAuthChecked(true);
-      open(caller.email, caller.fullName);
-      return;
-    }
-
-    let cancelled = false;
-    const client = requireSupabase();
-    const openForVerifiedEmail = (email?: string) => {
-      if (cancelled) return;
-      setAuthChecked(true);
-      if (email?.toLowerCase() === caller.email.trim().toLowerCase()) {
-        open(caller.email, caller.fullName);
-      }
-    };
-    void client.auth.getUser().then(({ data, error }) => {
-      if (error) logDiagnostic("support-auth", error);
-      openForVerifiedEmail(data.user?.email);
-    });
-    const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN") window.setTimeout(() => openForVerifiedEmail(session?.user.email), 0);
-    });
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, [busy, caller.email, caller.fullName, conversationId, failed, open]);
-
-  const identify = async (email: string, name: string) => {
-    if (supportRepository.mode !== "supabase") {
-      open(email, name);
-      return;
-    }
-    setBusy(true);
-    setFailed(false);
-    try {
-      window.localStorage.setItem(`callastar-support-name:${email.toLowerCase()}`, name);
-      const { error } = await requireSupabase().auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/support` },
-      });
-      if (error) throw error;
-      setMagicLinkEmail(email);
-    } catch (error) {
-      logDiagnostic("support-email-link", error);
-      setFailed(true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+    if (conversationId || busy || failed) return;
+    open(supportCustomer.email, supportCustomer.name);
+  }, [busy, conversationId, failed, open, supportCustomer.email, supportCustomer.name]);
   return (
     <div className="support-overlay" role="dialog" aria-modal="true" aria-label={t("support.supportName")}>
       {conversationId ? (
@@ -313,38 +247,24 @@ export function SupportOverlay({
               ? selectPackage
               : undefined
           }
-          onPaymentMethodSubmitted={channel === "in_app" ? confirmSubscription : undefined}
-          onContinueToWhatsapp={channel === "whatsapp" ? () => void confirmSubscription() : undefined}
+          onPaymentMethodSubmitted={confirmSubscription}
+          onContinueToWhatsapp={whatsappNumber ? () => void continueWhatsapp() : undefined}
+          onContinueInApp={() => void continueInApp()}
         />
       ) : (
         <div className="support-overlay-panel">
           <button type="button" className="support-overlay-close" onClick={onClose} aria-label="Close support">
             <Icon name="close" className="size-5" />
           </button>
-
-          {!authChecked && <p className="chat-note">{t("common.loading")}</p>}
-
           {failed && (
             <p className="cs-error" role="alert">
-              We could not send the sign-in link or open your conversation.
+              We could not open your conversation. Please retry.
               {whatsappNumber ? " You can also reach support on WhatsApp." : ""}
+              <button type="button" onClick={() => { opening.current = false; setFailed(false); }}>Retry</button>
             </p>
           )}
 
-          {magicLinkEmail && (
-            <p className="cs-note" role="status">{t("support.accessLinkSent", { email: magicLinkEmail })}</p>
-          )}
-
-          {authChecked && (
-            <SupportIdentifyForm
-              initialEmail={caller.email}
-              initialName={caller.fullName}
-              busy={busy}
-              secureEmailAccess={supportRepository.mode === "supabase"}
-              onSubmit={({ email, name }) => void identify(email, name)}
-              onCancel={onClose}
-            />
-          )}
+          {busy && <p className="chat-note" role="status">Opening Customer Care…</p>}
         </div>
       )}
     </div>

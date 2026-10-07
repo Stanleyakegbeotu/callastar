@@ -15,7 +15,8 @@ Deno.serve(async (request) => {
   const { data: session } = await client.from("call_sessions")
     .select("id,host_id,call_id_id,call_type,visitor_name,visitor_email,session_token_hash,status,created_at,connected_at")
     .eq("id", body.callSessionId).eq("session_token_hash", await hash(body.sessionToken)).maybeSingle();
-  if (!session || session.call_type !== "video" || !["connecting", "ringing", "active"].includes(session.status) || session.host_id !== body.hostId) {
+  if (!session || session.call_type !== "video" || !["connecting", "ringing", "active", "ended", "failed"].includes(session.status) ||
+      (["ended", "failed"].includes(session.status) && !session.connected_at) || session.host_id !== body.hostId) {
     return json({ error: "call_session_unavailable" }, 404);
   }
   const { data: callIdRow } = await client.from("call_ids").select("id,host_id,host:hosts!inner(display_name,status)")

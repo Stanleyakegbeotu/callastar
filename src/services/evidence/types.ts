@@ -1,5 +1,5 @@
 export type EvidenceSyncStatus = "local_only" | "sync_pending" | "synced" | "sync_failed";
-export type EvidenceStatus = "ready" | "pending" | "capture_failed";
+export type EvidenceStatus = "ready" | "pending" | "captured" | "uploading" | "capture_failed" | "upload_failed";
 export type EvidencePlanType = "free_trial" | "plus" | "pro" | "subscription";
 
 export interface CallEvidence {

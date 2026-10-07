@@ -112,18 +112,18 @@ export const callEvidenceRepository = {
     notifyEvidenceUpdated();
     return result;
   },
-  async saveCaptureFailure(input: BeginEvidenceInput, reason: string): Promise<LocalCallEvidence> {
+  async saveCaptureFailure(input: BeginEvidenceInput, reason: string, failureKind: "capture" | "upload" = "capture"): Promise<LocalCallEvidence> {
     if (cloudEnabled()) {
       const credentials = await getCloudCallSessionCredentials(input.callSessionId);
       if (!credentials) throw new Error("Secure call session credentials are unavailable.");
       const handle = await invoke<CloudBeginResult>("begin-call-evidence", { ...input, callSessionId: credentials.sessionId, sessionToken: credentials.sessionToken });
-      if (handle.token) await invoke("finish-call-evidence", { action: "failed", ...handle, reason });
+      if (handle.token) await invoke("finish-call-evidence", { action: "failed", ...handle, reason, failureKind });
       return {
         id: handle.id, callSessionId: input.callSessionId, callerName: input.callerName, callerEmail: input.callerEmail,
         hostId: input.hostId, hostName: input.hostName, packageId: input.packageId, packageName: input.packageName,
         planType: input.planType, callType: "video", capturedAt: null, sessionStartedAt: input.sessionStartedAt,
         answeredAt: input.answeredAt, endedAt: input.endedAt, durationSeconds: input.durationSeconds,
-        callStatus: input.callStatus, terminationReason: input.terminationReason, status: "capture_failed", syncStatus: "synced",
+        callStatus: input.callStatus, terminationReason: input.terminationReason, status: failureKind === "upload" ? "upload_failed" : "capture_failed", syncStatus: "synced",
         imagePath: null, cloudEvidenceId: handle.id, cloudStoragePath: null, width: null, height: null, mimeType: "image/jpeg",
         createdAt: new Date().toISOString(), failureReason: reason, imageBlob: null, callIdSnapshot: input.callId, consentAt: input.consentAt,
       };
@@ -136,7 +136,7 @@ export const callEvidenceRepository = {
       hostId: input.hostId, hostName: input.hostName, packageId: input.packageId, packageName: input.packageName,
       planType: input.planType, callType: "video", capturedAt: null, sessionStartedAt: input.sessionStartedAt, answeredAt: input.answeredAt,
       endedAt: input.endedAt, durationSeconds: input.durationSeconds, callStatus: input.callStatus, terminationReason: input.terminationReason,
-      status: "capture_failed", syncStatus: "local_only", imagePath: null,
+      status: failureKind === "upload" ? "upload_failed" : "capture_failed", syncStatus: "local_only", imagePath: null,
       cloudEvidenceId: null, cloudStoragePath: null, width: null, height: null, mimeType: "image/jpeg",
       createdAt: new Date().toISOString(), failureReason: reason, imageBlob: null,
       callIdSnapshot: input.callId, consentAt: input.consentAt,

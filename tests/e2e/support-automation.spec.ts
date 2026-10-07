@@ -4,11 +4,12 @@ test("support chat keeps its quick actions and composer usable across phone widt
   await page.setViewportSize({ width: 390, height: 744 });
   await page.goto("/tests/fixtures/support-automation.html");
   await expect(page.getByText("Would you like to continue with your payment?")).toBeVisible();
-  await expect(page.getByText("Plus at $19", { exact: false })).toBeVisible();
+  await expect(page.getByText("Plus at $39.00", { exact: false })).toBeVisible();
   await page.screenshot({ path: "test-results/support-automation-mobile.png" });
 
   for (const width of [320, 360, 375, 390, 393, 414, 430]) {
     await page.setViewportSize({ width, height: 667 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--app-visual-height"))).toBe("667px");
     const layout = await page.evaluate(() => {
       const actions = document.querySelector<HTMLElement>(".chat-decision-actions")!;
       const composer = document.querySelector<HTMLElement>(".chat-composer-wrap")!;
@@ -39,6 +40,7 @@ test("support chat keeps its quick actions and composer usable across phone widt
   }
   for (const width of [320, 360, 375, 390, 393, 414, 430]) {
     await page.setViewportSize({ width, height: 667 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--app-visual-height"))).toBe("667px");
     const layout = await page.evaluate(() => {
       const actions = document.querySelector<HTMLElement>(".chat-payment-methods")!;
       const composer = document.querySelector<HTMLElement>(".chat-composer-wrap")!;
@@ -88,9 +90,9 @@ test("support chat keeps its quick actions and composer usable across phone widt
   await expect(page.getByText("Welcome back, Sarah. A CallaStar specialist will continue assisting you with your Cash App payment here.", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: /Select .* as payment method/ })).toHaveCount(0);
   await expect(page.getByText("Hi Sarah, welcome to CallaStar Support.")).toHaveCount(1);
-  await page.getByRole("button", { name: /Plus, \$19\. View package details/ }).click();
-  await page.getByRole("button", { name: /Pro.*\$69/ }).click();
-  await expect(page.getByRole("button", { name: /Pro, \$69\. View package details/ })).toBeVisible();
+  await page.getByRole("button", { name: /Plus, \$39\.00\. View package details/ }).click();
+  await page.getByRole("button", { name: /Pro.*\$69\.00/ }).click();
+  await expect(page.getByRole("button", { name: /Pro, \$69\.00\. View package details/ })).toBeVisible();
 });
 
 test("a returning customer can resume pending method selection or ask for help", async ({ page }) => {
@@ -110,4 +112,27 @@ test("a returning customer can resume pending method selection or ask for help",
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await page.getByRole("button", { name: "Reopen chat" }).click();
   await expect(page.getByRole("button", { name: "Continue Payment" })).toBeVisible();
+});
+
+test("accountless Customer Care opens directly and payment offers both handoff choices", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as Window & { openedUrls?: string[] }).openedUrls = [];
+    window.open = ((url?: string | URL | null) => {
+      (window as Window & { openedUrls?: string[] }).openedUrls?.push(String(url));
+      return null;
+    }) as typeof window.open;
+  });
+  await page.goto("/support");
+  await expect(page.getByPlaceholder(/Message CallaStar support/i)).toBeVisible();
+  await expect(page.getByText(/sign-in link|verify your email|verification/i)).toHaveCount(0);
+  await page.goto("/tests/fixtures/support-automation.html");
+  await page.getByRole("button", { name: "Yes", exact: true }).click();
+  await page.getByRole("button", { name: "Select Bank Transfer as payment method" }).click();
+  await expect(page.getByRole("button", { name: "Continue on WhatsApp" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue in CallaStar" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue in CallaStar" }).click();
+  expect(await page.evaluate(() => window.openedUrls?.length ?? 0)).toBe(0);
+  await page.getByRole("button", { name: "Continue on WhatsApp" }).click();
+  await expect.poll(() => page.evaluate(() => window.openedUrls?.length ?? 0)).toBe(1);
+  await expect(page.getByPlaceholder(/Message CallaStar support/i)).toBeVisible();
 });

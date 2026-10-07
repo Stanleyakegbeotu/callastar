@@ -10,8 +10,14 @@ Deno.serve(async (request) => {
   if (!data || !host || host.status !== "active") return json({ found: false });
   const now = new Date().toISOString();
   if (data.expires_at && data.expires_at <= now) return json({ found: false });
-  const avatarUrl = host.avatar_path ? (await client.storage.from("host-avatars").createSignedUrl(host.avatar_path, 3600)).data?.signedUrl ?? null : null;
-  const coverUrl = host.cover_path ? (await client.storage.from("host-avatars").createSignedUrl(host.cover_path, 3600)).data?.signedUrl ?? null : null;
+  const mediaStarted = performance.now();
+  const [avatar, cover] = await Promise.all([
+    host.avatar_path ? client.storage.from("host-avatars").createSignedUrl(host.avatar_path, 3600) : Promise.resolve({ data: null, error: null }),
+    host.cover_path ? client.storage.from("host-avatars").createSignedUrl(host.cover_path, 3600) : Promise.resolve({ data: null, error: null }),
+  ]);
+  const avatarUrl = avatar.data?.signedUrl ?? null;
+  const coverUrl = cover.data?.signedUrl ?? null;
+  console.info("[callastar:media_pipeline]", { stage: "signed_url_resolution", durationMs: Math.round(performance.now() - mediaStarted), success: !(avatar.error || cover.error) });
   await client.from("call_ids").update({ last_used_at: now }).eq("id", data.id);
   return json({ found: true, host: { id: host.id, displayName: host.display_name, shortBio: host.short_bio, avatarUrl, coverUrl, remoteVideoAssetId: host.remote_video_asset_id, remoteAudioAssetId: host.remote_audio_asset_id, followerCount: Number(host.base_follower_count ?? 0) + Number(host.tracked_follower_count ?? 0), likeCount: Number(host.base_like_count ?? 0) + Number(host.tracked_like_count ?? 0), status: host.status } });
 });

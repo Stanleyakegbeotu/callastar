@@ -11,8 +11,19 @@ import type {
   SubscriptionRequestFilters,
   SubscriptionRequestStatus,
 } from "./types";
+import { readSupportCustomerIdentity } from "@/services/support/customerIdentity";
 
 type Row = Record<string, any>;
+
+async function customerSubscriptionAction<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
+  const identity = readSupportCustomerIdentity();
+  if (!identity.normalizedEmail) throw new Error("Enter caller details before requesting a subscription.");
+  const { data, error } = await requireSupabase().functions.invoke("support-customer", {
+    body: { action, email: identity.normalizedEmail, displayEmail: identity.email, guestSessionId: identity.guestSessionId, ...values },
+  });
+  if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Subscription service unavailable.");
+  return data as T;
+}
 
 function newId(): string {
   return typeof crypto.randomUUID === "function"
@@ -154,6 +165,10 @@ export const supabaseSubscriptionRepository: SubscriptionRepository = {
   },
 
   async createRequest(input: CreateSubscriptionRequestInput) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin")) {
+      const { request } = await customerSubscriptionAction<{ request: Row }>("subscription_create", { ...input, email: input.customerEmail });
+      return fromRequest(request);
+    }
     const email = input.customerEmail.trim();
     const { data, error } = await requireSupabase()
       .from("subscription_requests")
@@ -179,12 +194,23 @@ export const supabaseSubscriptionRepository: SubscriptionRepository = {
   },
 
   async getRequest(id) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin")) {
+      const { requests } = await customerSubscriptionAction<{ requests: Row[] }>("subscription_list", { id });
+      return requests[0] ? fromRequest(requests[0]) : null;
+    }
     const { data, error } = await requireSupabase().from("subscription_requests").select("*").eq("id", id).maybeSingle();
     if (error) throw error;
     return data ? fromRequest(data) : null;
   },
 
   async listRequests(filters?: SubscriptionRequestFilters) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin")) {
+      const { requests } = await customerSubscriptionAction<{ requests: Row[] }>("subscription_list");
+      let rows = requests.map(fromRequest);
+      if (filters?.status && filters.status !== "all") rows = rows.filter((item) => item.status === filters.status);
+      if (filters?.channel && filters.channel !== "all") rows = rows.filter((item) => item.channel === filters.channel);
+      return filters?.limit ? rows.slice(0, filters.limit) : rows;
+    }
     let query = requireSupabase().from("subscription_requests").select("*");
     if (filters?.status && filters.status !== "all") query = query.eq("status", filters.status);
     if (filters?.channel && filters.channel !== "all") query = query.eq("channel", filters.channel);
@@ -195,6 +221,10 @@ export const supabaseSubscriptionRepository: SubscriptionRepository = {
   },
 
   async listSessionRequests(sessionId) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin")) {
+      const { requests } = await customerSubscriptionAction<{ requests: Row[] }>("subscription_list", { sessionId });
+      return requests.map(fromRequest);
+    }
     const { data, error } = await requireSupabase()
       .from("subscription_requests")
       .select("*")
@@ -218,6 +248,10 @@ export const supabaseSubscriptionRepository: SubscriptionRepository = {
   },
 
   async cancelRequest(id) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin")) {
+      const { request } = await customerSubscriptionAction<{ request: Row | null }>("subscription_cancel", { id });
+      return request ? fromRequest(request) : null;
+    }
     const { data, error } = await requireSupabase().rpc("cancel_customer_subscription_request", {
       p_request_id: id,
     });

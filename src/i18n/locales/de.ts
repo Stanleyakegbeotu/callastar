@@ -204,19 +204,6 @@ export const de: TranslationSchema = {
   },
   support: {
     title: "Kundenservice",
-    identifyCopy:
-      "Gib deine E-Mail-Adresse ein und wir öffnen deine Unterhaltung mit dem CallaStar-Support. Wenn du uns schon geschrieben hast, findest du deine Nachrichten hier.",
-    emailPlaceholder: "E-Mail-Adresse",
-    namePlaceholder: "Dein Name",
-    nameRequired: "Gib deinen Namen ein, um den Chat zu öffnen.",
-    privacyNote:
-      "Wir verwenden deine E-Mail nur, um deine Unterhaltung zu finden. Es gibt kein Konto und keinen Bestätigungscode.",
-    secureEmailNote: "Für Cloud-Chats bestätigen wir deine E-Mail mit einem einmaligen Anmeldelink, bevor wir Nachrichten anzeigen.",
-    sendAccessLink: "Anmeldelink per E-Mail senden",
-    accessLinkSent: "Wir haben einen sicheren Anmeldelink an {{email}} gesendet. Öffne ihn auf diesem Gerät, um den Chat aufzurufen.",
-    checking: "E-Mail wird geprüft…",
-    continueToSupport: "Weiter zum Support",
-    notNow: "Jetzt nicht",
     supportName: "CallaStar Support",
     emptyTitle: "Wie können wir helfen?",
     emptyCopy:

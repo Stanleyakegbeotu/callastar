@@ -392,6 +392,11 @@ verify_jwt = false
 [functions.get-session-media]
 verify_jwt = false
 
+# Customer chat is accountless; the handler scopes every operation to the
+# supplied support identity and guest session instead of requiring a JWT user.
+[functions.support-customer]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

@@ -34,6 +34,7 @@ interface SupportChatProps {
   onSelectPackage?: (planId: SubscriptionPlan["id"]) => void | Promise<void>;
   onPaymentMethodSubmitted?: () => void | Promise<void>;
   onContinueToWhatsapp?: () => void;
+  onContinueInApp?: () => void;
   /**
    * An extra control for the header, such as the admin expand/collapse toggle.
    *
@@ -88,6 +89,7 @@ export function SupportChat({
   onSelectPackage,
   onPaymentMethodSubmitted,
   onContinueToWhatsapp,
+  onContinueInApp,
 }: SupportChatProps) {
   const { t } = useTranslation();
   const { messages, loading, sending, error, send } = state;
@@ -396,9 +398,11 @@ export function SupportChat({
           </div>
         )}
 
-        {viewer === "customer" && onContinueToWhatsapp && isPaymentMethod(state.conversation?.checkoutDraft?.selectedPaymentMethod) && (
+        {viewer === "customer" && (onContinueToWhatsapp || onContinueInApp) && isPaymentMethod(state.conversation?.checkoutDraft?.selectedPaymentMethod) && (
           <div className="chat-welcome-actions chat-decision-actions">
-            <button type="button" onClick={onContinueToWhatsapp}>{t("support.continueToWhatsapp")}</button>
+            <p>How would you like to continue?</p>
+            {onContinueToWhatsapp && <button type="button" onClick={onContinueToWhatsapp}>{t("support.continueToWhatsapp")}</button>}
+            {onContinueInApp && <button type="button" onClick={onContinueInApp}>Continue in CallaStar</button>}
           </div>
         )}
 

@@ -214,19 +214,6 @@ export const en = {
   },
   support: {
     title: "Customer care",
-    identifyCopy:
-      "Enter your email address and we'll open your CallaStar support conversation. If you have written to us before, your messages will be here.",
-    emailPlaceholder: "Email address",
-    namePlaceholder: "Your name",
-    nameRequired: "Enter your name to open your conversation.",
-    privacyNote:
-      "We use your email only to find your conversation. There is no account to create and no verification code to wait for.",
-    secureEmailNote: "For cloud chat, we verify your email with a one-time sign-in link before showing your messages.",
-    sendAccessLink: "Email me a sign-in link",
-    accessLinkSent: "We sent a secure sign-in link to {{email}}. Open it on this device to continue to your chat.",
-    checking: "Checking email…",
-    continueToSupport: "Continue to support",
-    notNow: "Not now",
     supportName: "CallaStar Support",
     emptyTitle: "How can we help?",
     emptyCopy:

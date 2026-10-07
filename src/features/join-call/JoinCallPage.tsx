@@ -13,6 +13,9 @@ import { useCallSession } from "@/state/CallSessionContext";
 import { useClearStaleSession } from "@/state/useClearStaleSession";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
+import { saveSupportCustomerIdentity } from "@/services/support/customerIdentity";
+import { supportRepository } from "@/services/support/repository";
+import { logDiagnostic } from "@/lib/utils";
 
 import { JoinCallForm } from "./JoinCallForm";
 import { ProfileInactiveScreen, ReturningSubscriptionScreen, WelcomeBackScreen } from "./HostStateScreens";
@@ -59,6 +62,8 @@ export function JoinCallPage() {
 
   /** Put the caller and host into session state, ready for a call. */
   const prepareSession = (values: JoinCallValues, host: HostPreview) => {
+    const identity = saveSupportCustomerIdentity({ fullName: values.fullName, phone: values.phone, email: values.email });
+    supportRepository.setCustomerIdentity?.(identity);
     dispatch({
       type: "SET_CALLER_DETAILS",
       caller: { fullName: values.fullName, phone: values.phone, email: values.email },
@@ -197,6 +202,11 @@ export function JoinCallPage() {
           onCancel={() => navigate("/connect")}
           onSubmit={handleSubmit}
           onOutcome={(values, result) => setOutcome({ values, result })}
+          onCallerDetails={(values) => {
+            const identity = saveSupportCustomerIdentity({ fullName: values.fullName, phone: values.phone, email: values.email });
+            supportRepository.setCustomerIdentity?.(identity);
+            void supportRepository.linkGuestConversation?.().catch((cause: unknown) => logDiagnostic("support-guest-link", cause));
+          }}
         />
       </main>
     </div>

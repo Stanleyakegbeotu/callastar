@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { looksLikeCallId } from "@/lib/callId";
 import { classifyEntryId, resolveEntryId, type EntryOutcome } from "@/services/access/resolveEntry";
 import { CALL_TIMINGS, isLiveCallingConfigured } from "@/lib/config";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
 
@@ -33,6 +34,7 @@ interface JoinCallFormProps {
    * Handled by the page, because each one is a screen rather than a step.
    */
   onOutcome: (values: JoinCallValues, outcome: EntryOutcome) => void;
+  onCallerDetails: (values: JoinCallValues) => void;
 }
 
 type JoinStep =
@@ -67,7 +69,7 @@ function initialValues(): JoinCallValues {
  * Call ID, then the host you are about to reach. Camera access is the final,
  * deliberate action rather than a side effect of filling in a form.
  */
-export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCallFormProps) {
+export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCallerDetails }: JoinCallFormProps) {
   const { t } = useTranslation();
   const [values, setValues] = useState<JoinCallValues>(initialValues);
   const [errors, setErrors] = useState<JoinCallErrors>({});
@@ -117,7 +119,10 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
     }
     setErrors(nextErrors);
     setTouched({ fullName: true, phone: true, email: true });
-    if (!hasErrors(nextErrors)) setStep("call-id");
+    if (!hasErrors(nextErrors)) {
+      onCallerDetails(normaliseJoinCall(values));
+      setStep("call-id");
+    }
   };
 
   const handleCallIdSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -327,7 +332,13 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
 
         <div className="ready-cover" role="img" aria-label={profile.coverUrl ? `${profile.displayName} cover photo` : "Cover photo placeholder"}>
           {profile.coverUrl ? (
-            <img className="ready-cover-image" src={profile.coverUrl} alt="" />
+            <img className="ready-cover-image" src={profile.coverUrl} alt="" width={1280} height={280} decoding="async" fetchPriority="high" onLoad={(event) => {
+              const image = event.currentTarget;
+              const resource = performance.getEntriesByName(image.currentSrc).at(-1) as PerformanceResourceTiming | undefined;
+              if (resource) productionDiagnostic("MEDIA_IMAGE_READY", { stage: "cover_response", durationMs: resource.responseEnd - resource.startTime, kind: "cover" });
+              const decodeStarted = performance.now();
+              void image.decode().then(() => productionDiagnostic("MEDIA_IMAGE_READY", { stage: "cover_decode", durationMs: performance.now() - decodeStarted, kind: "cover", width: image.naturalWidth, height: image.naturalHeight })).catch(() => undefined);
+            }} />
           ) : (
             <span className="ready-cover-placeholder" aria-hidden="true">
               <Icon name="image" className="size-4" />
@@ -338,7 +349,13 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
 
         <div className="ready-profile">
           <div className="ready-avatar">
-            <img src={profile.avatarUrl} alt="" />
+            <img src={profile.avatarUrl} alt="" width={128} height={128} decoding="async" fetchPriority="high" onLoad={(event) => {
+              const image = event.currentTarget;
+              const resource = performance.getEntriesByName(image.currentSrc).at(-1) as PerformanceResourceTiming | undefined;
+              if (resource) productionDiagnostic("MEDIA_IMAGE_READY", { stage: "avatar_response", durationMs: resource.responseEnd - resource.startTime, kind: "avatar" });
+              const decodeStarted = performance.now();
+              void image.decode().then(() => productionDiagnostic("MEDIA_IMAGE_READY", { stage: "avatar_decode", durationMs: performance.now() - decodeStarted, kind: "avatar", width: image.naturalWidth, height: image.naturalHeight })).catch(() => undefined);
+            }} />
             <span className="ready-verified" aria-label="Verified profile">
               <Icon name="check" className="size-4" />
             </span>

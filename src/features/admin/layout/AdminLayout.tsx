@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase/client";
 
 import { HostCallProvider } from "@/features/host-calls/HostCallProvider";
 import { HostCallSurface } from "@/features/host-calls/HostCallSurface";
+import { supportRepository } from "@/services/support/repository";
 
 import { ToastProvider } from "../components/ToastProvider";
 import { AdminSidebar } from "./AdminSidebar";
@@ -20,6 +21,7 @@ import { AdminSidebar } from "./AdminSidebar";
  * navigation so a tap on a link never leaves the overlay covering the page.
  */
 export function AdminLayout() {
+  supportRepository.setCustomerIdentity?.(null);
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);

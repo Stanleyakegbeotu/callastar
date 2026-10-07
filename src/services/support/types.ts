@@ -43,6 +43,8 @@ export interface SupportCheckoutDraft {
   sortOrder: number;
   sessionDurationMinutes: number;
   channel: SupportChannel;
+  entryIntent?: SupportChannel;
+  handoffChoice?: "whatsapp" | "in_app";
   /** Stable per-package checkout attempt, so stale button events cannot apply. */
   checkoutIntentId?: string;
   conversationMode?: SupportConversationMode;

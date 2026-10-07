@@ -5,17 +5,16 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { logDiagnostic } from "@/lib/utils";
 import { buildWhatsappLink } from "@/lib/phone";
-import { requireSupabase } from "@/lib/supabase/client";
 import { subscriptionRepository } from "@/services/subscriptions/repository";
 import type { SubscriptionPlan, SubscriptionRequest } from "@/services/subscriptions/types";
 import { supportRepository } from "@/services/support/repository";
 
 import { SupportChat } from "./SupportChat";
-import { SupportIdentifyForm } from "./SupportIdentifyForm";
 import { useSupportConversation } from "./hooks/useSupportConversation";
 import { useWhatsappSupportNumber } from "./hooks/useWhatsappSupportNumber";
 import { resolveConversation } from "./supportEntry";
 import { announcePackageChange } from "./supportAutomation";
+import { readSupportCustomerIdentity } from "@/services/support/customerIdentity";
 
 /**
  * `/support` — customer care reached on its own, rather than from a payment.
@@ -25,101 +24,32 @@ import { announcePackageChange } from "./supportAutomation";
  */
 export function SupportIdentifyPage() {
   const navigate = useNavigate();
-  const { t } = useTranslation();
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [magicLinkEmail, setMagicLinkEmail] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (supportRepository.mode !== "supabase") return;
     let cancelled = false;
-    const resumeSignedInCustomer = async (emailOverride?: string) => {
-      const client = requireSupabase();
-      const { data, error: authError } = await client.auth.getUser();
-      if (authError || !data.user?.email || cancelled) return;
-      const email = emailOverride ?? data.user.email;
-      if (email.toLowerCase() !== data.user.email.toLowerCase()) return;
-      let name = String(data.user.user_metadata?.full_name ?? "");
-      try {
-        name = window.localStorage.getItem(`callastar-support-name:${email.toLowerCase()}`) ?? name;
-      } catch {
-        // The verified email remains enough to reopen the history.
-      }
-      setBusy(true);
-      void resolveConversation({ email, name, subject: "CallaStar support" })
-        .then((conversation) => {
-          if (!cancelled) navigate(`/support/${conversation.id}`, { replace: true });
-        })
-        .catch((cause: unknown) => {
-          logDiagnostic("support-identify", cause);
-          if (!cancelled) setError("We could not open your conversation. Please try again.");
-        })
-        .finally(() => {
-          if (!cancelled) setBusy(false);
-        });
-    };
-
-    const client = requireSupabase();
-    void resumeSignedInCustomer();
-    const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session?.user.email) {
-        window.setTimeout(() => void resumeSignedInCustomer(session.user.email), 0);
-      }
-    });
+    const identity = readSupportCustomerIdentity();
+    supportRepository.setCustomerIdentity?.(identity);
+    void resolveConversation({ email: identity.email, name: identity.name, subject: "CallaStar support" })
+      .then((conversation) => { if (!cancelled) navigate(`/support/${conversation.id}`, { replace: true }); })
+      .catch((cause: unknown) => { logDiagnostic("support-identify", cause); if (!cancelled) setError("We could not open your conversation. Please retry."); });
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
     };
-  }, [navigate]);
-
-  const identify = async ({ email, name }: { email: string; name: string }) => {
-    setBusy(true);
-    setError(null);
-    if (supportRepository.mode === "supabase") {
-      try {
-        window.localStorage.setItem(`callastar-support-name:${email.toLowerCase()}`, name);
-        const { error: authError } = await requireSupabase().auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: `${window.location.origin}/support` },
-        });
-        if (authError) throw authError;
-        setMagicLinkEmail(email);
-      } catch (cause) {
-        logDiagnostic("support-email-link", cause);
-        setError("We could not send the sign-in link. Please try again.");
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-
-    void resolveConversation({ email, name, subject: "CallaStar support" })
-      .then((conversation) => navigate(`/support/${conversation.id}`, { replace: true }))
-      .catch((cause: unknown) => {
-        logDiagnostic("support-identify", cause);
-        setError("We could not open your conversation. Please try again.");
-      })
-      .finally(() => setBusy(false));
-  };
+  }, [attempt, navigate]);
 
   return (
     <main className="support-page">
       <AppHeader minimal />
       {error && (
-        <p className="cs-error" role="alert">
-          {error}
-        </p>
+        <div className="cs-error" role="alert">
+          <p>{error}</p>
+          <button type="button" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Retry</button>
+          <button type="button" onClick={() => navigate("/")}>Back</button>
+        </div>
       )}
-      {magicLinkEmail && (
-        <p className="cs-note" role="status">{t("support.accessLinkSent", { email: magicLinkEmail })}</p>
-      )}
-      <SupportIdentifyForm
-        busy={busy}
-        showLanguage
-        secureEmailAccess={supportRepository.mode === "supabase"}
-        onSubmit={(values) => void identify(values)}
-        onCancel={() => navigate("/")}
-      />
+      {!error && <p className="cs-note" role="status">Opening Customer Care…</p>}
     </main>
   );
 }
@@ -128,6 +58,8 @@ export function SupportIdentifyPage() {
 export function SupportThreadPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
+  const identity = readSupportCustomerIdentity();
+  supportRepository.setCustomerIdentity?.(identity);
   const state = useSupportConversation(conversationId ?? null, "customer");
   const { number: whatsappNumber } = useWhatsappSupportNumber();
   const [resumePlan, setResumePlan] = useState<SubscriptionPlan | null>(null);
@@ -204,10 +136,10 @@ export function SupportThreadPage() {
         target?.close();
         return;
       }
-      const link = buildWhatsappLink(
-        whatsappNumber,
-        `Hello CallaStar Support. I would like to continue my ${request.planNameSnapshot} subscription. Request reference: ${request.reference}.`,
-      );
+      const method = state.conversation?.checkoutDraft?.selectedPaymentMethod ?? "payment method";
+      const firstName = state.conversation?.customerName.trim().split(/\s+/)[0] || "a CallaStar customer";
+      const link = buildWhatsappLink(whatsappNumber,
+        `Hello, I'm ${firstName}. I selected ${String(method).replace(/_/g, " ")} for the ${request.planNameSnapshot} plan and would like to continue my payment.`);
       if (link && target) target.location.href = link;
       else if (link) window.open(link, "_blank", "noopener");
       else target?.close();
@@ -215,7 +147,13 @@ export function SupportThreadPage() {
       target?.close();
       logDiagnostic("support-continue-whatsapp", cause);
     }
-  }, [createResumedPaymentRequest, whatsappNumber]);
+  }, [createResumedPaymentRequest, state.conversation?.checkoutDraft?.selectedPaymentMethod, state.conversation?.customerName, whatsappNumber]);
+
+  const continueInApp = useCallback(async () => {
+    if (!currentConversationId || !checkoutDraft) return;
+    await supportRepository.updateConversation(currentConversationId, { checkoutDraft: { ...checkoutDraft, handoffChoice: "in_app" } });
+    state.reload();
+  }, [checkoutDraft, currentConversationId, state.reload]);
 
   const selectPackage = useCallback(async (planId: SubscriptionPlan["id"]) => {
     const selected = availablePlans.find((candidate) => candidate.id === planId);
@@ -308,7 +246,8 @@ export function SupportThreadPage() {
             : undefined
         }
         onPaymentMethodSubmitted={async () => { await createResumedPaymentRequest(); }}
-        onContinueToWhatsapp={checkoutDraft?.channel === "whatsapp" && whatsappNumber ? () => void continueWhatsapp() : undefined}
+        onContinueToWhatsapp={whatsappNumber ? () => void continueWhatsapp() : undefined}
+        onContinueInApp={() => void continueInApp()}
       />
     </main>
   );
