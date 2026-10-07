@@ -154,8 +154,10 @@ describe("Netlify edge access gate", () => {
 
       expect(response!.status).toBe(200)
       expect(response!.headers.get("x-robots-tag")).toContain("noindex")
-      expect(html).toContain("Human Verification")
-      expect(html).toContain("I am a real person")
+      expect(html).toContain('class="verify-bar"')
+      expect(html).toContain("Please confirm you're human")
+      expect(html).not.toContain("Human Verification")
+      expect(html).not.toContain('id="continue"')
       expect(html).toContain('name="robots" content="noindex,nofollow')
       expect(html).toContain("safe-area-inset-bottom")
       expect(html).not.toContain("private application response")
@@ -172,7 +174,7 @@ describe("Netlify edge access gate", () => {
       context,
     )
     const html = await response!.text()
-    const nonce = html.match(/const nonce=("[^"]+")/)?.[1]
+    const nonce = html.match(/const nonce = ("[^"]+")/)?.[1]
 
     expect(response!.headers.get("cache-control")).toContain("no-store")
     expect(response!.headers.get("content-security-policy")).not.toContain(

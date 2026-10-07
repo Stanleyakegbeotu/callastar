@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { Icon } from "@/components/ui/Icon";
 
@@ -84,7 +85,7 @@ export function PwaInstallCard() {
         <span>Get the app</span>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div className="pwa-install-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
           <section className="pwa-install-card" role="dialog" aria-modal="true" aria-labelledby="pwa-install-title">
             <button type="button" className="pwa-install-close" aria-label="Close install card" onClick={() => setOpen(false)}>
@@ -125,7 +126,8 @@ export function PwaInstallCard() {
 
             <p className="pwa-install-footnote">Free to install. Calls still need an internet connection.</p>
           </section>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

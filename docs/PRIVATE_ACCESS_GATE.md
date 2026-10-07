@@ -30,6 +30,11 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ## Confirmation nonce and cookie
 
+The verification page keeps the compact confirmation-bar design: one checkbox is
+the only initial control. Checking it submits automatically after the short
+interaction delay; a separate Continue button or third-party challenge is not
+shown. A failed request resets the checkbox so the visitor can try again.
+
 The edge creates a random, versioned confirmation nonce with an issue time and
 an expiry 10 minutes later, then signs its payload using HMAC-SHA-256 and
 `ACCESS_GATE_SECRET`. The browser cannot mint a valid nonce. The verify endpoint

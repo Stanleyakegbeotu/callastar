@@ -43,6 +43,7 @@
   display: grid;
   box-sizing: border-box;
   place-items: center;
+  align-content: safe center;
   overflow-y: auto;
   padding: max(1.25rem, var(--safe-top)) max(1rem, var(--safe-right)) max(1.25rem, var(--safe-bottom)) max(1rem, var(--safe-left));
   background: oklch(0.1 0.025 255 / 0.68);
