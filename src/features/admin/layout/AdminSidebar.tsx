@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 
+import { CallaStarLogo } from "@/components/branding/CallaStarLogo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { config } from "@/lib/config";
 
@@ -18,6 +19,7 @@ const NAV: { to: string; label: string; icon: IconName; end?: boolean; badge?: B
   { to: "/admin", label: "Overview", icon: "check", end: true },
   { to: "/admin/profiles", label: "Profiles", icon: "video" },
   { to: "/admin/sessions", label: "Call Sessions", icon: "audio" },
+  { to: "/admin/evidence", label: "Call Evidence", icon: "video" },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: "crown", badge: "openRequests" },
   { to: "/admin/support", label: "Customer Care", icon: "chat", badge: "unreadConversations" },
   { to: "/admin/media", label: "Media", icon: "camera" },
@@ -36,13 +38,8 @@ export function AdminSidebar({ open, onNavigate, onSignOut }: AdminSidebarProps)
   return (
     <nav className={`admin-sidebar ${open ? "is-open" : ""}`} aria-label="Admin sections">
       <div className="admin-brand">
-        <span className="brand-mark">
-          <Icon name="video" className="size-5" />
-        </span>
-        <span>
-          CallaStar
-          <small>Admin</small>
-        </span>
+        <CallaStarLogo size={32} />
+        <small>Admin</small>
       </div>
 
       <ul className="admin-nav">

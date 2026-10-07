@@ -51,4 +51,21 @@ describe("live source-mesh projection", () => {
     expect(output[0]).toBeCloseTo(-0.11);
     expect(output[1]).toBeCloseTo(0.11);
   });
+
+  it("does not add source expression a second time to live lip vertices", () => {
+    const live: Point3[] = Array.from({ length: 468 }, () => ({ x: .5, y: .5, z: 0 }));
+    live[0] = { x: .4, y: .5, z: 0 };
+    live[1] = { x: .6, y: .5, z: 0 };
+    const bindings: ProjectionBinding[] = [
+      { a: 0, b: 0, c: 0, wa: 1, wb: 0, wc: 0 },
+      { a: 1, b: 1, c: 1, wa: 1, wb: 0, wc: 0 },
+    ];
+    const base = new Float32Array(6);
+    const sourceExpression = new Float32Array([.1, 0, 0, .1, 0, 0]);
+    const result = new Float32Array(6);
+    projectLiveMeshPositions(result, base, sourceExpression, bindings, live,
+      { x: .5, y: .5, z: 0 }, .4, 1, identity, .44, new Set([0]));
+    expect(result[0]).toBeCloseTo(-.11);
+    expect(result[3]).toBeCloseTo(.21);
+  });
 });

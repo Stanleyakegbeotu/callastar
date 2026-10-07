@@ -70,7 +70,12 @@ async function guestDials(page: Page): Promise<void> {
   await page.getByRole("button", { name: /find profile/i }).click();
 
   // The profile confirmation, then into the call itself.
+  await expect(page.getByText(/video calls may be recorded for session review/i)).toHaveCount(0);
   await page.getByRole("button", { name: /start call/i }).click();
+}
+
+async function guestContinues(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^continue$/i }).click();
 }
 
 test.describe("two-party live video call", () => {
@@ -97,20 +102,25 @@ test.describe("two-party live video call", () => {
 
       await expect(guestPage.getByRole("heading", { name: /camera & microphone/i })).toBeVisible();
       expect(await gumCalls(guestPage)).toBe(0);
+      await guestContinues(guestPage);
 
-      await guestPage.getByRole("button", { name: /^continue$/i }).click();
+      /* 3. The request is visible before the host starts ringing. */
+      await expect(guestPage.getByText(/sending your call request to/i)).toBeVisible();
+      await expect(guestPage.getByText(/please wait .* to accept your call request/i)).toBeVisible();
 
-      /* 3. Ringing — driven by signalling, not a timer. */
+      /* 4. Ringing — driven by signalling, not a timer. */
       await expect(guestPage.getByText(/ringing/i)).toBeVisible();
 
-      /* 4. The host's phone rings, wherever they were in the dashboard. */
+      /* 5. The host's phone rings, wherever they were in the dashboard. */
       const incoming = hostPage.getByRole("alertdialog");
       await expect(incoming).toBeVisible();
       await expect(incoming.getByText(CALLER.fullName)).toBeVisible();
       await expect(incoming.getByText(/incoming video call/i)).toBeVisible();
 
-      /* 5. Answering opens the source choice rather than starting a camera. */
+      /* 6. Answering confirms the request before connecting. */
       await incoming.getByRole("button", { name: /answer/i }).click();
+
+      await expect(guestPage.getByText(/call request accepted/i)).toBeVisible();
 
       // The caller stops hearing a ring the moment the call is picked up, even
       // though nothing is connected yet.
@@ -118,10 +128,10 @@ test.describe("two-party live video call", () => {
 
       await expect(hostPage.getByRole("heading", { name: /choose how you want to appear/i })).toBeVisible();
 
-      /* 6. Live Camera: only now is the host's camera requested. */
+      /* 7. Live Camera: only now is the host's camera requested. */
       await hostPage.getByRole("button", { name: /live camera/i }).click();
 
-      /* 7. Both peer connections reach `connected`. This is the assertion the
+      /* 8. Both peer connections reach `connected`. This is the assertion the
             whole phase exists for — real media between two real browsers. */
       await expect
         .poll(async () => (await rtcStates(guestPage)).includes("connected"), {
@@ -143,14 +153,33 @@ test.describe("two-party live video call", () => {
         })
         .toBe(true);
 
-      /* 8. Both are looking at a live call surface with controls. */
+      /* 9. Both are looking at a live call surface with controls. */
       await expect(guestPage.locator(".live-call")).toBeVisible();
       await expect(hostPage.locator(".live-call")).toBeVisible();
 
-      /* 9. The guest hangs up, and the host is told. */
+      // Wait for the one connected-call snapshot to reach IndexedDB.
+      await expect(guestPage.getByText("● Recording")).toHaveCount(0);
+      await guestPage.waitForTimeout(2_000);
+
+      /* 10. The guest hangs up, and the host is told. */
       await guestPage.locator(".call-control.is-end").click();
       await expect(guestPage.getByRole("heading", { name: /call ended/i })).toBeVisible();
+      await expect(guestPage.getByText("● Recording")).toHaveCount(0);
       await expect(hostPage.locator(".live-call")).toBeHidden();
+
+      // The Free Trial image remains immediately available to admin locally.
+      await guestPage.goto("/admin/evidence");
+      const evidenceRow = guestPage.locator(".recordings-item").first();
+      await expect(evidenceRow).toContainText("free trial");
+      await expect(evidenceRow).toContainText("Local");
+      await expect(evidenceRow.locator("img.call-evidence-thumbnail")).toHaveAttribute("src", /^blob:/);
+      await evidenceRow.click();
+      await expect(guestPage.locator(".recordings-player img.call-evidence-image")).toHaveAttribute("src", /^blob:/);
+      await expect(guestPage.locator(".recordings-player")).toContainText("Free Trial");
+      await guestPage.reload();
+      await expect(guestPage.locator(".recordings-item")).toHaveCount(1);
+      await guestPage.locator(".recordings-item").first().click();
+      await expect(guestPage.locator(".recordings-player img.call-evidence-image")).toHaveAttribute("src", /^blob:/);
     } finally {
       await hostContext.close();
       await guestContext.close();
@@ -172,7 +201,7 @@ test.describe("two-party live video call", () => {
       await seedProfile(guestPage);
       await bringHostOnline(hostPage);
       await guestDials(guestPage);
-      await guestPage.getByRole("button", { name: /^continue$/i }).click();
+      await guestContinues(guestPage);
 
       const incoming = hostPage.getByRole("alertdialog");
       await expect(incoming).toBeVisible();
@@ -203,7 +232,7 @@ test.describe("two-party live video call", () => {
       await seedProfile(guestPage);
       await bringHostOnline(hostPage);
       await guestDials(guestPage);
-      await guestPage.getByRole("button", { name: /^continue$/i }).click();
+      await guestContinues(guestPage);
 
       await expect(hostPage.getByRole("alertdialog")).toBeVisible();
 

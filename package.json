@@ -3,7 +3,11 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12 <25"
+  },
   "scripts": {
+    "assets:branding": "node scripts/generate-brand-icons.mjs",
     "assets:transformation": "node scripts/copy-transformation-wasm.mjs && node scripts/fetch-transformation-models.mjs",
     "assets:jeeliz": "node scripts/prepare-jeeliz-assets.mjs",
     "predev": "pnpm assets:transformation && pnpm assets:jeeliz",
@@ -16,6 +20,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:admin-login": "playwright test --config=playwright.admin-login.config.ts",
+    "test:subscription-selector": "playwright test --config playwright.subscription-selector.config.ts",
+    "test:private-access": "playwright test --config playwright.private-access.config.ts",
     "test:transformation:browser": "playwright test --config playwright.transformation.config.ts",
     "test:transformation:benchmark": "playwright test --config playwright.transformation-hardware.config.ts"
   },
@@ -26,6 +33,7 @@
     "comlink": "^4.4.2",
     "facefilter": "3.4.3",
     "i18next": "^26.4.2",
+    "libphonenumber-js": "^1.13.14",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.15",
@@ -42,6 +50,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.0",
     "oxfmt": "^0.2.0",
+    "supabase": "^2.119.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^8.0.5",

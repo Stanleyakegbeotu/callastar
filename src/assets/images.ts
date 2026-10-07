@@ -13,4 +13,5 @@ export const images = {
    * hero does not depend on a third-party image host.
    */
   onboardingParticipant: "/media/onboarding/male-participant.jpg",
+  onboardingParticipantLandscape: "/media/onboarding/male-participant-landscape.png",
 } as const;

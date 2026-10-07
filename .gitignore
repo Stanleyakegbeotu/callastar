@@ -25,3 +25,6 @@ logs/
 /playwright-report/
 /blob-report/
 /server/signaling/node_modules/
+
+# Local Netlify folder
+.netlify

@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { logDiagnostic } from "@/lib/utils";
 import { subscriptionRepository } from "@/services/subscriptions/repository";
-import type { SubscriptionPlanId, SupportPriority } from "@/services/subscriptions/types";
+import type { SubscriptionPlanId } from "@/services/subscriptions/types";
+import { isCurrencyCode, majorAmountToMinorUnits, minorUnitsToMajorString } from "@/services/subscriptions/money";
 
 import { useToast } from "../components/ToastProvider";
 import { usePlan } from "../hooks/useCrmData";
@@ -11,10 +12,11 @@ import { AdminPageHeader } from "../layout/AdminPageHeader";
 
 interface FormState {
   displayName: string;
-  /** Whole dollars in the field; cents in storage. */
-  priceUsd: string;
+  /** Whole currency units in the field; minor units in storage. */
+  price: string;
+  currencyCode: string;
+  sortOrder: string;
   sessionDurationMinutes: string;
-  supportPriority: SupportPriority;
   description: string;
   features: string;
   isActive: boolean;
@@ -24,9 +26,8 @@ interface FormState {
 /**
  * Editing one global plan.
  *
- * The plan id is never editable: historical requests reference it, and renaming
- * "Premium" must not break what somebody already paid for. Prices are entered in
- * dollars and stored in cents, so money never passes through a float.
+ * Plan ids stay stable after migration, while admins control the displayed name,
+ * currency, price, benefits, visibility, and display order.
  */
 export function EditPlanPage() {
   const { planId } = useParams<{ planId: string }>();
@@ -41,9 +42,10 @@ export function EditPlanPage() {
     if (!plan) return;
     setForm({
       displayName: plan.displayName,
-      priceUsd: String(plan.priceUsdCents / 100),
+      price: minorUnitsToMajorString(plan.priceMinorUnits, plan.currencyCode),
+      currencyCode: plan.currencyCode,
+      sortOrder: String(plan.sortOrder),
       sessionDurationMinutes: String(plan.sessionDurationMinutes),
-      supportPriority: plan.supportPriority,
       description: plan.description,
       features: plan.features.join("\n"),
       isActive: plan.isActive,
@@ -82,9 +84,21 @@ export function EditPlanPage() {
       return;
     }
 
-    const price = Number(form.priceUsd);
+    const price = Number(form.price);
     if (!Number.isFinite(price) || price < 0) {
-      setProblem("Enter the price in US dollars, for example 39.");
+      setProblem("Enter a valid price in the selected currency.");
+      return;
+    }
+
+    const currencyCode = form.currencyCode.trim().toUpperCase();
+    if (!isCurrencyCode(currencyCode)) {
+      setProblem("Enter a valid three-letter ISO currency code, such as USD.");
+      return;
+    }
+
+    const sortOrder = Number(form.sortOrder);
+    if (!Number.isInteger(sortOrder) || sortOrder < 1) {
+      setProblem("Enter a display order of 1 or higher.");
       return;
     }
 
@@ -99,9 +113,10 @@ export function EditPlanPage() {
       await subscriptionRepository.updatePlan(plan.id, {
         displayName: name,
         // Rounded at the boundary, so a stray fraction of a cent cannot be stored.
-        priceUsdCents: Math.round(price * 100),
+        priceMinorUnits: majorAmountToMinorUnits(price, currencyCode),
+        currencyCode,
+        sortOrder,
         sessionDurationMinutes: minutes,
-        supportPriority: form.supportPriority,
         description: form.description.trim(),
         features: form.features
           .split("\n")
@@ -152,17 +167,27 @@ export function EditPlanPage() {
           </div>
 
           <div className="admin-field">
-            <label htmlFor="plan-price">Price (USD)</label>
+            <label htmlFor="plan-price">Price</label>
             <input
               id="plan-price"
               className="admin-input"
               type="number"
               min="0"
-              step="1"
-              value={form.priceUsd}
-              onChange={(event) => update("priceUsd", event.target.value)}
+              step="any"
+              value={form.price}
+              onChange={(event) => update("price", event.target.value)}
             />
-            <p className="admin-note">Prices are shown in US dollars in every language.</p>
+            <p className="admin-note">Enter the amount in the currency selected below.</p>
+          </div>
+
+          <div className="admin-field">
+            <label htmlFor="plan-currency">Currency code</label>
+            <input id="plan-currency" className="admin-input" maxLength={3} autoCapitalize="characters" value={form.currencyCode} onChange={(event) => update("currencyCode", event.target.value.toUpperCase())} />
+          </div>
+
+          <div className="admin-field">
+            <label htmlFor="plan-order">Display order</label>
+            <input id="plan-order" className="admin-input" type="number" min="1" step="1" value={form.sortOrder} onChange={(event) => update("sortOrder", event.target.value)} />
           </div>
 
           <div className="admin-field">
@@ -176,20 +201,6 @@ export function EditPlanPage() {
               value={form.sessionDurationMinutes}
               onChange={(event) => update("sessionDurationMinutes", event.target.value)}
             />
-          </div>
-
-          <div className="admin-field">
-            <label htmlFor="plan-priority">Support priority</label>
-            <select
-              id="plan-priority"
-              className="admin-input admin-select"
-              value={form.supportPriority}
-              onChange={(event) => update("supportPriority", event.target.value as SupportPriority)}
-            >
-              <option value="standard">Standard</option>
-              <option value="priority">Priority</option>
-              <option value="highest">Highest</option>
-            </select>
           </div>
 
           <div className="admin-field">

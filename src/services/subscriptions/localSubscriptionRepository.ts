@@ -60,10 +60,38 @@ function consumedBy(grant: CallAccessGrant): string | null {
 }
 
 /** Order the plans are always presented in, cheapest first. */
-const PLAN_ORDER: SubscriptionPlanId[] = ["regular", "premium", "gold"];
+const PLAN_ORDER: SubscriptionPlanId[] = ["plus", "pro"];
+
+const SHARED_PLAN_OFFERS = [
+  "Stable calls, subject to your network and device",
+  "Uninterrupted sessions when connection conditions allow",
+  "Secure conversations with built-in protections",
+  "HD video and audio where your device and connection support it",
+  "Free meet-and-greet pass included with every package",
+  "One-time access with no recurring billing",
+];
+
+function refreshPlanOffers(plan: SubscriptionPlan): SubscriptionPlan {
+  const additionalFeatures = plan.features.filter(
+    (feature) => !/customer\s*(care|support)|support\s*(queue|priority)|payment confirmation/i.test(feature),
+  ).filter((feature) => !SHARED_PLAN_OFFERS.includes(feature));
+  const features = [...SHARED_PLAN_OFFERS, ...additionalFeatures];
+  const descriptions: Partial<Record<SubscriptionPlanId, string>> = {
+    plus: "More time to enjoy your CallaStar sessions.",
+    pro: "The most time for an unhurried CallaStar session.",
+  };
+  const description = /customer care|customer support|priority/i.test(plan.description)
+    ? descriptions[plan.id] ?? plan.description
+    : plan.description;
+  const changed =
+    features.length !== plan.features.length ||
+    features.some((feature, index) => feature !== plan.features[index]) ||
+    description !== plan.description;
+  return changed ? { ...plan, description, features, updatedAt: nowIso() } : plan;
+}
 
 function byPlanOrder(a: SubscriptionPlan, b: SubscriptionPlan): number {
-  return PLAN_ORDER.indexOf(a.id) - PLAN_ORDER.indexOf(b.id);
+  return a.sortOrder - b.sortOrder || PLAN_ORDER.indexOf(a.id) - PLAN_ORDER.indexOf(b.id);
 }
 
 export const localSubscriptionRepository: SubscriptionRepository = {
@@ -76,7 +104,13 @@ export const localSubscriptionRepository: SubscriptionRepository = {
   async listPlans() {
     const plans = await runTransaction([STORE_PLANS], "readwrite", async (scope) => {
       const existing = await scope.getAll<SubscriptionPlan>(STORE_PLANS);
-      if (existing.length > 0) return existing;
+      if (existing.length > 0) {
+        const refreshed = existing.map(refreshPlanOffers);
+        for (let index = 0; index < existing.length; index += 1) {
+          if (refreshed[index] !== existing[index]) await scope.put(STORE_PLANS, refreshed[index]);
+        }
+        return refreshed;
+      }
 
       const timestamp = nowIso();
       const seeded = DEFAULT_PLANS.map((plan) => ({ ...plan, createdAt: timestamp, updatedAt: timestamp }));
@@ -130,7 +164,8 @@ export const localSubscriptionRepository: SubscriptionRepository = {
       customerEmailNormalized: normalizeEmail(input.customerEmail),
       planId: input.planId,
       planNameSnapshot: input.planNameSnapshot,
-      amountUsdCents: input.amountUsdCents,
+      amountMinorUnits: input.amountMinorUnits,
+      currencyCode: input.currencyCode,
       channel: input.channel,
       status: "awaiting_payment",
       conversationId: null,
@@ -186,6 +221,12 @@ export const localSubscriptionRepository: SubscriptionRepository = {
       await scope.put(STORE_REQUESTS, next);
       return next;
     });
+  },
+
+  async cancelRequest(id) {
+    const request = await this.getRequest(id);
+    if (!request || request.status === "confirmed" || request.status === "cancelled") return null;
+    return this.updateRequest(id, { status: "cancelled" });
   },
 
   /**

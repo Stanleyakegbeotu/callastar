@@ -1,17 +1,18 @@
 /**
- * Subscription plans are GLOBAL: every CallaStar profile uses the same three
- * plans at the same prices. Plan ids are stable and never change, so renaming
- * "Premium" in the dashboard cannot break a historical request.
+ * Subscription plans are global. Stable ids connect plans to checkout,
+ * conversations, access grants, and call evidence.
  */
-export type SubscriptionPlanId = "regular" | "premium" | "gold";
+export type SubscriptionPlanId = "plus" | "pro";
 
 export type SupportPriority = "standard" | "priority" | "highest";
 
 export interface SubscriptionPlan {
   id: SubscriptionPlanId;
   displayName: string;
-  /** Cents, so money is never held in a float. */
-  priceUsdCents: number;
+  /** Minor units for the selected ISO 4217 currency. */
+  priceMinorUnits: number;
+  currencyCode: string;
+  sortOrder: number;
   sessionDurationMinutes: number;
   supportPriority: SupportPriority;
   description: string;
@@ -26,7 +27,9 @@ export type SubscriptionPlanPatch = Partial<
   Pick<
     SubscriptionPlan,
     | "displayName"
-    | "priceUsdCents"
+    | "priceMinorUnits"
+    | "currencyCode"
+    | "sortOrder"
     | "sessionDurationMinutes"
     | "supportPriority"
     | "description"
@@ -58,7 +61,8 @@ export interface SubscriptionRequest {
   planId: SubscriptionPlanId;
   planNameSnapshot: string;
   /** Snapshotted at creation: later price edits never rewrite history. */
-  amountUsdCents: number;
+  amountMinorUnits: number;
+  currencyCode: string;
   channel: SupportChannel;
   status: SubscriptionRequestStatus;
   conversationId: string | null;
@@ -75,7 +79,8 @@ export interface CreateSubscriptionRequestInput {
   customerEmail: string;
   planId: SubscriptionPlanId;
   planNameSnapshot: string;
-  amountUsdCents: number;
+  amountMinorUnits: number;
+  currencyCode: string;
   channel: SupportChannel;
 }
 

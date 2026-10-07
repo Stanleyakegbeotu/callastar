@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { formatDateTime } from "@/lib/utils";
+import { HostAudience } from "@/components/host/HostAudience";
+import { profileAudience } from "@/services/admin/profileEngagement";
 import { adminRepository } from "@/services/admin/repository";
 import type { HostProfile } from "@/services/admin/types";
 
@@ -118,6 +120,7 @@ export function ProfileDetailPage() {
         <ProfileAvatar name={profile.displayName} assetId={profile.avatarAssetId} size="lg" />
         <div>
           <h2>{profile.displayName}</h2>
+          <HostAudience {...profileAudience(profile)} />
           {profile.shortBio ? <p>{profile.shortBio}</p> : <p className="admin-hint">No bio yet.</p>}
           <StatusBadge status={profile.status} />
         </div>
@@ -125,6 +128,18 @@ export function ProfileDetailPage() {
 
       <div className="admin-record-grid">
         <div className="admin-record-main">
+          <section className="admin-card">
+            <div className="admin-card-heading">
+              <h2 className="admin-card-label">Followers and likes</h2>
+              <Link className="admin-link" to={`/admin/profiles/${profile.id}/edit`}>Edit counts</Link>
+            </div>
+            <dl className="admin-meta-grid">
+              <div><dt>Total followers</dt><dd>{profileAudience(profile).followerCount.toLocaleString()}</dd></div>
+              <div><dt>Total likes</dt><dd>{profileAudience(profile).likeCount.toLocaleString()}</dd></div>
+              <div><dt>Follows collected in CallaStar</dt><dd>{(profile.trackedFollowerCount ?? 0).toLocaleString()}</dd></div>
+              <div><dt>Likes collected in CallaStar</dt><dd>{(profile.trackedLikeCount ?? 0).toLocaleString()}</dd></div>
+            </dl>
+          </section>
           <RemoteVideoCard profile={profile} onChanged={setProfile} />
           <RemoteAudioCard profile={profile} onChanged={setProfile} />
           <SubscriptionAccessCard profile={profile} />
@@ -143,6 +158,14 @@ export function ProfileDetailPage() {
             ) : (
               <SessionTable sessions={sessions} showHost={false} compact />
             )}
+          </section>
+
+          <section className="admin-card">
+            <div className="admin-card-heading">
+              <h2 className="admin-card-label">Call evidence</h2>
+              <Link className="admin-link" to={`/admin/evidence?hostId=${profile.id}`}>View call evidence</Link>
+            </div>
+            <p className="admin-hint">Private evidence snapshots from connected video calls for this profile.</p>
           </section>
 
           <section className="admin-card">

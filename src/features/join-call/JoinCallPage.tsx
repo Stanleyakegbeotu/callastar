@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { CallaStarLogo } from "@/components/branding/CallaStarLogo";
+import { AppHeader } from "@/components/layout/AppHeader";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { config } from "@/lib/config";
 import type { EntryOutcome } from "@/services/access/resolveEntry";
 import { createSessionId } from "@/services/callSession";
 import { useCallSession } from "@/state/CallSessionContext";
@@ -42,11 +44,17 @@ export function JoinCallPage() {
 
   // Keep session state in step with the URL, including on a deep link.
   useEffect(() => {
-    if (callType) dispatch({ type: "SET_CALL_TYPE", callType });
+    if (callType && (callType !== "audio" || config.audioCallsEnabled)) {
+      dispatch({ type: "SET_CALL_TYPE", callType });
+    }
   }, [callType, dispatch]);
 
   if (!callType) {
     return <Navigate to="/connect" replace />;
+  }
+
+  if (callType === "audio" && !config.audioCallsEnabled) {
+    return <Navigate to="/join/video" replace />;
   }
 
   /** Put the caller and host into session state, ready for a call. */
@@ -182,6 +190,7 @@ export function JoinCallPage() {
         <div className="join-backdrop-orb join-backdrop-orb-one" />
         <div className="join-backdrop-orb join-backdrop-orb-two" />
       </div>
+      <AppHeader minimal />
       <main className="form-wrap" aria-label={`Join ${callType} call`}>
         <JoinCallForm
           callType={callType}

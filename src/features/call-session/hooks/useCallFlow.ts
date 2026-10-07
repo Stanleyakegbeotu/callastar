@@ -5,7 +5,7 @@ import type { CallSessionAction } from "@/state/callSessionReducer";
 import type { CallPhase } from "@/types/call";
 
 /**
- * The SIMULATED connect-and-ring sequence.
+ * The SIMULATED request, ringing and acceptance sequence.
  *
  * This is not how a real call is paced. A real call moves when signalling says
  * it does — the host's phone rings, somebody taps Answer, ICE connects — and
@@ -30,14 +30,24 @@ export function useSimulatedCallFlow(
     if (!enabled) return undefined;
 
     if (status === "connecting") {
-      const timer = window.setTimeout(() => dispatch({ type: "START_RINGING" }), CALL_TIMINGS.connectingMs);
+      const timer = window.setTimeout(() => dispatch({ type: "START_INVITING" }), CALL_TIMINGS.connectingMs);
+      return () => window.clearTimeout(timer);
+    }
+
+    if (status === "inviting") {
+      const timer = window.setTimeout(() => dispatch({ type: "START_RINGING" }), 1_000);
       return () => window.clearTimeout(timer);
     }
 
     if (status === "ringing") {
       // Stands in for the host answering. On the real path this arrives as a
       // `call.accept` from the other phone.
-      const timer = window.setTimeout(() => dispatch({ type: "CALL_CONNECTED" }), CALL_TIMINGS.ringingMs);
+      const timer = window.setTimeout(() => dispatch({ type: "CALL_ACCEPTED" }), CALL_TIMINGS.ringingMs);
+      return () => window.clearTimeout(timer);
+    }
+
+    if (status === "accepted") {
+      const timer = window.setTimeout(() => dispatch({ type: "CALL_CONNECTED" }), 1_800);
       return () => window.clearTimeout(timer);
     }
 

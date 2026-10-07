@@ -14,6 +14,7 @@ interface IdentifyFormProps {
   busy?: boolean;
   /** The standalone page offers the language control; the overlay does not. */
   showLanguage?: boolean;
+  secureEmailAccess?: boolean;
   onSubmit: (values: { email: string; name: string }) => void;
   onCancel?: () => void;
 }
@@ -30,6 +31,7 @@ export function SupportIdentifyForm({
   initialName = "",
   busy = false,
   showLanguage = false,
+  secureEmailAccess = false,
   onSubmit,
   onCancel,
 }: IdentifyFormProps) {
@@ -44,7 +46,7 @@ export function SupportIdentifyForm({
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const problem = validateSupportEmail(email);
+        const problem = name.trim().length === 0 ? "support.nameRequired" : validateSupportEmail(email);
         setError(problem === null ? null : t(problem));
         if (problem) return;
         onSubmit({ email: email.trim(), name: name.trim() });
@@ -85,6 +87,7 @@ export function SupportIdentifyForm({
           className="cs-input"
           type="text"
           autoComplete="name"
+          required
           placeholder={t("support.namePlaceholder")}
           aria-label={t("support.namePlaceholder")}
           value={name}
@@ -102,13 +105,13 @@ export function SupportIdentifyForm({
         <span className="cs-note-icon">
           <Icon name="shield" className="size-6" />
         </span>
-        <span>{t("support.privacyNote")}</span>
+        <span>{t(secureEmailAccess ? "support.secureEmailNote" : "support.privacyNote")}</span>
       </p>
 
       <Button type="submit" disabled={busy} withArrow={false}>
         {/* Checking the format and looking for a previous conversation. It is
             never a check on the mailbox, so it never says "verified". */}
-        {busy ? t("support.checking") : t("support.continueToSupport")}
+        {busy ? t("support.checking") : secureEmailAccess ? t("support.sendAccessLink") : t("support.continueToSupport")}
       </Button>
 
       {onCancel && (

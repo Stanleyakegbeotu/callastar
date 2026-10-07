@@ -22,6 +22,7 @@ export type IconName =
   | "crown"
   | "close"
   | "star"
+  | "heart"
   | "chat"
   | "whatsapp"
   | "bell"
@@ -46,6 +47,7 @@ export type IconName =
 
 /** The icon set drawn for the approved design — paths are unchanged. */
 const paths: Record<IconName, ReactNode> = {
+  heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />,
   video: (
     <>
       <rect x="3" y="6" width="13" height="12" rx="3" />

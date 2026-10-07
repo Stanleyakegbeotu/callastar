@@ -20,7 +20,7 @@ import { deriveStudioSteps } from "./studioSteps";
 import { useSourceSelection } from "./useSourceSelection";
 import { useStudioRuntime } from "./useStudioRuntime";
 import { usePreviewExpansion } from "./usePreviewExpansion";
-import type { FaceRendererStats, FaceRootMotionDebug } from "../engine/rendering/FaceRenderer";
+import type { FaceRendererStats, FaceRootMotionDebug, MouthDebugLayer } from "../engine/rendering/FaceRenderer";
 import type { RenderMirrorMode } from "../engine/rendering/rendererMotion";
 import type { OralInteriorMode } from '../engine/rendering/liveMouthCompositor';
 import type { FaceRenderFraming } from "../engine/rendering/faceFraming";
@@ -168,6 +168,12 @@ export function TransformationStudioPage() {
   const [oralInteriorMode, setOralInteriorMode] = useState<OralInteriorMode>('auto');
   const oralInteriorModeRef = useRef<OralInteriorMode>('auto');
   oralInteriorModeRef.current = oralInteriorMode;
+  const [mouthDebugLayers, setMouthDebugLayers] = useState<Record<MouthDebugLayer, boolean>>({
+    rawOuter: false, rawInner: false, stableOuter: false, stableInner: false,
+    mask: false, feather: false,
+  });
+  const mouthDebugLayersRef = useRef(mouthDebugLayers);
+  mouthDebugLayersRef.current = mouthDebugLayers;
   const liveMouthEnabled = oralInteriorMode !== 'source';
   const liveMouthEnabledRef = useRef(true);
   liveMouthEnabledRef.current = liveMouthEnabled;
@@ -292,6 +298,7 @@ export function TransformationStudioPage() {
         liveMouthVideoRef: runtime.videoRef,
         liveMouthEnabled: liveMouthEnabledRef,
         oralInteriorMode: oralInteriorModeRef,
+        mouthDebugLayers: mouthDebugLayersRef,
         motion: runtime.motionRef,
         controls: controlsRef,
         expression: runtime.expressionRef,
@@ -914,6 +921,25 @@ export function TransformationStudioPage() {
                   <div className="studio-metric-list"><p><span>Face Detected</span><b>{summary.face?.detected ? "Yes" : "No"}</b></p><p><span>Tracking FPS</span><b>{summary.stats?.faceFps?.toFixed(1) ?? "—"}</b></p><p><span>Render FPS</span><b>{rendererStats?.fps?.toFixed(1) ?? "—"}</b></p><p><span>Yaw</span><b>{summary.face?.derived?.yaw == null ? "—" : `${(summary.face.derived.yaw * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Pitch</span><b>{summary.face?.derived?.pitch == null ? "—" : `${(summary.face.derived.pitch * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Roll</span><b>{summary.face?.derived?.roll == null ? "—" : `${(summary.face.derived.roll * 180 / Math.PI).toFixed(1)}°`}</b></p><p><span>Face Scale</span><b>{summary.face?.derived?.scale?.toFixed(2) ?? "—"}</b></p><p><span>Blend Coverage</span><b>{toolValues["Face Coverage"] ?? 88}%</b></p><p><span>Latency</span><b>{rendererStats?.renderMs?.toFixed(1) ?? "—"} ms</b></p></div>
                   <StudioControlSwitch label="Show Tracking Points" values={switches} onChange={setSwitches} onToggle={enabled => { setSwitches(current => ({ ...current, "Show Tracking Points": enabled })); runtime.setShowFace(enabled); }} /><StudioControlSwitch label="Show Face Boundary" values={switches} onChange={setSwitches} /><StudioControlSwitch label="Show Mask" values={switches} onChange={setSwitches} /><StudioControlSwitch label="Show Alignment" values={switches} onChange={setSwitches} />
                   {import.meta.env.DEV && <details className="studio-inline-advanced"><summary>Developer Diagnostics</summary><StudioControlSwitch label="Raw Direct" values={switches} onChange={setSwitches} onToggle={toggleRawDirect} /><label className="studio-sheet-slider"><span>Root Mode</span><select value={faceRootDebug.mode} onChange={event => setFaceRootDebug(current => ({ ...current, mode: event.target.value as FaceRootMotionDebug["mode"] }))}><option value="tracking">Tracking</option><option value="raw-direct">Raw Direct</option><option value="manual">Manual Root</option><option value="oscillator">Forced Oscillator</option></select></label><div className="studio-metric-list"><p><span>Frame ID</span><b>{rendererStats?.faceFrame?.frameId ?? "—"}</b></p><p><span>Root X</span><b>{rootNumber(rootProbe?.rootPosition?.x)}</b></p><p><span>Root Y</span><b>{rootNumber(rootProbe?.rootPosition?.y)}</b></p><p><span>Contour error</span><b>{rendererStats?.contourAlignment?.[0]?.errorPx.toFixed(1) ?? "—"} px</b></p><p><span>Alpha pipeline</span><b>{rendererStats?.alphaPipeline ?? "—"}</b></p></div></details>}
+                  {import.meta.env.DEV && <details className="studio-inline-advanced"><summary>Live mouth geometry · Developer</summary>
+                    <div className="studio-metric-list">{(() => {
+                      const m = rendererStats?.canonicalMouth;
+                      const values = {
+                        'Live width': m?.liveWidth, 'Rendered width': m?.renderedWidth, 'Width ratio': m?.widthRatio,
+                        'Live outer height': m?.liveOuterHeight, 'Rendered outer height': m?.renderedOuterHeight,
+                        'Live opening height': m?.liveOpeningHeight, 'Rendered opening height': m?.renderedOpeningHeight,
+                        'Opening ratio': m?.openingRatio, 'Live opening width': m?.liveOpeningWidth,
+                        'Rendered opening width': m?.renderedOpeningWidth, 'Open ratio': m?.openRatio,
+                        'Left corner X': m?.leftCorner.x, 'Left corner Y': m?.leftCorner.y,
+                        'Right corner X': m?.rightCorner.x, 'Right corner Y': m?.rightCorner.y,
+                        'Raw motion': m?.filter.rawMotion, 'Filtered motion': m?.filter.filteredMotion,
+                        'Filter alpha': m?.filter.alpha, 'Rejected points': m?.filter.rejectedPoints,
+                        'Yaw': m?.yaw, 'Pitch': m?.pitch, 'Roll': m?.roll,
+                        'Mouth processing ms': rendererStats?.mouthCompositorMs,
+                      };
+                      return Object.entries(values).map(([label,value]) => <p key={label}><span>{label}</span><b>{rootNumber(value)}</b></p>);
+                    })()}</div>
+                  </details>}
                 </>}
               </div>
           </section>
@@ -1194,6 +1220,13 @@ export function TransformationStudioPage() {
                   </select>
                 </label>
                 <span>AUTO preserves the current live mouth; SOURCE disables it for A/B comparison.</span>
+                {import.meta.env.DEV && <details className="studio-inline-advanced"><summary>Mouth geometry overlay · Developer</summary>
+                  {([['rawOuter','Green · raw outer lips'],['rawInner','Cyan · raw inner lips'],
+                    ['stableOuter','Blue · stabilized outer lips'],['stableInner','Purple · stabilized inner lips'],
+                    ['mask','Red · mouth mask boundary'],['feather','Yellow · feather boundary']] as const).map(([key,label]) =>
+                    <label key={key}><input type="checkbox" checked={mouthDebugLayers[key]}
+                      onChange={event => setMouthDebugLayers(current => ({...current,[key]:event.target.checked}))} /> {label}</label>) }
+                </details>}
               </div>
             )}
             {previewMode === "face" && rendererStats?.status === "ready" && (

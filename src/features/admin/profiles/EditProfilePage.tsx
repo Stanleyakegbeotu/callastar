@@ -9,7 +9,7 @@ import { AdminPageHeader } from "../layout/AdminPageHeader";
 import { ProfileForm, type ProfileFormValues } from "./ProfileForm";
 
 /**
- * Editing covers identity and the avatar. The remote call video is managed from
+ * Editing covers identity, the avatar and the cover photo. The remote call video is managed from
  * its own card on the detail page, where replacement is a deliberate,
  * confirmed action rather than a side effect of saving a form.
  */
@@ -38,6 +38,8 @@ export function EditProfilePage() {
         displayName: values.displayName,
         shortBio: values.shortBio,
         status: values.status,
+        baseFollowerCount: values.baseFollowerCount,
+        baseLikeCount: values.baseLikeCount,
       });
 
       // Media changes are separate writes so a failed upload cannot silently
@@ -48,6 +50,14 @@ export function EditProfilePage() {
       } else if (values.removeAvatar) {
         await adminRepository.removeAvatar(profile.id);
         toast.success("Avatar removed.");
+      }
+
+      if (values.coverFile) {
+        await adminRepository.setCover(profile.id, values.coverFile);
+        toast.success("Cover photo updated.");
+      } else if (values.removeCover) {
+        await adminRepository.removeCover(profile.id);
+        toast.success("Cover photo removed.");
       }
 
       toast.success("Profile updated.");
@@ -71,7 +81,10 @@ export function EditProfilePage() {
         initialName={profile.displayName}
         initialBio={profile.shortBio}
         initialStatus={profile.status}
+        initialFollowerCount={profile.baseFollowerCount ?? 0}
+        initialLikeCount={profile.baseLikeCount ?? 0}
         avatarAssetId={profile.avatarAssetId}
+        coverAssetId={profile.coverAssetId}
         submitting={submitting}
         submitLabel="Save changes"
         onSubmit={(values) => void handleSubmit(values)}

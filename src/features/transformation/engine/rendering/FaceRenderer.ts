@@ -33,8 +33,9 @@ import { faceWorldTransform, meshEyeSpan, type FaceRenderFraming } from "./faceF
 import { ExpressionDeformer } from "./expressionDeformer";
 import { faceWebGLContext, FACE_WEBGL_UNAVAILABLE } from './webglPreflight';
 import { VideoFrameReader } from '../../source/videoFrameReader';
-import { drawPerioralPatch, mouthMaskMetrics, perioralRegion, oralFrameFresh, MOUTH_HORIZONTAL_PAD_RATIO, MOUTH_UPPER_PAD_FACE_RATIO, MOUTH_LOWER_PAD_FACE_RATIO, type MouthPoint, type OralInteriorMode } from './liveMouthCompositor';
-import { OUTER_LIP_RING } from './sourceMesh';
+import { drawPerioralPatch, mouthMaskMetrics, perioralRegion, oralFrameFresh, type MouthPoint, type OralInteriorMode } from './liveMouthCompositor';
+import { FACE_LANDMARK_VERTICES, INNER_LIP_RING, OUTER_LIP_RING } from './sourceMesh';
+import { CanonicalMouthStabilizer, canonicalMouthRings, measureLiveMouth, mouthMeshIndices, perioralLocalRing, type MouthFilterStats } from './canonicalLiveMouth';
 import { EyeGazeWarper } from "./eyeGazeWarper";
 import { EYE_RENDER_CHANNELS, eyeGazeForRenderer } from '../eyeControls';
 import { noseCavityData, nostrilVisibility } from './noseCavities';
@@ -50,6 +51,18 @@ import {
   type BoundaryColorCorrection,
   type BoundaryRgb,
 } from "./boundaryHarmonization";
+
+const LIVE_LIP_INDICES = new Set<number>([
+  ...OUTER_LIP_RING, ...INNER_LIP_RING,
+  // The source mesh's two oral fans follow the lip rings after vertex 468.
+  ...Array.from({ length: OUTER_LIP_RING.length + INNER_LIP_RING.length + 2 },
+    (_, index) => FACE_LANDMARK_VERTICES + index),
+]);
+export type MouthDebugLayer = "rawOuter" | "rawInner" | "stableOuter" | "stableInner" | "mask" | "feather";
+const MOUTH_DEBUG_COLORS: Record<MouthDebugLayer, number> = {
+  rawOuter: 0x39e779, rawInner: 0x38e4eb, stableOuter: 0x3976ff,
+  stableInner: 0xad58ff, mask: 0xff3f55, feather: 0xffd447,
+};
 
 export type FaceRendererStatus = "loading" | "ready" | "lost" | "failed" | "disposed";
 
@@ -94,6 +107,7 @@ export interface FaceRendererStats {
   expressionMs: number | null;
   deformationMs: number | null;
   mouthCompositorMs?: number | null;
+  canonicalMouth?: CanonicalMouthDiagnostics | null;
   mouthMaskStatus?: 'disabled'|'closed'|'unavailable'|'stale'|'invalid'|'ready';
   oral?: OralDiagnostics;
   nosePerspective?: {depth:number;visibility:number;requestedPitch:number;appliedPitch:number};
@@ -161,6 +175,28 @@ export interface OralDiagnostics {
   extendedMaskActive: boolean;
 }
 
+export interface CanonicalMouthDiagnostics {
+  liveWidth: number;
+  renderedWidth: number;
+  widthRatio: number;
+  liveOuterHeight: number;
+  renderedOuterHeight: number;
+  liveOpeningHeight: number;
+  renderedOpeningHeight: number;
+  openingRatio: number;
+  liveOpeningWidth: number;
+  renderedOpeningWidth: number;
+  center: { x: number; y: number };
+  leftCorner: { x: number; y: number };
+  rightCorner: { x: number; y: number };
+  openRatio: number;
+  heightRatio: number;
+  filter: MouthFilterStats;
+  yaw: number;
+  pitch: number;
+  roll: number;
+}
+
 export interface FaceScreenProbe {
   pivot: { x: number; y: number };
   nose: { x: number; y: number };
@@ -181,6 +217,7 @@ export interface FaceRendererOptions {
   /** Experimental live-interior switch, read through a ref without restarting. */
   liveMouthEnabled?: { current: boolean };
   oralInteriorMode?: { current: OralInteriorMode };
+  mouthDebugLayers?: { current: Partial<Record<MouthDebugLayer, boolean>> };
   /** The tracking loop owns writes to this ref. Rendering never starts inference. */
   motion: { current: CalibrationMotion };
   expression?: { current: ExpressionMotion | null };
@@ -255,6 +292,10 @@ export class FaceRenderer {
   private liveMouthHasFrame = false;
   private liveMouthOpacity = 0;
   private liveMouthActive = false;
+  private readonly canonicalMouthFilter = new CanonicalMouthStabilizer();
+  private liveMouthCanonical = false;
+  private canonicalMouthDiagnostics: CanonicalMouthDiagnostics | null = null;
+  private mouthDebugLines: Partial<Record<MouthDebugLayer, import('three').LineLoop>> = {};
   private mouthMaskStatus:NonNullable<FaceRendererStats['mouthMaskStatus']>='disabled';
   private texture: import("three").Texture | null = null;
   private meshEdges: import("three").LineSegments | null = null;
@@ -573,6 +614,11 @@ export class FaceRenderer {
     this.liveMouthMaterial?.dispose();
     this.liveMouthTexture?.dispose();
     this.liveMouthGeometry?.dispose();
+    for (const line of Object.values(this.mouthDebugLines)) {
+      line.geometry.dispose();
+      (line.material as import('three').Material).dispose();
+    }
+    this.mouthDebugLines = {};
     this.texture?.dispose();
     this.textureBitmap?.close();
     this.geometry = null;
@@ -598,6 +644,9 @@ export class FaceRenderer {
     this.liveMouthHasFrame = false;
     this.liveMouthOpacity = 0;
     this.liveMouthActive = false;
+    this.liveMouthCanonical = false;
+    this.canonicalMouthDiagnostics = null;
+    this.canonicalMouthFilter.reset();
     this.texture = null;
     this.boundaryAlpha = null;
     this.textureBitmap = null;
@@ -774,32 +823,27 @@ export class FaceRenderer {
           side: three.DoubleSide, toneMapped: false,
         });
         const liveGeometry = new three.BufferGeometry();
-        const count = OUTER_LIP_RING.length + 1;
+        const count = OUTER_LIP_RING.length * 3 + 1;
         const faceLeft = meshData.localLandmarks![234]!, faceRight = meshData.localLandmarks![454]!;
         const faceWidth = Math.hypot(faceRight.x-faceLeft.x,faceRight.y-faceLeft.y);
         const lip = OUTER_LIP_RING.map(i => meshData.localLandmarks![i]!);
-        const lipCx=lip.reduce((sum,p)=>sum+p.x,0)/lip.length,lipCy=lip.reduce((sum,p)=>sum+p.y,0)/lip.length;
-        const mouthWidth=Math.max(...lip.map(p=>p.x))-Math.min(...lip.map(p=>p.x));
-        const padX=mouthWidth*MOUTH_HORIZONTAL_PAD_RATIO,padTop=faceWidth*MOUTH_UPPER_PAD_FACE_RATIO,padBottom=faceWidth*MOUTH_LOWER_PAD_FACE_RATIO;
-        const expanded=lip.map(p=>({
-          x:lipCx+(p.x-lipCx)*(1+2*padX/Math.max(1e-6,mouthWidth)),
-          y:p.y+(p.y>=lipCy?padTop:-padBottom),
-          z:p.z,
-        }));
+        const inner = INNER_LIP_RING.map(i => meshData.localLandmarks![i]!);
+        const expanded = perioralLocalRing(lip,faceWidth);
+        const all = [...expanded,...lip,...inner];
         const minX=Math.min(...expanded.map(p=>p.x)),maxX=Math.max(...expanded.map(p=>p.x));
         const minY=Math.min(...expanded.map(p=>p.y)),maxY=Math.max(...expanded.map(p=>p.y));
         const position=new Float32Array(count*3);
-        expanded.forEach((p,i)=>position.set([p.x,p.y,p.z+.003],i*3));
-        const centre=expanded.reduce((sum,p)=>({x:sum.x+p.x/count,y:sum.y+p.y/count,z:sum.z+p.z/count}),{x:0,y:0,z:0});
-        position.set([centre.x,centre.y,centre.z+.003],OUTER_LIP_RING.length*3);
-        const target = expanded.map(p => ({ x:(p.x-minX)/Math.max(1e-6,maxX-minX), y:(p.y-minY)/Math.max(1e-6,maxY-minY) }));
+        all.forEach((p,i)=>position.set([p.x,p.y,p.z+.006],i*3));
+        const centre=inner.reduce((sum,p)=>({x:sum.x+p.x/inner.length,y:sum.y+p.y/inner.length,z:sum.z+p.z/inner.length}),{x:0,y:0,z:0});
+        position.set([centre.x,centre.y,centre.z+.006],all.length*3);
+        const target = all.map(p => ({ x:(p.x-minX)/Math.max(1e-6,maxX-minX), y:(p.y-minY)/Math.max(1e-6,maxY-minY) }));
         const uv = new Float32Array(count * 2);
         for (let i = 0; i < count; i++) {
           const point = target[i] ?? { x: (centre.x-minX)/Math.max(1e-6,maxX-minX), y: (centre.y-minY)/Math.max(1e-6,maxY-minY) };
           uv[i * 2] = point.x;
           uv[i * 2 + 1] = 1 - point.y;
         }
-        const indices = new Uint16Array(OUTER_LIP_RING.flatMap((_, i) => [OUTER_LIP_RING.length, i, (i + 1) % OUTER_LIP_RING.length]));
+        const indices = mouthMeshIndices();
         liveGeometry.setAttribute('position', new three.BufferAttribute(position, 3).setUsage(three.DynamicDrawUsage));
         liveGeometry.setAttribute('uv', new three.BufferAttribute(uv, 2));
         liveGeometry.setIndex(new three.BufferAttribute(indices, 1));
@@ -811,6 +855,19 @@ export class FaceRenderer {
         // No independent image-space warp is used here: this padded mouth patch
         // is a mesh child of the same faceRoot that places the transformed face.
         faceRoot.add(liveMesh);
+        if (import.meta.env.DEV) {
+          for (const key of Object.keys(MOUTH_DEBUG_COLORS) as MouthDebugLayer[]) {
+            const debugGeometry = new three.BufferGeometry();
+            debugGeometry.setAttribute('position', new three.BufferAttribute(new Float32Array(OUTER_LIP_RING.length * 3), 3).setUsage(three.DynamicDrawUsage));
+            const debugMaterial = new three.LineBasicMaterial({ color: MOUTH_DEBUG_COLORS[key],
+              transparent: true, opacity: .9, depthTest: false, depthWrite: false });
+            const line = new three.LineLoop(debugGeometry, debugMaterial);
+            line.visible = false;
+            line.renderOrder = 12;
+            faceRoot.add(line);
+            this.mouthDebugLines[key] = line;
+          }
+        }
         this.liveMouthCanvas = canvas;
         this.liveMouthTexture = liveTexture;
         this.liveMouthMaterial = liveMaterial;
@@ -1032,6 +1089,9 @@ export class FaceRenderer {
             faceFrame.livePlacement.width,
             faceFrame.trackingAspect,
             inverse.elements,
+            0.44,
+            this.options.liveMouthEnabled?.current && this.options.oralInteriorMode?.current !== "source"
+              ? LIVE_LIP_INDICES : undefined,
           );
         }
       } else {
@@ -1053,6 +1113,7 @@ export class FaceRenderer {
         uv.needsUpdate = true;
       }
       this.updateLiveMouth(elapsed, false, expression);
+      this.updateMouthDebugVisibility();
       const started = performance.now();
       this.renderStartMs = started;
       /*
@@ -1224,6 +1285,7 @@ export class FaceRenderer {
       expressionMs: this.expressionMs,
       deformationMs: this.deformationMs,
       mouthCompositorMs: this.mouthCompositorMs,
+      canonicalMouth: this.canonicalMouthDiagnostics,
       vertexDisplacementMax: probe.vertexDisplacementMax,
       vertexDisplacementPx: probe.vertexDisplacementPx,
       faceWidthPx: probe.faceWidthPx,
@@ -1277,7 +1339,9 @@ export class FaceRenderer {
     const trustworthy = !expression?.mouth || expression.mouth.confidence >= .35;
     // SOURCE is the explicit A/B bypass. AUTO and LIVE restore the current
     // outer-lip/perioral patch; this no longer waits for a jaw-opening threshold.
-    const wantsFeed = enabled && mode !== 'source' && trustworthy && this.liveMouthActive && fresh && !!mouth && !!video && video.readyState >= 2;
+    const faceFrame = this.options.faceFrame?.current;
+    const paired = !faceFrame || faceFrame.timestampMs === mouth?.timestampMs;
+    const wantsFeed = enabled && mode !== 'source' && trustworthy && paired && this.liveMouthActive && fresh && !!mouth && !!video && video.readyState >= 2;
     const metrics=mouth && sourceFrame ? mouthMaskMetrics(mouth.ring,sourceWidth,sourceHeight) : null;
     const faceWidthPx=mouth?(mouth.faceWidthRatio || .45)*sourceWidth:0;
     const region=mouth&&sourceFrame?perioralRegion(mouth.ring,sourceWidth,sourceHeight,faceWidthPx):null;
@@ -1298,7 +1362,13 @@ export class FaceRenderer {
     if (wantsFeed && mouth && video && mouth.timestampMs !== this.liveMouthLastTimestamp && canvas) {
       const context = canvas.getContext('2d');
       if (context && sourceFrame && drawPerioralPatch(context, sourceFrame, mouth.ring,
-        sourceWidth, sourceHeight, faceWidthPx)) {
+        sourceWidth, sourceHeight, faceWidthPx, mouth.innerRing)) {
+        this.liveMouthCanonical = !!(mouth.ring.length === OUTER_LIP_RING.length &&
+          faceFrame?.livePlacement?.center && faceFrame.livePlacement.width &&
+          mouth.innerRing?.length === INNER_LIP_RING.length &&
+          this.writeCanonicalMouthGeometry(faceFrame, mouth.ring, mouth.innerRing, region,
+            sourceWidth, sourceHeight, mouth.faceWidthRatio, mouth.timestampMs));
+        if (!this.liveMouthCanonical) this.writeLegacyMouthGeometry();
         this.liveMouthLastTimestamp = mouth.timestampMs;
         this.liveMouthHasFrame = true;
         this.mouthMaskStatus='ready';
@@ -1316,6 +1386,9 @@ export class FaceRenderer {
         if (this.liveMouthTexture) this.liveMouthTexture.needsUpdate = true;
       }else{
         this.liveMouthHasFrame=false;
+        this.liveMouthCanonical=false;
+        this.canonicalMouthDiagnostics=null;
+        this.canonicalMouthFilter.reset();
         canvas.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height);
         this.liveMouthLastTimestamp=-1;
         this.liveMouthOpacity=0;
@@ -1330,6 +1403,9 @@ export class FaceRenderer {
       this.liveMouthLastTimestamp=-1;
       this.liveMouthOpacity=0;
       if(this.liveMouthTexture)this.liveMouthTexture.needsUpdate=true;
+      this.liveMouthCanonical=false;
+      this.canonicalMouthDiagnostics=null;
+      this.canonicalMouthFilter.reset();
     }
     const targetOpacity = wantsFeed && this.liveMouthHasFrame ? 1 : 0;
     this.oralDiagnostics.active = targetOpacity === 1;
@@ -1350,32 +1426,130 @@ export class FaceRenderer {
     }
     if (this.liveMouthMaterial) this.liveMouthMaterial.opacity = this.liveMouthOpacity*(this.material?.opacity ?? 1);
     if (this.fillMaterial) this.fillMaterial.opacity = (1 - this.liveMouthOpacity)*(this.material?.opacity ?? 1);
-    const position = this.liveMouthGeometry?.getAttribute('position') as import('three').BufferAttribute | undefined;
-    if (position && this.deformer) {
-      const vertices=this.deformer.positions;
-      const uv=this.liveMouthGeometry!.getAttribute('uv') as import('three').BufferAttribute;
-      const anchors=OUTER_LIP_RING.map(anchor=>({x:vertices[anchor*3]!,y:vertices[anchor*3+1]!,z:vertices[anchor*3+2]!}));
-      const cx=anchors.reduce((sum,p)=>sum+p.x,0)/anchors.length,cy=anchors.reduce((sum,p)=>sum+p.y,0)/anchors.length;
-      const width=Math.max(...anchors.map(p=>p.x))-Math.min(...anchors.map(p=>p.x));
-      const faceLeft=vertices[234*3]!,faceRight=vertices[454*3]!,faceWidth=Math.abs(faceRight-faceLeft);
-      const padX=width*MOUTH_HORIZONTAL_PAD_RATIO,padTop=faceWidth*MOUTH_UPPER_PAD_FACE_RATIO,padBottom=faceWidth*MOUTH_LOWER_PAD_FACE_RATIO;
-      const expanded=anchors.map(p=>({
-        x:cx+(p.x-cx)*(1+2*padX/Math.max(1e-6,width)),
-        y:p.y+(p.y>=cy?padTop:-padBottom),
-        z:p.z+.003,
-      }));
-      const minX=Math.min(...expanded.map(p=>p.x)),maxX=Math.max(...expanded.map(p=>p.x));
-      const minY=Math.min(...expanded.map(p=>p.y)),maxY=Math.max(...expanded.map(p=>p.y));
-      let x=0,y=0,z=0;
-      expanded.forEach((p,i)=>{position.setXYZ(i,p.x,p.y,p.z);x+=p.x;y+=p.y;z+=p.z;
-        uv.setXY(i,(p.x-minX)/Math.max(1e-6,maxX-minX),1-(p.y-minY)/Math.max(1e-6,maxY-minY));});
-      const n=OUTER_LIP_RING.length;
-      position.setXYZ(n,x/n,y/n,z/n);
-      uv.setXY(n,(x/n-minX)/Math.max(1e-6,maxX-minX),1-(y/n-minY)/Math.max(1e-6,maxY-minY));
-      uv.needsUpdate=true;
-      position.needsUpdate = true;
-    }
+    if (!this.liveMouthCanonical) this.writeLegacyMouthGeometry();
     this.mouthCompositorMs = performance.now() - started;
+  }
+
+  private writeCanonicalMouthGeometry(
+    frame: FaceFrameSnapshot, outerPixels: readonly MouthPoint[], innerPixels: readonly MouthPoint[],
+    region: ReturnType<typeof perioralRegion>, sourceWidth: number, sourceHeight: number,
+    faceWidthRatio: number,
+    timestampMs: number,
+  ): boolean {
+    const placement = frame.livePlacement;
+    if (!placement?.center || !placement.width || !region || !this.three || !this.liveMouthGeometry) return false;
+    const rotation = rendererMotionFromPose(this.pose);
+    const inverse = new this.three.Matrix4()
+      .makeRotationFromEuler(new this.three.Euler(rotation.rotationX, rotation.rotationY, rotation.rotationZ, "XYZ"))
+      .invert();
+    const raw = canonicalMouthRings(frame.landmarks, placement.center, placement.width,
+      frame.trackingAspect, inverse.elements);
+    if (!raw) return false;
+    const stable = this.canonicalMouthFilter.update(raw, timestampMs);
+    const feather = perioralLocalRing(stable.outer, .44 * (faceWidthRatio || .45) / placement.width);
+    const positions = this.liveMouthGeometry.getAttribute('position') as import('three').BufferAttribute;
+    const uvs = this.liveMouthGeometry.getAttribute('uv') as import('three').BufferAttribute;
+    const destination = [...feather, ...stable.outer, ...stable.inner];
+    // UVs come from the raw inference frame. Geometry comes from stabilized
+    // face-local landmarks, so source pixels and lip contour share one sample.
+    const rawUv = [...region.expanded,
+      ...outerPixels.map(p => ({ x: p.x * sourceWidth, y: p.y * sourceHeight })),
+      ...innerPixels.map(p => ({ x: p.x * sourceWidth, y: p.y * sourceHeight }))];
+    const bounds = region.bounds;
+    const dx = Math.max(1e-6, bounds.maxX - bounds.minX), dy = Math.max(1e-6, bounds.maxY - bounds.minY);
+    for (let i = 0; i < destination.length; i++) {
+      const point = destination[i]!, uv = rawUv[i]!;
+      positions.setXYZ(i, point.x, point.y, point.z + .006);
+      uvs.setXY(i, (uv.x - bounds.minX) / dx, 1 - (uv.y - bounds.minY) / dy);
+    }
+    const count = destination.length;
+    const innerCenter = stable.inner.reduce((sum, p) => ({ x: sum.x + p.x / stable.inner.length,
+      y: sum.y + p.y / stable.inner.length, z: sum.z + p.z / stable.inner.length }), { x: 0, y: 0, z: 0 });
+    const rawCenter = innerPixels.reduce((sum, p) => ({ x: sum.x + p.x * sourceWidth / innerPixels.length,
+      y: sum.y + p.y * sourceHeight / innerPixels.length }), { x: 0, y: 0 });
+    positions.setXYZ(count, innerCenter.x, innerCenter.y, innerCenter.z + .006);
+    uvs.setXY(count, (rawCenter.x - bounds.minX) / dx, 1 - (rawCenter.y - bounds.minY) / dy);
+    positions.needsUpdate = true;
+    uvs.needsUpdate = true;
+    const span = (a: import('../faceTypes').Point3, b: import('../faceTypes').Point3) => Math.hypot(a.x - b.x, a.y - b.y);
+    const rawWidth = span(raw.outer[0]!, raw.outer[10]!);
+    const renderedWidth = span(stable.outer[0]!, stable.outer[10]!);
+    const rawOpening = Math.max(0, raw.inner[15]!.y - raw.inner[5]!.y);
+    const renderedOpening = Math.max(0, stable.inner[15]!.y - stable.inner[5]!.y);
+    const measurements = measureLiveMouth(frame.landmarks);
+    this.canonicalMouthDiagnostics = {
+      liveWidth: rawWidth, renderedWidth, widthRatio: renderedWidth / Math.max(1e-6, rawWidth),
+      liveOuterHeight: span(raw.outer[15]!, raw.outer[5]!),
+      renderedOuterHeight: span(stable.outer[15]!, stable.outer[5]!),
+      liveOpeningHeight: rawOpening, renderedOpeningHeight: renderedOpening,
+      openingRatio: rawOpening > 1e-6 ? renderedOpening / rawOpening : renderedOpening < 1e-6 ? 1 : 0,
+      liveOpeningWidth: span(raw.inner[0]!, raw.inner[10]!),
+      renderedOpeningWidth: span(stable.inner[0]!, stable.inner[10]!),
+      center: { x: measurements?.center.x ?? 0, y: measurements?.center.y ?? 0 },
+      leftCorner: { x: measurements?.leftCorner.x ?? 0, y: measurements?.leftCorner.y ?? 0 },
+      rightCorner: { x: measurements?.rightCorner.x ?? 0, y: measurements?.rightCorner.y ?? 0 },
+      openRatio: measurements?.openRatio ?? 0, heightRatio: measurements?.heightRatio ?? 0,
+      filter: this.canonicalMouthFilter.stats,
+      yaw: this.pose.yaw, pitch: this.pose.pitch, roll: this.pose.roll,
+    };
+    if (import.meta.env.DEV && (this.canonicalMouthDiagnostics.widthRatio > 1.15 ||
+      this.canonicalMouthDiagnostics.widthRatio < .85)) {
+      console.warn('Live mouth width departed from measured width', this.canonicalMouthDiagnostics.widthRatio);
+    }
+    if (import.meta.env.DEV) {
+      const featherEdge = feather.map(p => ({ ...p,
+        x: p.x + (p.x - innerCenter.x) * .025,
+        y: p.y + (p.y - innerCenter.y) * .025 }));
+      this.writeMouthDebugLine('rawOuter', raw.outer);
+      this.writeMouthDebugLine('rawInner', raw.inner);
+      this.writeMouthDebugLine('stableOuter', stable.outer);
+      this.writeMouthDebugLine('stableInner', stable.inner);
+      this.writeMouthDebugLine('mask', feather);
+      this.writeMouthDebugLine('feather', featherEdge);
+    }
+    return true;
+  }
+
+  private writeMouthDebugLine(key: MouthDebugLayer, points: readonly import('../faceTypes').Point3[]): void {
+    const line = this.mouthDebugLines[key];
+    if (!line) return;
+    const attribute = line.geometry.getAttribute('position') as import('three').BufferAttribute;
+    points.forEach((point, index) => attribute.setXYZ(index, point.x, point.y, point.z + .012));
+    attribute.needsUpdate = true;
+  }
+
+  private updateMouthDebugVisibility(): void {
+    if (!import.meta.env.DEV) return;
+    const selection = this.options.mouthDebugLayers?.current;
+    for (const key of Object.keys(this.mouthDebugLines) as MouthDebugLayer[]) {
+      this.mouthDebugLines[key]!.visible = !!(this.liveMouthCanonical && this.liveMouthHasFrame && selection?.[key]);
+    }
+  }
+
+  /** Kept for unpaired developer fixtures; production frames use canonical rings. */
+  private writeLegacyMouthGeometry(): void {
+    const position = this.liveMouthGeometry?.getAttribute('position') as import('three').BufferAttribute | undefined;
+    const uv = this.liveMouthGeometry?.getAttribute('uv') as import('three').BufferAttribute | undefined;
+    if (!position || !uv || !this.deformer) return;
+    const vertices = this.deformer.positions;
+    const outer = OUTER_LIP_RING.map(index => ({ x: vertices[index * 3]!, y: vertices[index * 3 + 1]!, z: vertices[index * 3 + 2]! }));
+    const inner = INNER_LIP_RING.map(index => ({ x: vertices[index * 3]!, y: vertices[index * 3 + 1]!, z: vertices[index * 3 + 2]! }));
+    const faceWidth = Math.abs(vertices[454 * 3]! - vertices[234 * 3]!);
+    const all = [...perioralLocalRing(outer, faceWidth), ...outer, ...inner];
+    const xs = all.slice(0, 20).map(p => p.x), ys = all.slice(0, 20).map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    all.forEach((point, i) => {
+      position.setXYZ(i, point.x, point.y, point.z + .006);
+      uv.setXY(i, (point.x - minX) / Math.max(1e-6, maxX - minX),
+        (point.y - minY) / Math.max(1e-6, maxY - minY));
+    });
+    const center = inner.reduce((sum, p) => ({ x: sum.x + p.x / inner.length,
+      y: sum.y + p.y / inner.length, z: sum.z + p.z / inner.length }), { x: 0, y: 0, z: 0 });
+    position.setXYZ(all.length, center.x, center.y, center.z + .006);
+    uv.setXY(all.length, (center.x - minX) / Math.max(1e-6, maxX - minX),
+      (center.y - minY) / Math.max(1e-6, maxY - minY));
+    position.needsUpdate = true;
+    uv.needsUpdate = true;
   }
 
   /** Apply both the conservative M7 envelope and the measured source envelope. */

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { CallaStarLogo } from "@/components/branding/CallaStarLogo";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { config } from "@/lib/config";
 import { callSupport, type CallSupportReason } from "@/services/device/deviceCapability";
 import { useCallSession } from "@/state/CallSessionContext";
 import { useClearStaleSession } from "@/state/useClearStaleSession";
@@ -41,7 +42,7 @@ export function CallTypePage() {
   const { t } = useTranslation();
   useClearStaleSession();
   const { session, dispatch } = useCallSession();
-  const callType = session.type;
+  const callType = config.audioCallsEnabled ? session.type : "video";
 
   /** Set when a chosen type cannot run here, which shows the gate instead. */
   const [blocked, setBlocked] = useState<CallSupportReason | null>(null);
@@ -61,11 +62,11 @@ export function CallTypePage() {
       <DeviceGateScreen
         reason={blocked}
         callId={session.callId || undefined}
-        onContinueWithAudio={() => {
+        onContinueWithAudio={config.audioCallsEnabled ? () => {
           dispatch({ type: "SET_CALL_TYPE", callType: "audio" });
           setBlocked(null);
           navigate("/join/audio");
-        }}
+        } : undefined}
         onGoHome={() => navigate("/")}
       />
     );
@@ -90,6 +91,7 @@ export function CallTypePage() {
               type="button"
               role="radio"
               aria-checked={callType === option.type}
+              disabled={option.type === "audio" && !config.audioCallsEnabled}
               className={`cs-option ${callType === option.type ? "cs-option-selected" : ""}`.trim()}
               key={option.type}
               onClick={() => dispatch({ type: "SET_CALL_TYPE", callType: option.type })}

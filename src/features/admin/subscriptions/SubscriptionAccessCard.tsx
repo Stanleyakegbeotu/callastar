@@ -12,7 +12,7 @@ import type { SubscriptionPlan, SubscriptionPlanId } from "@/services/subscripti
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/ToastProvider";
 import { usePlans } from "../hooks/useCrmData";
-import { formatUsdCents } from "./subscriptionInsights";
+import { formatPlanPrice } from "./subscriptionInsights";
 
 /**
  * Admin → Profile → Subscription Access.
@@ -134,7 +134,7 @@ export function SubscriptionAccessCard({ profile }: { profile: HostProfile }) {
                     </span>
                     {/* Read from the stored plan, never written into this file. */}
                     <span className="access-plan-meta">
-                      {formatUsdCents(plan.priceUsdCents)} USD · Up to {plan.sessionDurationMinutes} minutes per
+                      {formatPlanPrice(plan.priceMinorUnits, plan.currencyCode)} · Up to {plan.sessionDurationMinutes} minutes per
                       supported session
                     </span>
                   </div>

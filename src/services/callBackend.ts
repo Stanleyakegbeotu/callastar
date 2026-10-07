@@ -1,9 +1,8 @@
-import { normalizeCallId } from "@/lib/callId";
 import { config } from "@/lib/config";
-import { DEMO_CALL_ID, MOCK_HOST } from "@/lib/constants";
 import { requireSupabase } from "@/lib/supabase/client";
 import { logDiagnostic } from "@/lib/utils";
 import { adminRepository } from "@/services/admin/repository";
+import { sendAdminEvent } from "@/services/notifications/adminEvents";
 import type {
   CallEventMetadata,
   CallEventType,
@@ -67,6 +66,14 @@ export interface CallSessionRecorder {
   event(sessionId: string, type: CallEventType, metadata?: CallEventMetadata): Promise<void>;
 }
 
+const cloudSessionCredentials = new Map<string, Promise<CallSessionCredentials>>();
+
+/** Opaque credential pair held in memory and used only for this live call. */
+export async function getCloudCallSessionCredentials(localSessionId: string): Promise<CallSessionCredentials | null> {
+  const pending = cloudSessionCredentials.get(localSessionId);
+  return pending ? await pending : null;
+}
+
 function shortName(displayName: string): string {
   return displayName.split(/\s+/)[0] || displayName;
 }
@@ -83,7 +90,11 @@ const supabaseBackend: CallBackend = {
         displayName: data.host.displayName,
         shortName: shortName(data.host.displayName),
         avatarUrl: data.host.avatarUrl ?? "",
+        coverUrl: data.host.coverUrl ?? null,
         shortBio: data.host.shortBio,
+        followerCount: data.host.followerCount,
+        likeCount: data.host.likeCount,
+        available: data.host.status !== "inactive",
       },
     };
   },
@@ -92,6 +103,7 @@ const supabaseBackend: CallBackend = {
       body: { code, callType, caller },
     });
     if (error || !data?.sessionId || !data?.sessionToken) throw new Error("We couldn't start your call.");
+    sendAdminEvent("new_call", data.sessionId, `${caller.fullName} started a ${callType} call with ${data.host.displayName}.`);
     return {
       sessionId: data.sessionId,
       sessionToken: data.sessionToken,
@@ -100,6 +112,8 @@ const supabaseBackend: CallBackend = {
         displayName: data.host.displayName,
         shortName: shortName(data.host.displayName),
         avatarUrl: data.host.avatarUrl ?? "",
+        coverUrl: data.host.coverUrl ?? null,
+        available: true,
       },
     };
   },
@@ -108,6 +122,8 @@ const supabaseBackend: CallBackend = {
       body: { ...credentials, status },
     });
     if (error) throw new Error("Unable to update call status.");
+    if (status === "active") sendAdminEvent("call_answered", credentials.sessionId, "A host answered the call.");
+    if (status === "ended") sendAdminEvent("call_completed", credentials.sessionId, "The call has ended.");
   },
   async getSessionMedia(credentials) {
     const { data, error } = await requireSupabase().functions.invoke("get-session-media", { body: credentials });
@@ -118,6 +134,35 @@ const supabaseBackend: CallBackend = {
     // Signed media is session-scoped: this arrives once the call session
     // handshake is wired to `startCallSession` / `getSessionMedia`.
     return { available: false };
+  },
+  sessions: {
+    async create(input) {
+      const pending = (async () => {
+        const { data, error } = await requireSupabase().functions.invoke("start-call-session", {
+          body: { code: input.callIdSnapshot, callType: input.callType, caller: input.caller },
+        });
+        if (error || !data?.sessionId || !data?.sessionToken) throw new Error("Call session could not be recorded.");
+        return { sessionId: data.sessionId as string, sessionToken: data.sessionToken as string };
+      })();
+      cloudSessionCredentials.set(input.id, pending);
+      await pending;
+    },
+    async transition(localSessionId, patch) {
+      const credentials = await getCloudCallSessionCredentials(localSessionId);
+      if (!credentials) throw new Error("Call session credentials are unavailable.");
+      const { error } = await requireSupabase().functions.invoke("update-call-session", {
+        body: { ...credentials, status: patch.status, endedAt: patch.endedAt, durationSeconds: patch.durationSeconds, failureCode: patch.failureCode },
+      });
+      if (error) throw new Error("Call status could not be recorded.");
+    },
+    async event(localSessionId, type, metadata) {
+      const credentials = await getCloudCallSessionCredentials(localSessionId);
+      if (!credentials) throw new Error("Call session credentials are unavailable.");
+      const { error } = await requireSupabase().functions.invoke("update-call-session", {
+        body: { ...credentials, eventType: type, metadata: metadata ?? {} },
+      });
+      if (error) throw new Error("Call event could not be recorded.");
+    },
   },
 };
 
@@ -137,7 +182,10 @@ const localBackend: CallBackend = {
         displayName: profile.displayName,
         shortName: shortName(profile.displayName),
         avatarUrl: profile.avatarDataUrl,
+        coverUrl: profile.coverDataUrl,
         shortBio: profile.shortBio,
+        followerCount: profile.followerCount,
+        likeCount: profile.likeCount,
         remoteVideoRef: profile.remoteVideoAssetId,
         remoteAudioRef: profile.remoteAudioAssetId,
         available: profile.status === "active",
@@ -186,34 +234,16 @@ const localBackend: CallBackend = {
   },
 };
 
-const mockBackend: CallBackend = {
-  async resolveCallId(code) {
-    return normalizeCallId(code) === normalizeCallId(DEMO_CALL_ID) ? { found: true, host: MOCK_HOST } : { found: false };
-  },
-  async startCallSession() {
-    return { sessionId: `mock_${crypto.randomUUID()}`, sessionToken: crypto.randomUUID(), host: MOCK_HOST };
-  },
-  async updateCallSession() {},
-  async getSessionMedia() {
-    return { available: false };
-  },
-  async getRemoteMedia() {
-    return { available: false };
-  },
-};
-
 function selectBackend(): CallBackend {
   switch (config.callBackend) {
     case "local":
       return localBackend;
-    case "mock":
-      return mockBackend;
     case "supabase":
       return supabaseBackend;
   }
 }
 
-/** Mock and local are deliberately opt-in, never a fallback when Supabase fails. */
+/** Local development and Supabase production paths are selected by configuration. */
 export const callBackend: CallBackend = selectBackend();
 
 /** Call logging must never interrupt a call, so failures only reach the console. */

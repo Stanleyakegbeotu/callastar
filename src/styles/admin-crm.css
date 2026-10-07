@@ -355,16 +355,57 @@
  */
 .admin-chat-panel {
   display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--white);
+  box-shadow: 0 0.5rem 1.5rem oklch(0.2 0.04 258 / 0.06);
 }
 
 .admin-chat-panel .chat-shell {
-  height: min(32rem, 70vh);
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
   border: 0;
   border-radius: 0;
+}
+
+.admin-page-content:has(> .admin-support-thread-page) {
+  display: flex;
+  height: calc(100dvh - 4.25rem);
+  min-height: 30rem;
+  flex-direction: column;
+  padding-bottom: 1.25rem;
+}
+
+.admin-support-thread-page {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.admin-support-thread-page .admin-page-header {
+  flex: none;
+  margin-bottom: 1rem;
+}
+
+.admin-support-thread-page .admin-note {
+  flex: none;
+  margin: 0 0 0.75rem;
+}
+
+.admin-chat-panel .chat-header,
+.admin-chat-panel .chat-composer-wrap {
+  flex: none;
+}
+
+.admin-chat-panel .chat-thread {
+  min-height: 0;
 }
 
 /* Inside the dashboard the back button duplicates the breadcrumb above it. */
@@ -458,5 +499,30 @@ body:has(.admin-chat-panel.is-expanded) {
 
   body:has(.admin-chat-panel.is-expanded) {
     overflow: visible;
+  }
+}
+
+@media (max-width: 60rem) {
+  .admin-page-content:has(> .admin-support-thread-page) {
+    height: calc(100dvh - 4rem);
+    min-height: 34rem;
+    padding-top: 1rem;
+    padding-bottom: max(0.75rem, var(--safe-bottom));
+  }
+
+  .admin-support-thread-page .admin-page-header {
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  .admin-chat-panel {
+    border-radius: 1rem;
+  }
+
+  .admin-chat-panel .chat-header {
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
   }
 }

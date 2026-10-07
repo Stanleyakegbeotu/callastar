@@ -3,27 +3,18 @@ import { Navigate } from "react-router-dom";
 
 import { supabase } from "@/lib/supabase/client";
 
-import { hasDevelopmentSession, isDevelopmentAdminEnabled } from "./auth/adminAuth";
+import { hasActiveAdminAccess } from "./auth/adminAccess";
 
 type Access = "checking" | "allowed" | "denied";
 
 /**
- * Admin access gate.
- *
- * Two mutually exclusive paths. In a development build with
- * `VITE_ADMIN_AUTH_MODE=development`, a local session is enough. Otherwise the
- * Supabase session must exist AND be listed in `admin_profiles` — a production
- * build only ever takes that second path.
+ * Admin access gate: an active admin profile attached to the restored
+ * Supabase Auth session is required in every build.
  */
 export function AdminRoute({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<Access>(() => (isDevelopmentAdminEnabled() ? "checking" : "checking"));
+  const [state, setState] = useState<Access>("checking");
 
   useEffect(() => {
-    if (isDevelopmentAdminEnabled()) {
-      setState(hasDevelopmentSession() ? "allowed" : "denied");
-      return;
-    }
-
     const client = supabase;
     if (!client) {
       setState("denied");
@@ -31,20 +22,27 @@ export function AdminRoute({ children }: { children: ReactNode }) {
     }
 
     let active = true;
+    let checkId = 0;
     const check = async () => {
+      const currentCheck = ++checkId;
       const {
         data: { session },
       } = await client.auth.getSession();
       if (!session) {
-        if (active) setState("denied");
+        if (active && currentCheck === checkId) setState("denied");
         return;
       }
-      const { data } = await client
+      const { data: profile, error } = await client
         .from("admin_profiles")
-        .select("user_id")
+        .select("user_id, role, is_active")
         .eq("user_id", session.user.id)
         .maybeSingle();
-      if (active) setState(data ? "allowed" : "denied");
+      if (error || !hasActiveAdminAccess(profile)) {
+        await client.auth.signOut();
+        if (active && currentCheck === checkId) setState("denied");
+        return;
+      }
+      if (active && currentCheck === checkId) setState("allowed");
     };
 
     void check();

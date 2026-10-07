@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 
-import { SUPPORT } from "@/lib/config";
 import { LOCAL_EVENT_CHANNEL } from "@/lib/localEvents";
 import { normalizePhoneDigits } from "@/lib/phone";
 import { logDiagnostic } from "@/lib/utils";
-import { settingsRepository } from "@/services/settings/repository";
+import { getPublicSupportSettings } from "@/services/settings/publicSettingsRepository";
 
 export interface WhatsappSupportNumber {
   /** Digits only, ready for a `wa.me` link, or null when none is usable. */
@@ -31,21 +30,17 @@ export function useWhatsappSupportNumber(): WhatsappSupportNumber {
     let cancelled = false;
 
     const read = () => {
-      void settingsRepository
-        .getAppSettings()
+      void getPublicSupportSettings()
         .then((settings) => {
           if (cancelled) return;
           const saved = settings.whatsappSupportNumber;
-          const resolved = saved && saved.length > 0 ? saved : normalizePhoneDigits(SUPPORT.fallbackWhatsappNumber);
+          const resolved = normalizePhoneDigits(saved ?? "");
           setNumber(resolved.length > 0 ? resolved : null);
         })
         .catch((error: unknown) => {
           logDiagnostic("support-number", error);
           if (cancelled) return;
-          // Storage being unavailable must not silently hide a configured
-          // fallback, so the env value still gets its chance.
-          const fallback = normalizePhoneDigits(SUPPORT.fallbackWhatsappNumber);
-          setNumber(fallback.length > 0 ? fallback : null);
+          setNumber(null);
         })
         .finally(() => {
           if (!cancelled) setLoading(false);

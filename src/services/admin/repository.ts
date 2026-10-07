@@ -1,4 +1,5 @@
 import { config, type AdminDataMode } from "@/lib/config";
+import type { EngagementChange, EngagementSnapshot } from "./profileEngagement";
 
 import { localAdminRepository } from "./localAdminRepository";
 import { supabaseAdminRepository } from "./supabaseAdminRepository";
@@ -33,12 +34,16 @@ export interface AdminRepository {
   createProfile(input: CreateProfileInput): Promise<HostProfile>;
   updateProfile(id: string, input: UpdateProfileInput): Promise<HostProfile>;
   deleteProfile(id: string): Promise<void>;
+  getProfileEngagement(profileId: string, callerEmail: string): Promise<EngagementSnapshot>;
+  setProfileEngagement(profileId: string, callerEmail: string, change: EngagementChange): Promise<EngagementSnapshot>;
 
   /** Replaces the current code; the previous one stops resolving immediately. */
   regenerateCallId(id: string): Promise<HostProfile>;
 
   setAvatar(id: string, file: File): Promise<HostProfile>;
   removeAvatar(id: string): Promise<HostProfile>;
+  setCover(id: string, file: File): Promise<HostProfile>;
+  removeCover(id: string): Promise<HostProfile>;
   setRemoteVideo(id: string, file: File): Promise<HostProfile>;
   removeRemoteVideo(id: string): Promise<HostProfile>;
   /** The voice a profile is heard with on an audio call. Zero or one. */

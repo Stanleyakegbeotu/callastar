@@ -9,7 +9,7 @@ import { measureEyeGeometry, eyeStateFromGeometry, EYE_RENDER_CHANNELS, type Eye
 import { measureMouthControls, measureMouthGeometry, smoothMouth, type MouthControlFrame } from './mouthControls';
 import { noseControls, type NoseControlFrame } from './noseControls';
 import { mouthNoseLocalLandmarks } from './mouthNoseLocalGeometry';
-import { OUTER_LIP_RING } from './rendering/sourceMesh';
+import { INNER_LIP_RING, OUTER_LIP_RING } from './rendering/sourceMesh';
 
 const BROW_FULL_RAISE = 0.085;
 const localScratch: Point3[] = [];
@@ -63,7 +63,7 @@ export interface ExpressionMotion extends ExpressionValues {
   /** Local inner-lip aperture and chin drop, retained for jaw diagnostics. */
   mouthAperture?: { ratio: number | null; jawDrop: number | null };
   /** Ephemeral landmarks only; consumed in-memory by the optional compositor. */
-  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[]; faceWidthRatio: number; sourceFrame?: HTMLCanvasElement };
+  liveMouth?: { timestampMs: number; ring: { x: number; y: number }[]; innerRing?: { x: number; y: number }[]; faceWidthRatio: number; sourceFrame?: HTMLCanvasElement };
   /** Per-eye blink state and the closure measured before it shaped the value. */
   blinkState?: {
     left: "open" | "closing" | "closed" | "opening";
@@ -275,6 +275,7 @@ export function computeExpressionMotion(
     liveMouth: hasMesh ? {
       timestampMs: face.timestampMs,
       ring: OUTER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
+      innerRing: INNER_LIP_RING.map(index => ({ x: face.landmarks[index]!.x, y: face.landmarks[index]!.y })),
       // x is normalized by frame width, so the renderer multiplies by the
       // current tracking-frame width to recover face width in pixels.
       faceWidthRatio: Math.abs(face.landmarks[454]!.x - face.landmarks[234]!.x),

@@ -22,6 +22,9 @@ export interface CallSessionState extends CallSession {
    * attempt is already in flight.
    */
   attempt: number;
+  /** Host answered, before media negotiation finishes. */
+  answeredAt: number | null;
+  sessionCreatedAt: number | null;
 }
 
 export type CallSessionAction =
@@ -85,6 +88,8 @@ export const initialCallSessionState: CallSessionState = {
   remoteSource: EMPTY_REMOTE_SOURCE,
   permission: "unknown",
   attempt: 0,
+  answeredAt: null,
+  sessionCreatedAt: null,
 };
 
 /**
@@ -104,7 +109,7 @@ const ALLOWED_FROM: Partial<Record<CallSessionAction["type"], readonly CallPhase
   REQUEST_PERMISSIONS: ["preparing", "resolving", "failed"],
   PERMISSIONS_GRANTED: ["requesting_permissions"],
   PERMISSIONS_DENIED: ["requesting_permissions"],
-  START_INVITING: ["requesting_permissions", "resolving", "preparing"],
+  START_INVITING: ["requesting_permissions", "resolving", "preparing", "connecting"],
   START_RINGING: ["inviting", "connecting"],
   CALL_ACCEPTED: ["ringing", "inviting"],
   START_SOURCE_SELECTION: ["accepted"],
@@ -203,6 +208,8 @@ export function callSessionReducer(state: CallSessionState, action: CallSessionA
         // answer a previous attempt got.
         permission: "unknown",
         attempt: 0,
+        answeredAt: null,
+        sessionCreatedAt: Date.now(),
       };
 
     case "START_RESOLVING":
@@ -248,7 +255,7 @@ export function callSessionReducer(state: CallSessionState, action: CallSessionA
     case "CALL_ACCEPTED":
       // Answered, but not yet connected: the host still has to choose a source.
       // The caller sees "Connecting…" from here rather than a continuing ring.
-      return { ...state, status: "accepted" };
+      return { ...state, status: "accepted", answeredAt: state.answeredAt ?? Date.now() };
 
     case "START_SOURCE_SELECTION":
       return { ...state, status: "source_selection" };

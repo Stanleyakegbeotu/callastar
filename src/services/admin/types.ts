@@ -12,18 +12,24 @@ import type { CallType } from "@/types/call";
 
 export type ProfileStatus = "active" | "inactive";
 
-export type AssetKind = "avatar" | "remote_video" | "remote_audio";
+export type AssetKind = "avatar" | "cover" | "remote_video" | "remote_audio";
 
 export interface HostProfile {
   id: string;
   displayName: string;
   shortBio: string;
   status: ProfileStatus;
+  /** Counts entered by an administrator, before activity collected in CallaStar. */
+  baseFollowerCount?: number;
+  baseLikeCount?: number;
+  trackedFollowerCount?: number;
+  trackedLikeCount?: number;
   /** Display form, e.g. CS-7K4P-Q9MX-2J8R. One current Call ID per profile. */
   callId: string;
   /** Normalised lookup key for the same code; this is what the index holds. */
   callIdKey: string;
   avatarAssetId: string | null;
+  coverAssetId?: string | null;
   remoteVideoAssetId: string | null;
   /**
    * The voice this profile is heard with on an audio call. Zero or one, like
@@ -56,7 +62,10 @@ export interface CreateProfileInput {
   displayName: string;
   shortBio: string;
   status: ProfileStatus;
+  baseFollowerCount?: number;
+  baseLikeCount?: number;
   avatarFile?: File | null;
+  coverFile?: File | null;
   remoteVideoFile?: File | null;
   remoteAudioFile?: File | null;
 }
@@ -65,6 +74,8 @@ export interface UpdateProfileInput {
   displayName?: string;
   shortBio?: string;
   status?: ProfileStatus;
+  baseFollowerCount?: number;
+  baseLikeCount?: number;
 }
 
 /** A profile plus its remote media metadata, for the media overview. */
@@ -84,7 +95,10 @@ export interface PublicHostProfile {
   id: string;
   displayName: string;
   shortBio: string;
+  followerCount?: number;
+  likeCount?: number;
   avatarDataUrl: string;
+  coverDataUrl: string | null;
   remoteVideoAssetId: string | null;
   /** Played instead of the video on an audio call, when one was uploaded. */
   remoteAudioAssetId: string | null;
@@ -109,8 +123,8 @@ export type ProfileReadiness = "ready" | "incomplete" | "inactive";
  * one addition: `callIdSnapshot` keeps the code that was dialled, so history
  * still reads correctly after a profile regenerates its Call ID.
  *
- * Nothing about the media itself is stored here - no frames, no recordings, no
- * copy of the remote video.
+ * One optional screenshot is stored separately as private call evidence. This
+ * record contains call history only, never image data or public media URLs.
  */
 /**
  * `declined` and `no_answer` are outcomes in their own right rather than

@@ -6,6 +6,7 @@ import { buildWhatsappLink } from "@/lib/phone";
 import { logDiagnostic } from "@/lib/utils";
 import { subscriptionRepository } from "@/services/subscriptions/repository";
 import type { SubscriptionPlan, SubscriptionRequest, SupportChannel } from "@/services/subscriptions/types";
+import { formatMinorUnits } from "@/services/subscriptions/money";
 
 /**
  * Whether this call is allowed to keep going.
@@ -53,8 +54,10 @@ export interface CallAccessGate {
   choosePlan: (plan: SubscriptionPlan) => void;
   backToPlans: () => void;
   startPayment: (channel: SupportChannel, customerEmail: string) => Promise<SubscriptionRequest | null>;
+  /** End a source-based free preview after its final reconnecting interlude. */
+  finishPreview: () => void;
   /** The WhatsApp destination for a request, or null when unavailable. */
-  whatsappLinkFor: (request: SubscriptionRequest) => string | null;
+  whatsappLinkFor: (request: SubscriptionRequest, message?: string) => string | null;
 }
 
 function randomBetween(min: number, max: number): number {
@@ -271,7 +274,8 @@ export function useCallAccessGate({
           customerEmail: email,
           planId: selectedPlan.id,
           planNameSnapshot: selectedPlan.displayName,
-          amountUsdCents: selectedPlan.priceUsdCents,
+          amountMinorUnits: selectedPlan.priceMinorUnits,
+          currencyCode: selectedPlan.currencyCode,
           channel,
         });
         setRequest(created);
@@ -286,13 +290,29 @@ export function useCallAccessGate({
     [profileId, profileName, selectedPlan, sessionId],
   );
 
+  const finishPreview = useCallback(() => {
+    if (authorized || settled.current) return;
+    settled.current = true;
+    setStatus("required");
+    callbacks.current.onAccessRequired();
+  }, [authorized]);
+
   const whatsappLinkFor = useCallback(
-    (target: SubscriptionRequest) =>
-      buildWhatsappLink(
-        whatsappNumber,
-        `Hello CallaStar Support. I would like to complete my ${target.planNameSnapshot} access request. Request reference: ${target.reference}.`,
-      ),
-    [whatsappNumber],
+    (target: SubscriptionRequest, message?: string) => {
+      const price = formatMinorUnits(target.amountMinorUnits, target.currencyCode);
+      const features = selectedPlan?.features.map((feature) => `- ${feature}`).join("\n") ?? "";
+      const duration = selectedPlan?.sessionDurationMinutes;
+      const details = [
+        `Hello CallaStar Support. I am ready to subscribe to ${target.planNameSnapshot} for ${price}.`,
+        duration ? `It includes sessions of up to ${duration} minutes.` : "",
+        features ? `Package offers:\n${features}` : "",
+        `Please help me complete the subscription. Request reference: ${target.reference}.`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      return buildWhatsappLink(whatsappNumber, message ?? details);
+    },
+    [selectedPlan, whatsappNumber],
   );
 
   return {
@@ -306,10 +326,12 @@ export function useCallAccessGate({
     openPlans: useCallback(() => setStatus("selecting_plan"), []),
     choosePlan: useCallback((plan: SubscriptionPlan) => {
       setSelectedPlan(plan);
+      setRequest(null);
       setStatus("payment_method");
     }, []),
     backToPlans: useCallback(() => setStatus("selecting_plan"), []),
     startPayment,
+    finishPreview,
     whatsappLinkFor,
   };
 }

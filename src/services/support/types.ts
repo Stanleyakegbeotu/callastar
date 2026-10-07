@@ -1,3 +1,6 @@
+import type { SubscriptionPlanId, SupportChannel } from "@/services/subscriptions/types";
+import type { PaymentMethod } from "./paymentMethods";
+
 /**
  * Customer care: a conversation between one customer and CallaStar support.
  *
@@ -10,7 +13,45 @@
 
 export type ConversationStatus = "open" | "pending" | "resolved";
 
-export type MessageSender = "customer" | "admin";
+export type MessageSender = "customer" | "admin" | "assistant";
+
+export type SupportMessageAction =
+  | { type: "select_payment_method"; value: PaymentMethod }
+  | { type: "continue_payment_method_selection" }
+  | { type: "payment_method_help" };
+
+export type SubscriptionFollowupStatus =
+  | "awaiting_decision"
+  | "awaiting_payment_method"
+  | "payment_method_selected"
+  | "awaiting_specialist"
+  | "needs_help"
+  | "admin_handoff";
+
+export type SupportConversationMode = "payment" | "support";
+
+export interface SupportCheckoutDraft {
+  sessionId?: string;
+  profileId: string;
+  profileName: string;
+  planId: SubscriptionPlanId;
+  planName: string;
+  description?: string;
+  features?: string[];
+  priceMinorUnits: number;
+  currencyCode: string;
+  sortOrder: number;
+  sessionDurationMinutes: number;
+  channel: SupportChannel;
+  /** Stable per-package checkout attempt, so stale button events cannot apply. */
+  checkoutIntentId?: string;
+  conversationMode?: SupportConversationMode;
+  subscriptionFollowupStatus?: SubscriptionFollowupStatus;
+  paymentDecision?: "yes" | "no" | null;
+  selectedPaymentMethod?: PaymentMethod | null;
+  lastAutomatedReturnVisitAt?: string | null;
+  lastAutomatedVisitKey?: string | null;
+}
 
 export interface SupportConversation {
   id: string;
@@ -23,6 +64,10 @@ export interface SupportConversation {
   status: ConversationStatus;
   /** Set when the thread was opened to pay for a plan. */
   subscriptionRequestId: string | null;
+  /** The one-time package introduction has already been shown in this thread. */
+  packageBriefSeenAt?: string | null;
+  /** The selected package/channel, saved before the customer confirms a request. */
+  checkoutDraft?: SupportCheckoutDraft | null;
   /** Denormalised for the inbox, so a list never reads every message. */
   lastMessagePreview: string;
   lastMessageAt: string;
@@ -39,6 +84,7 @@ export interface SupportMessage {
   sender: MessageSender;
   /** Exactly as typed. Never translated, never rewritten. */
   body: string;
+  action?: SupportMessageAction | null;
   /** An image the message carries, or null. */
   attachmentId: string | null;
   /** The message this one answers, so a reply keeps its context. */
@@ -70,8 +116,11 @@ export interface SendMessageInput {
   conversationId: string;
   sender: MessageSender;
   body: string;
+  action?: SupportMessageAction | null;
   replyToMessageId?: string | null;
   attachment?: File | null;
+  /** A stable event key makes automated messages and quick replies safe to retry. */
+  idempotencyKey?: string;
 }
 
 export interface SentMessage {

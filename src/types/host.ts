@@ -10,7 +10,10 @@ export interface HostPreview {
   shortName: string;
   /** Always a usable image source: an uploaded avatar, or an initials mark. */
   avatarUrl: string;
+  coverUrl?: string | null;
   shortBio?: string | null;
+  followerCount?: number;
+  likeCount?: number;
   /**
    * Opaque handle the backend turns into the remote participant video. Locally
    * it is a stored asset id; with Supabase the media is session-scoped and this

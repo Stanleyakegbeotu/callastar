@@ -29,6 +29,16 @@ export function validateAvatarFile(file: File): FileCheck {
   return { ok: true };
 }
 
+export function validateCoverFile(file: File): FileCheck {
+  if (!MEDIA_LIMITS.COVER_MIME_TYPES.includes(file.type as (typeof MEDIA_LIMITS.COVER_MIME_TYPES)[number])) {
+    return { ok: false, message: `Choose a ${describeTypes(MEDIA_LIMITS.COVER_MIME_TYPES)} image.` };
+  }
+  if (file.size > MEDIA_LIMITS.MAX_COVER_BYTES) {
+    return { ok: false, message: `Images must be ${formatFileSize(MEDIA_LIMITS.MAX_COVER_BYTES)} or smaller.` };
+  }
+  return { ok: true };
+}
+
 export function validateRemoteVideoFile(file: File): FileCheck {
   if (
     !MEDIA_LIMITS.REMOTE_VIDEO_MIME_TYPES.includes(
@@ -106,6 +116,7 @@ export async function validateCallSourceVideo(file: File): Promise<FileCheck> {
 
 export function validateFile(kind: AssetKind, file: File): FileCheck {
   if (kind === "avatar") return validateAvatarFile(file);
+  if (kind === "cover") return validateCoverFile(file);
   if (kind === "remote_audio") return validateRemoteAudioFile(file);
   return validateRemoteVideoFile(file);
 }

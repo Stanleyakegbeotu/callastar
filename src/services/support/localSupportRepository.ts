@@ -18,6 +18,7 @@ import type {
   SupportMessage,
   SupportMessageView,
 } from "./types";
+import { paymentMethodLabel } from "./paymentMethods";
 
 /**
  * Customer care against the local development engine.
@@ -189,6 +190,9 @@ export const localSupportRepository: SupportRepository = {
   },
 
   async sendMessage(input: SendMessageInput) {
+    if (input.action?.type === "select_payment_method") {
+      throw new Error("Payment methods must be selected through the validated payment action.");
+    }
     const attachment = input.attachment ?? null;
 
     if (attachment && attachment.size > SUPPORT_LIMITS.MAX_ATTACHMENT_BYTES) {
@@ -199,7 +203,9 @@ export const localSupportRepository: SupportRepository = {
     // awaiting it inside one would let the transaction close mid-write.
     const dimensions = attachment ? await readImageMetadata(attachment) : { width: null, height: null };
 
-    const messageId = newId();
+    const messageId = input.idempotencyKey
+      ? `event:${input.conversationId}:${input.idempotencyKey}`
+      : newId();
     const assetId = attachment ? newId() : null;
     const timestamp = nextIso();
     const body = input.body.trim().slice(0, SUPPORT_LIMITS.MESSAGE_MAX);
@@ -211,11 +217,17 @@ export const localSupportRepository: SupportRepository = {
         const conversation = await scope.get<SupportConversation>(STORE_CONVERSATIONS, input.conversationId);
         if (!conversation) throw new Error("That conversation no longer exists.");
 
+        const existing = input.idempotencyKey
+          ? await scope.get<SupportMessage>(STORE_MESSAGES, messageId)
+          : null;
+        if (existing) return { message: existing, asset: null, conversation };
+
         const message: SupportMessage = {
           id: messageId,
           conversationId: input.conversationId,
           sender: input.sender,
           body,
+          action: input.action ?? null,
           attachmentId: assetId,
           replyToMessageId: input.replyToMessageId ?? null,
           createdAt: timestamp,
@@ -250,7 +262,10 @@ export const localSupportRepository: SupportRepository = {
           unreadForCustomer: fromCustomer ? conversation.unreadForCustomer : conversation.unreadForCustomer + 1,
           // An admin reply moves a thread from "waiting on us" to "answered";
           // a customer message always reopens it.
-          status: fromCustomer ? "open" : "pending",
+          status: fromCustomer ? "open" : input.sender === "admin" ? "pending" : conversation.status,
+          checkoutDraft: input.sender === "admin" && conversation.checkoutDraft
+            ? { ...conversation.checkoutDraft, subscriptionFollowupStatus: "admin_handoff" }
+            : conversation.checkoutDraft,
           updatedAt: timestamp,
         };
         await scope.put(STORE_CONVERSATIONS, next);
@@ -258,6 +273,51 @@ export const localSupportRepository: SupportRepository = {
         return { message, asset, conversation: next };
       },
     );
+  },
+
+  async selectPaymentMethod(input) {
+    const idempotencyKey = `event:${input.conversationId}:payment-method:${input.checkoutIntentId}`;
+    return runTransaction([STORE_CONVERSATIONS, STORE_MESSAGES], "readwrite", async (scope) => {
+      const conversation = await scope.get<SupportConversation>(STORE_CONVERSATIONS, input.conversationId);
+      const draft = conversation?.checkoutDraft;
+      if (!conversation || !draft || draft.planId !== input.planId) return false;
+      const checkoutIntentId = draft.checkoutIntentId ?? `${conversation.id}:${draft.planId}`;
+      if (checkoutIntentId !== input.checkoutIntentId) return false;
+
+      if (draft.selectedPaymentMethod) return draft.selectedPaymentMethod === input.method;
+      if (draft.paymentDecision !== "yes" || draft.subscriptionFollowupStatus !== "awaiting_payment_method") return false;
+      const messages = await scope.getAllFromIndex<SupportMessage>(STORE_MESSAGES, "by_conversation", input.conversationId);
+      if (messages.some((message) => message.sender === "admin")) return false;
+
+      const message: SupportMessage = {
+        id: idempotencyKey,
+        conversationId: input.conversationId,
+        sender: "customer",
+        body: paymentMethodLabel(input.method),
+        action: { type: "select_payment_method", value: input.method },
+        attachmentId: null,
+        replyToMessageId: null,
+        createdAt: nextIso(),
+      };
+      await scope.put(STORE_MESSAGES, message);
+      const updated: SupportConversation = {
+        ...conversation,
+        checkoutDraft: {
+          ...draft,
+          checkoutIntentId,
+          selectedPaymentMethod: input.method,
+          subscriptionFollowupStatus: "payment_method_selected",
+        },
+        lastMessagePreview: message.body,
+        lastMessageAt: message.createdAt,
+        lastMessageSender: "customer",
+        unreadForAdmin: conversation.unreadForAdmin + 1,
+        status: "open",
+        updatedAt: message.createdAt,
+      };
+      await scope.put(STORE_CONVERSATIONS, updated);
+      return true;
+    });
   },
 
   async getAttachment(assetId) {

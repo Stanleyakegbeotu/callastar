@@ -1,0 +1,203 @@
+.pwa-install-entry {
+  position: relative;
+  z-index: 30;
+  flex: none;
+}
+
+.pwa-install-trigger {
+  display: inline-flex;
+  min-height: 2.7rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid oklch(1 0 0 / 0.3);
+  border-radius: var(--radius-pill);
+  padding: 0.55rem 0.9rem;
+  background: oklch(0.12 0.025 255 / 0.38);
+  color: white;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(0.8rem);
+  box-shadow: 0 0.4rem 1.4rem oklch(0.08 0.03 255 / 0.15);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.pwa-install-trigger:hover {
+  transform: translateY(-1px);
+  border-color: oklch(1 0 0 / 0.62);
+  background: oklch(0.12 0.025 255 / 0.58);
+}
+
+.pwa-install-trigger:focus-visible,
+.pwa-install-action:focus-visible,
+.pwa-install-close:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--blue) 46%, white);
+  outline-offset: 3px;
+}
+
+.pwa-install-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  overflow-y: auto;
+  padding: max(1.25rem, var(--safe-top)) max(1rem, var(--safe-right)) max(1.25rem, var(--safe-bottom)) max(1rem, var(--safe-left));
+  background: oklch(0.1 0.025 255 / 0.68);
+  backdrop-filter: blur(0.8rem);
+  animation: pwa-backdrop-in 180ms ease-out both;
+}
+
+.pwa-install-card {
+  position: relative;
+  width: min(100%, 31rem);
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid oklch(1 0 0 / 0.9);
+  border-radius: 1.65rem;
+  padding: 2rem 2.15rem 1.5rem;
+  background:
+    radial-gradient(ellipse at 50% 0%, oklch(0.92 0.075 248 / 0.55), transparent 43%),
+    linear-gradient(150deg, #ffffff, #f8faff 72%, #f4f6ff);
+  color: var(--navy);
+  box-shadow: 0 2rem 5.5rem oklch(0.05 0.025 255 / 0.38);
+  text-align: center;
+  animation: pwa-card-in 340ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+.pwa-install-close {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--line) 80%, white);
+  border-radius: 50%;
+  background: oklch(1 0 0 / 0.72);
+  color: var(--slate);
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.pwa-install-close:hover {
+  transform: rotate(5deg);
+  background: white;
+  color: var(--navy);
+}
+
+.pwa-install-icon-wrap {
+  position: relative;
+  display: grid;
+  width: 5.5rem;
+  height: 5.5rem;
+  place-items: center;
+  margin: 0 auto 1.1rem;
+  border: 1px solid oklch(1 0 0 / 0.8);
+  border-radius: 1.55rem;
+  background: linear-gradient(145deg, #f5f8ff, #e4ecff 62%, #f5efff);
+  box-shadow: 0 0.9rem 1.8rem oklch(0.42 0.12 255 / 0.16), inset 0 1px white;
+}
+
+.pwa-install-icon { width: 3.15rem; height: 3.15rem; object-fit: contain; }
+.pwa-install-icon-sparkle { position: absolute; top: -0.4rem; right: -0.42rem; color: #d6a332; font-size: 1.5rem; filter: drop-shadow(0 0.2rem 0.4rem oklch(0.7 0.15 83 / 0.25)); }
+
+.pwa-install-eyebrow {
+  margin: 0;
+  color: var(--blue-dark);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+
+.pwa-install-card h2 {
+  margin: 0.55rem 0 0;
+  font-size: clamp(1.8rem, 7vw, 2.35rem);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.06;
+}
+
+.pwa-install-copy {
+  max-width: 25rem;
+  margin: 0.8rem auto 0;
+  color: var(--slate);
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.pwa-install-benefits {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  color: var(--navy);
+  font-size: 0.85rem;
+  text-align: left;
+  list-style: none;
+}
+
+.pwa-install-benefits li { display: flex; align-items: center; gap: 0.65rem; }
+.pwa-install-benefits li > span { display: grid; width: 1.45rem; height: 1.45rem; flex: none; place-items: center; border-radius: 50%; background: var(--blue-soft); color: var(--blue-dark); }
+
+.pwa-install-ios-steps {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+  border: 1px solid color-mix(in oklab, var(--blue) 12%, white);
+  border-radius: 1rem;
+  padding: 0.85rem 1rem;
+  background: oklch(0.96 0.025 250 / 0.85);
+  text-align: left;
+}
+
+.pwa-install-step-number { display: grid; width: 1.6rem; height: 1.6rem; flex: none; place-items: center; border-radius: 50%; background: var(--blue); color: white; font-size: 0.76rem; font-weight: 800; }
+.pwa-install-ios-steps p { margin: 0; color: var(--slate); font-size: 0.84rem; line-height: 1.5; }
+.pwa-install-ios-steps strong { color: var(--navy); }
+
+.pwa-install-action {
+  display: flex;
+  width: 100%;
+  min-height: 3.45rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.3rem;
+  border: 1px solid color-mix(in oklab, var(--blue) 65%, #182fc4);
+  border-radius: var(--radius-pill);
+  padding: 0.75rem 1.2rem;
+  background: linear-gradient(110deg, #2878ff, #165ef0 55%, #4d55df);
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 750;
+  box-shadow: 0 0.65rem 1.35rem oklch(0.52 0.19 260 / 0.25), inset 0 1px oklch(1 0 0 / 0.22);
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.pwa-install-action:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 0.85rem 1.6rem oklch(0.52 0.19 260 / 0.31), inset 0 1px oklch(1 0 0 / 0.22); }
+.pwa-install-action:disabled { cursor: wait; opacity: 0.75; }
+.pwa-install-browser-hint { margin: 1.2rem 0 0; border-radius: 0.85rem; padding: 0.8rem 1rem; background: var(--blue-soft); color: var(--slate); font-size: 0.82rem; line-height: 1.5; }
+.pwa-install-browser-hint strong { color: var(--blue-dark); }
+.pwa-install-error { margin: 0.8rem 0 0; color: var(--danger, #b42318); font-size: 0.8rem; line-height: 1.45; }
+.pwa-install-footnote { margin: 1rem 0 0; color: var(--muted); font-size: 0.72rem; }
+
+@keyframes pwa-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pwa-card-in { from { opacity: 0; transform: translateY(0.75rem) scale(0.975); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+@media (max-width: 36rem) {
+  .pwa-install-trigger { min-height: 2.5rem; padding-inline: 0.75rem; font-size: 0.78rem; }
+  .pwa-install-card { border-radius: 1.4rem; padding: 1.7rem 1.25rem 1.25rem; }
+  .pwa-install-icon-wrap { width: 4.8rem; height: 4.8rem; border-radius: 1.35rem; }
+  .pwa-install-icon { width: 2.8rem; height: 2.8rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-install-backdrop,
+  .pwa-install-card,
+  .pwa-install-trigger,
+  .pwa-install-action,
+  .pwa-install-close { animation: none !important; transition: none !important; }
+}

@@ -17,7 +17,8 @@
 .permission-page,
 .outcome-page {
   display: grid;
-  place-items: center;
+  align-items: start;
+  justify-items: center;
   min-height: 100dvh;
   padding: max(1.5rem, var(--safe-top)) 1rem max(1.5rem, var(--safe-bottom));
   background: var(--white);
@@ -299,6 +300,22 @@
   color: oklch(1 0 0 / 0.86);
   font-size: 1rem;
   font-weight: 600;
+}
+
+.live-ring-status.is-accepted { color: oklch(0.82 0.16 150); }
+.live-ring-request-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid oklch(1 0 0 / 0.35);
+  border-top-color: var(--white);
+  border-radius: 50%;
+  animation: live-ring-request-spin 700ms linear infinite;
+}
+
+@keyframes live-ring-request-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-ring-request-spinner { animation: none; }
 }
 
 .live-ring-sub {

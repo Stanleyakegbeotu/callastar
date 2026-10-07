@@ -1,0 +1,8 @@
+<svg width="280" height="72" viewBox="0 0 280 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(-9 -8) scale(.09)">
+    <path d="M512 256 C528 324 566 362 634 378 C566 394 528 432 512 500 C496 432 458 394 390 378 C458 362 496 324 512 256Z" fill="#165EF0"/>
+    <path d="M372 584 C404 550 450 530 500 530 C550 530 596 550 628 584" stroke="#165EF0" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M414 648 C436 624 466 610 500 610 C534 610 564 624 586 648" stroke="#165EF0" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  </g>
+  <text x="74" y="46" fill="#101E38" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif" font-size="37" font-weight="700" letter-spacing="-1.6">CallaStar</text>
+</svg>

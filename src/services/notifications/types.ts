@@ -11,7 +11,7 @@ export type NotificationType =
   | "support_message_received"
   | "support_conversation_started";
 
-export type NotificationEntityKind = "subscription_request" | "support_conversation";
+export type NotificationEntityKind = "subscription_request" | "support_conversation" | "call_session" | "call_evidence" | "system";
 
 export interface AdminNotification {
   id: string;

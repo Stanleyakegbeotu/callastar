@@ -30,6 +30,8 @@ export interface SubscriptionRepository {
   listRequests(filters?: SubscriptionRequestFilters): Promise<SubscriptionRequest[]>;
   listSessionRequests(sessionId: string): Promise<SubscriptionRequest[]>;
   updateRequest(id: string, patch: Partial<SubscriptionRequest>): Promise<SubscriptionRequest | null>;
+  /** Cancel a customer's still-open request before switching packages. */
+  cancelRequest(id: string): Promise<SubscriptionRequest | null>;
   /** Idempotent: confirming twice grants access once. */
   confirmRequest(id: string): Promise<{ request: SubscriptionRequest; grant: CallAccessGrant }>;
 

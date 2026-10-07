@@ -77,6 +77,7 @@ export function projectLiveMeshPositions(
   aspect: number,
   inverseRotation: ArrayLike<number>,
   canonicalWidth = 0.44,
+  liveMouthIndices?: ReadonlySet<number>,
 ): boolean {
   if (faceWidth <= 1e-6 || aspect <= 1e-6 || liveLandmarks.length < 468) return false;
   for (let vertex = 0; vertex < bindings.length; vertex++) {
@@ -89,9 +90,12 @@ export function projectLiveMeshPositions(
     const ry = inverseRotation[1]! * x + inverseRotation[5]! * y + inverseRotation[9]! * z;
     const rz = inverseRotation[2]! * x + inverseRotation[6]! * y + inverseRotation[10]! * z;
     const offset = vertex * 3;
-    output[offset] = rx + expressionPositions[offset]! - sourceBase[offset]!;
-    output[offset + 1] = ry + expressionPositions[offset + 1]! - sourceBase[offset + 1]!;
-    output[offset + 2] = rz + expressionPositions[offset + 2]! - sourceBase[offset + 2]!;
+    // The live landmarks already contain mouth expression. Adding the source
+    // deformer again enlarges lip width/opening and can expose a second lip.
+    const expressionWeight = liveMouthIndices?.has(vertex) ? 0 : 1;
+    output[offset] = rx + (expressionPositions[offset]! - sourceBase[offset]!) * expressionWeight;
+    output[offset + 1] = ry + (expressionPositions[offset + 1]! - sourceBase[offset + 1]!) * expressionWeight;
+    output[offset + 2] = rz + (expressionPositions[offset + 2]! - sourceBase[offset + 2]!) * expressionWeight;
   }
   return true;
 }

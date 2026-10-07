@@ -27,7 +27,10 @@ export function CreateProfilePage() {
         displayName: values.displayName,
         shortBio: values.shortBio,
         status: values.status,
+        baseFollowerCount: values.baseFollowerCount,
+        baseLikeCount: values.baseLikeCount,
         avatarFile: values.avatarFile,
+        coverFile: values.coverFile,
         remoteVideoFile: values.remoteVideoFile,
         remoteAudioFile: values.remoteAudioFile,
       });

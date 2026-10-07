@@ -4,20 +4,13 @@ import { formatDateTime } from "@/lib/utils";
 
 import { usePlans } from "../hooks/useCrmData";
 import { AdminPageHeader } from "../layout/AdminPageHeader";
-import { formatUsdCents } from "./subscriptionInsights";
-
-const PRIORITY_LABELS: Record<string, string> = {
-  standard: "Standard support",
-  priority: "Priority support",
-  highest: "Highest priority support",
-};
+import { formatPlanPrice } from "./subscriptionInsights";
 
 /**
  * Admin → Subscriptions → Plans.
  *
- * The three plans are global: every profile is sold on the same terms at the
- * same prices, so this is one list rather than a per-profile setting. Prices are
- * in USD everywhere, regardless of the language the app is being read in.
+ * The Plus and Pro plans are global. Supabase holds the authoritative prices,
+ * currency, benefits, visibility, and ordering for every host profile.
  */
 export function SubscriptionPlansPage() {
   const { data: plans, loading, error } = usePlans();
@@ -53,18 +46,14 @@ export function SubscriptionPlansPage() {
               </div>
 
               <p className="admin-plan-price">
-                {formatUsdCents(plan.priceUsdCents)}
-                <small>USD</small>
+                {formatPlanPrice(plan.priceMinorUnits, plan.currencyCode)}
+                <small>{plan.currencyCode}</small>
               </p>
 
               <dl className="admin-meta-grid">
                 <div>
                   <dt>Session length</dt>
                   <dd>{plan.sessionDurationMinutes} minutes</dd>
-                </div>
-                <div>
-                  <dt>Support</dt>
-                  <dd>{PRIORITY_LABELS[plan.supportPriority] ?? plan.supportPriority}</dd>
                 </div>
                 <div>
                   <dt>Updated</dt>

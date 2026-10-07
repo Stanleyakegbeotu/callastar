@@ -1,17 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { images } from "@/assets/images";
 import { CallaStarLogo } from "@/components/branding/CallaStarLogo";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { MOCK_HOST } from "@/lib/constants";
+import { PwaInstallCard } from "@/components/pwa/PwaInstallCard";
 import { useClearStaleSession } from "@/state/useClearStaleSession";
 
-import { useDevAdminShortcut } from "./useDevAdminShortcut";
+import { createHiddenAdminEntry } from "./hiddenAdminEntry";
+import { hasSeenWelcomeReward } from "./welcomeReward";
+
+interface LandingHighlight {
+  icon: IconName;
+  lines: [string, string];
+}
 
 /** The three promises the landing screen makes, as drawn in the prototype. */
-const HIGHLIGHTS: { icon: IconName; lines: [string, string] }[] = [
+const HIGHLIGHTS: LandingHighlight[] = [
   { icon: "bolt", lines: ["No sign‑up", "required"] },
   { icon: "video", lines: ["Video &", "audio calls"] },
   { icon: "shield", lines: ["Secure", "connections"] },
@@ -21,19 +27,22 @@ const HIGHLIGHTS: { icon: IconName; lines: [string, string] }[] = [
 export function OnboardingPage() {
   const navigate = useNavigate();
   useClearStaleSession();
-  // Hidden development shortcut. Contributes no markup and no styling of its
-  // own: the brand area simply also receives pointer-up.
-  const devAdmin = useDevAdminShortcut();
+  const hiddenAdminEntry = useMemo(
+    () => createHiddenAdminEntry(() => navigate("/admin/login")),
+    [navigate],
+  );
+  useEffect(() => () => hiddenAdminEntry.reset(), [hiddenAdminEntry]);
+
   const [returning] = useState(() => {
     try {
-      return window.sessionStorage.getItem("callastar-onboarding-seen") === "true";
+      return window.localStorage.getItem("callastar-onboarding-seen") === "true";
     } catch {
       return false;
     }
   });
   useEffect(() => {
     try {
-      window.sessionStorage.setItem("callastar-onboarding-seen", "true");
+      window.localStorage.setItem("callastar-onboarding-seen", "true");
     } catch {
       // Storage is optional for the animation; never let it affect the flow.
     }
@@ -44,23 +53,18 @@ export function OnboardingPage() {
       <img className="landing-image" src={images.hero} alt="Woman smiling during a video call" />
       <div className="landing-overlay" />
 
-      {/* The brand mark is unchanged: same element, same position, same
-          spacing, no cursor and nothing to read. All it gains is a pointer
-          handler, which is inert unless the development flag is on. */}
-      <div className="landing-top landing-brand-reveal" {...devAdmin.handlers}>
-        <CallaStarLogo />
+      <div className="landing-top landing-brand-reveal">
+        <CallaStarLogo size={44} onClick={hiddenAdminEntry.tap} />
+        <PwaInstallCard />
       </div>
-
-      {devAdmin.activating && (
-        <p className="dev-shortcut-toast" role="status">
-          Opening Admin…
-        </p>
-      )}
 
       {/* The person at the other end of the call, as supplied with the
           approved reference pack and served from /public. */}
       <div className="hero-pip landing-pip-reveal">
-        <img src={images.onboardingParticipant} alt="" />
+        <picture>
+          <source media="(min-width: 48rem)" srcSet={images.onboardingParticipantLandscape} />
+          <img src={images.onboardingParticipant} alt="" />
+        </picture>
       </div>
 
       <div className="landing-content">
@@ -97,8 +101,11 @@ export function OnboardingPage() {
           ))}
         </ul>
 
-        <Button onClick={() => navigate("/connect")} className="landing-cta landing-cta-reveal">
-          Get Started
+        <Button
+          onClick={() => navigate(hasSeenWelcomeReward() ? "/connect" : "/welcome-reward")}
+          className="landing-cta landing-cta-reveal"
+        >
+          {returning ? "Get started" : "Get started for free"}
         </Button>
       </div>
     </main>

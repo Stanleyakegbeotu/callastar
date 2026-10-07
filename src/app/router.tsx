@@ -11,6 +11,7 @@ import { EditProfilePage } from "@/features/admin/profiles/EditProfilePage";
 import { ProfileDetailPage } from "@/features/admin/profiles/ProfileDetailPage";
 import { ProfilesPage } from "@/features/admin/profiles/ProfilesPage";
 import { SessionDetailPage } from "@/features/admin/sessions/SessionDetailPage";
+import { CallEvidencePage } from "@/features/admin/sessions/CallEvidencePage";
 import { SessionsPage } from "@/features/admin/sessions/SessionsPage";
 import { AdminSettingsPage } from "@/features/admin/settings/AdminSettingsPage";
 import { EditPlanPage } from "@/features/admin/subscriptions/EditPlanPage";
@@ -25,6 +26,7 @@ import { CallSessionRoute } from "@/features/call-session/CallSessionRoute";
 import { JoinCallPage } from "@/features/join-call/JoinCallPage";
 import { PlansPage } from "@/features/join-call/PlansPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
+import { WelcomeRewardPage } from "@/features/onboarding/WelcomeRewardPage";
 import { SupportIdentifyPage, SupportThreadPage } from "@/features/support/SupportPage";
 import { resolveRouterBasename } from "@/lib/utils";
 
@@ -48,7 +50,7 @@ import { resolveRouterBasename } from "@/lib/utils";
  *
  * Admin workspace, behind one guard and one layout:
  *
- *   /admin/login                      sign in (or development access)
+ *   /admin/login                      sign in or set up the first administrator
  *   /admin                            overview
  *   /admin/profiles                   list, create, detail, edit
  *   /admin/sessions                   recorded call sessions and one session
@@ -68,6 +70,7 @@ export function AppRouter() {
     <BrowserRouter basename={resolveRouterBasename()}>
       <Routes>
         <Route path="/" element={<OnboardingPage />} />
+        <Route path="/welcome-reward" element={<WelcomeRewardPage />} />
         <Route path="/connect" element={<CallTypePage />} />
         <Route path="/join/:callType" element={<JoinCallPage />} />
         <Route path="/call/:sessionId" element={<CallSessionRoute />} />
@@ -92,6 +95,8 @@ export function AppRouter() {
           <Route path="media" element={<MediaPage />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
+          <Route path="evidence" element={<CallEvidencePage />} />
+          <Route path="recordings" element={<Navigate to="/admin/evidence" replace />} />
           {/* Plans before :requestId, or "plans" would be read as an id. */}
           <Route path="subscriptions" element={<SubscriptionRequestsPage />} />
           <Route path="subscriptions/plans" element={<SubscriptionPlansPage />} />

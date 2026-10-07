@@ -59,7 +59,7 @@ export function AdminSupportThreadPage() {
   };
 
   return (
-    <>
+    <div className="admin-support-thread-page">
       <AdminPageHeader
         title={conversation.customerName || conversation.customerEmail}
         description={conversation.subject}
@@ -113,8 +113,8 @@ export function AdminSupportThreadPage() {
         <SupportChat
           state={state}
           viewer="admin"
-          title={conversation.customerEmail}
-          subtitle={conversation.customerName || "Customer"}
+          title={conversation.customerName || "Customer"}
+          subtitle={conversation.customerEmail}
           onBack={() => (expanded ? setExpanded(false) : navigate("/admin/support"))}
           backLabel={expanded ? "Collapse conversation" : "Back to customer care"}
           headerAction={
@@ -130,7 +130,7 @@ export function AdminSupportThreadPage() {
           }
         />
       </section>
-    </>
+    </div>
   );
 }
 

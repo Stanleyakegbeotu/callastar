@@ -1,20 +1,26 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { PROFILE_LIMITS } from "@/lib/config";
+import { assertAudienceCount, parseAudienceCount } from "@/services/admin/profileEngagement";
 import type { ProfileStatus } from "@/services/admin/types";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAssetUrl, useFilePreview } from "../hooks/useAdminData";
 import { AudioUpload } from "../media/AudioUpload";
 import { AvatarUpload } from "../media/AvatarUpload";
+import { CoverUpload } from "../media/CoverUpload";
 import { VideoUpload } from "../media/VideoUpload";
 
 export interface ProfileFormValues {
   displayName: string;
   shortBio: string;
   status: ProfileStatus;
+  baseFollowerCount: number;
+  baseLikeCount: number;
   avatarFile: File | null;
   removeAvatar: boolean;
+  coverFile: File | null;
+  removeCover: boolean;
   remoteVideoFile: File | null;
   remoteAudioFile: File | null;
 }
@@ -24,8 +30,11 @@ interface ProfileFormProps {
   initialName?: string;
   initialBio?: string;
   initialStatus?: ProfileStatus;
+  initialFollowerCount?: number;
+  initialLikeCount?: number;
   /** Existing avatar on an edit; null while creating. */
   avatarAssetId?: string | null;
+  coverAssetId?: string | null;
   submitting: boolean;
   submitLabel: string;
   onSubmit: (values: ProfileFormValues) => void;
@@ -35,6 +44,8 @@ interface ProfileFormProps {
 interface FieldErrors {
   displayName?: string;
   shortBio?: string;
+  baseFollowerCount?: string;
+  baseLikeCount?: string;
 }
 
 /**
@@ -49,7 +60,10 @@ export function ProfileForm({
   initialName = "",
   initialBio = "",
   initialStatus = "active",
+  initialFollowerCount = 0,
+  initialLikeCount = 0,
   avatarAssetId = null,
+  coverAssetId = null,
   submitting,
   submitLabel,
   onSubmit,
@@ -58,15 +72,21 @@ export function ProfileForm({
   const [displayName, setDisplayName] = useState(initialName);
   const [shortBio, setShortBio] = useState(initialBio);
   const [status, setStatus] = useState<ProfileStatus>(initialStatus);
+  const [baseFollowerCount, setBaseFollowerCount] = useState(String(initialFollowerCount));
+  const [baseLikeCount, setBaseLikeCount] = useState(String(initialLikeCount));
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [removeCover, setRemoveCover] = useState(false);
   const [remoteVideoFile, setRemoteVideoFile] = useState<File | null>(null);
   const [remoteAudioFile, setRemoteAudioFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const storedAvatarUrl = useAssetUrl(removeAvatar ? null : avatarAssetId);
+  const storedCoverUrl = useAssetUrl(removeCover ? null : coverAssetId);
   const chosenAvatarUrl = useFilePreview(avatarFile);
+  const chosenCoverUrl = useFilePreview(coverFile);
   const chosenVideoUrl = useFilePreview(remoteVideoFile);
   const chosenAudioUrl = useFilePreview(remoteAudioFile);
   const avatarPreview = chosenAvatarUrl ?? storedAvatarUrl;
@@ -76,8 +96,12 @@ export function ProfileForm({
       displayName !== initialName ||
       shortBio !== initialBio ||
       status !== initialStatus ||
+      baseFollowerCount !== String(initialFollowerCount) ||
+      baseLikeCount !== String(initialLikeCount) ||
       avatarFile !== null ||
       removeAvatar ||
+      coverFile !== null ||
+      removeCover ||
       remoteVideoFile !== null ||
       remoteAudioFile !== null,
     [
@@ -86,7 +110,13 @@ export function ProfileForm({
       initialBio,
       initialName,
       initialStatus,
+      initialFollowerCount,
+      initialLikeCount,
+      baseFollowerCount,
+      baseLikeCount,
       removeAvatar,
+      coverFile,
+      removeCover,
       remoteAudioFile,
       remoteVideoFile,
       shortBio,
@@ -111,6 +141,20 @@ export function ProfileForm({
     else if (name.length > PROFILE_LIMITS.NAME_MAX) next.displayName = `Keep the name under ${PROFILE_LIMITS.NAME_MAX} characters.`;
     if (shortBio.trim().length > PROFILE_LIMITS.BIO_MAX) next.shortBio = `Keep the bio under ${PROFILE_LIMITS.BIO_MAX} characters.`;
 
+    try {
+      parseAudienceCount(baseFollowerCount);
+    } catch (cause) {
+      next.baseFollowerCount = cause instanceof Error ? cause.message : "Enter a valid follower count.";
+    }
+    for (const [field, value] of [["baseLikeCount", baseLikeCount]] as const) {
+      try {
+        if (!value.trim()) throw new Error("Enter a count, or 0 if there are none.");
+        assertAudienceCount(Number(value));
+      } catch (cause) {
+        next[field] = cause instanceof Error ? cause.message : "Enter a valid count.";
+      }
+    }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -122,8 +166,12 @@ export function ProfileForm({
       displayName: displayName.trim(),
       shortBio: shortBio.trim(),
       status,
+      baseFollowerCount: parseAudienceCount(baseFollowerCount),
+      baseLikeCount: Number(baseLikeCount),
       avatarFile,
       removeAvatar,
+      coverFile,
+      removeCover,
       remoteVideoFile,
       remoteAudioFile,
     });
@@ -156,6 +204,22 @@ export function ProfileForm({
           }
           busy={submitting}
         />
+
+        <div className="admin-field">
+          <label>Cover photo</label>
+          <CoverUpload
+            previewUrl={chosenCoverUrl ?? storedCoverUrl}
+            onSelect={(file) => {
+              setCoverFile(file);
+              if (file) setRemoveCover(false);
+            }}
+            onRemove={chosenCoverUrl || storedCoverUrl ? () => {
+              setCoverFile(null);
+              setRemoveCover(Boolean(coverAssetId));
+            } : undefined}
+            disabled={submitting}
+          />
+        </div>
 
         <div className="admin-field">
           <label htmlFor="profile-name">
@@ -219,6 +283,29 @@ export function ProfileForm({
           </div>
           <p className="admin-hint">Inactive profiles cannot be reached by their Call ID.</p>
         </fieldset>
+      </section>
+
+      <section className="admin-card">
+        <h2 className="admin-card-label">Followers and likes</h2>
+        <p className="admin-hint">
+          Enter the host&apos;s existing counts. Follower counts accept values like 12k or 1.5M. New follows and likes collected in CallaStar are added automatically.
+        </p>
+        <div className="admin-audience-fields">
+          {([
+            { field: "baseFollowerCount", label: "Follower count", value: baseFollowerCount, setValue: setBaseFollowerCount },
+            { field: "baseLikeCount", label: "Like count", value: baseLikeCount, setValue: setBaseLikeCount },
+          ] as const).map(({ field, label, value, setValue }) => (
+            <div className="admin-field" key={field}>
+              <label htmlFor={`profile-${field}`}>{label}</label>
+              <input id={`profile-${field}`} className="admin-input" type="text" inputMode={field === "baseFollowerCount" ? "decimal" : "numeric"}
+                placeholder={field === "baseFollowerCount" ? "e.g. 12k or 1.5M" : "0"} value={value}
+                onChange={(event) => setValue(event.target.value)} disabled={submitting}
+                aria-invalid={errors[field] ? true : undefined}
+                aria-describedby={errors[field] ? `profile-${field}-error` : undefined} />
+              {errors[field] && <p className="admin-field-error" id={`profile-${field}-error`} role="alert">{errors[field]}</p>}
+            </div>
+          ))}
+        </div>
       </section>
 
       {mode === "create" && (

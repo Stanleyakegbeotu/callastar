@@ -120,51 +120,68 @@ export function ReturningSubscriptionScreen({
   const { t } = useTranslation();
 
   return (
-    <main className="host-state">
+    <main className="host-state host-state-returning">
       <div className="host-state-brand">
         <CallaStarLogo />
       </div>
 
-      <HostCard host={host} callId={callId} tone="available" label={t("hostState.availableChip")} />
+      <section className="returning-copy" aria-labelledby="returning-title">
+        <div className="returning-host">
+          <span className="returning-host-avatar">
+            <img src={host.avatarUrl} alt="" />
+            <span className="host-card-dot host-card-dot-available" aria-hidden="true" />
+          </span>
+          <span className="returning-host-details">
+            <strong>{host.displayName}</strong>
+            <span className="returning-host-status">
+              <span className="host-card-chip-dot" aria-hidden="true" />
+              {t("hostState.availableChip")}
+            </span>
+            <span className="host-card-callid">
+              Call ID: <code>{formatCallId(callId)}</code>
+            </span>
+          </span>
+        </div>
 
-      <h1 className="cs-display">{t("hostState.returningTitle", { host: host.displayName })}</h1>
-      <p className="cs-lede">
-        {callType === "audio"
-          ? t("hostState.returningCopyAudio", { host: host.displayName })
-          : t("hostState.returningCopyVideo", { host: host.displayName })}
-      </p>
+        <h1 className="cs-display" id="returning-title">
+          {t("hostState.returningTitle", { host: host.displayName })}
+        </h1>
+        <p className="cs-lede">
+          {callType === "audio"
+            ? t("hostState.returningCopyAudio", { host: host.displayName })
+            : t("hostState.returningCopyVideo", { host: host.displayName })}
+        </p>
 
-      <div className="cs-note cs-note-feature">
-        <span className="cs-note-icon cs-note-icon-brand">
-          <Icon name="video" className="size-6" />
-        </span>
-        <span>
-          <strong className="cs-note-title">{t("hostState.returningNoteTitle")}</strong>
-          {t("hostState.returningNoteCopy")}
-        </span>
-      </div>
+        <div className="returning-plan-note">
+          <span className="returning-plan-note-icon" aria-hidden="true">
+            <Icon name="video" className="size-6" />
+          </span>
+          <p>
+            <strong>{t("hostState.returningNoteTitle")}</strong>
+            {t("hostState.returningNoteCopy")}
+          </p>
+        </div>
+      </section>
 
-      <div className="host-state-actions">
-        <Button onClick={onContinueToPlans}>{t("access.continueToPlans")}</Button>
-        <Button variant="secondary" withArrow={false} onClick={onReturnHome}>
-          {t("common.returnHome")}
-        </Button>
-      </div>
+      <div className="returning-decision">
+        <div className="host-state-actions">
+          <Button onClick={onContinueToPlans}>{t("access.continueToPlans")}</Button>
+          <Button variant="secondary" withArrow={false} onClick={onReturnHome}>
+            {t("common.returnHome")}
+          </Button>
+        </div>
 
-      {/*
-        Honest about what this is. The app remembers in this browser's own
-        storage that the preview was used; it has not identified a device or a
-        person, and clearing site data clears it.
-      */}
-      <div className="host-state-footnote">
-        <span className="host-state-footnote-icon">
-          <Icon name="info" className="size-5" />
-        </span>
-        <span>
-          <strong>{t("hostState.previewUsedTitle")}</strong>
-          {t("hostState.previewUsedCopy", { host: host.displayName })}
-          <small>{t("hostState.noAccountRequired")}</small>
-        </span>
+        {/* This remembers a browser preview, not a device or a person. */}
+        <div className="host-state-footnote returning-footnote">
+          <span className="host-state-footnote-icon">
+            <Icon name="info" className="size-5" />
+          </span>
+          <span>
+            <strong>{t("hostState.previewUsedTitle")}</strong>
+            {t("hostState.previewUsedCopy", { host: host.displayName })}
+            <small>{t("hostState.noAccountRequired")}</small>
+          </span>
+        </div>
       </div>
     </main>
   );

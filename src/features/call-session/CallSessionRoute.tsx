@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -10,7 +10,8 @@ import { logDiagnostic } from "@/lib/utils";
 import { notifyAdmin } from "@/services/notifications/repository";
 import { previewAccessRepository } from "@/services/access/previewAccess";
 import { createSessionId } from "@/services/callSession";
-import type { SubscriptionRequest, SupportChannel } from "@/services/subscriptions/types";
+import { subscriptionRepository } from "@/services/subscriptions/repository";
+import type { SubscriptionPlan, SubscriptionRequest, SupportChannel } from "@/services/subscriptions/types";
 import { useCallSession } from "@/state/CallSessionContext";
 import type { MediaErrorInfo } from "@/types/media";
 
@@ -39,6 +40,7 @@ import { SubscriptionCheckpoint } from "./subscription/SubscriptionCheckpoint";
 import { SupportOverlay } from "@/features/support/SupportOverlay";
 import { useWhatsappSupportNumber } from "@/features/support/hooks/useWhatsappSupportNumber";
 import { useSessionRecorder } from "./hooks/useSessionRecorder";
+import { useCallEvidenceScreenshot } from "./hooks/useCallEvidenceScreenshot";
 import { useSessionLimit } from "./hooks/useSessionLimit";
 import { SessionCompletePage } from "./SessionCompletePage";
 
@@ -72,16 +74,24 @@ export function CallSessionRoute() {
    * legacy simulated path are never accidentally mixed. Demo mode is a simulation
    * by definition and stays on the old path.
    */
-  const liveMode = isLiveCallingConfigured && !config.enableDemoVideo;
+  const liveMode = isLiveCallingConfigured;
   const media = useLocalMedia(session.type);
   // These three are stable across renders; the effects below depend on them
   // rather than on the controller object.
   const { request: requestMedia, stop: stopMedia, status: mediaStatus } = media;
   const host = session.host;
   const [supportOpen, setSupportOpen] = useState(false);
+  const [supportChannel, setSupportChannel] = useState<SupportChannel>("in_app");
 
   // The remote clip is only fetched once the call is actually active.
   const remote = useRemoteVideo(host, session.status === "active", session.type);
+  const hasUploadedFreeVideoPreview =
+    !liveMode &&
+    session.type === "video" &&
+    session.access === null &&
+    Boolean(host?.remoteVideoRef) &&
+    remote.status === "ready" &&
+    remote.url !== null;
 
   // Only worth querying while the answer affects what we show.
   const permission = useCameraPermission(session.status === "failed");
@@ -144,7 +154,8 @@ export function CallSessionRoute() {
       record(`subscription-requested-${request.id}`, "subscription_requested", {
         reference: request.reference,
         plan: request.planNameSnapshot,
-        amountUsdCents: request.amountUsdCents,
+        amountMinorUnits: request.amountMinorUnits,
+        currencyCode: request.currencyCode,
         channel: request.channel,
       });
       notifyAdmin({
@@ -174,7 +185,11 @@ export function CallSessionRoute() {
     profileId: host?.id ?? "",
     profileName: host?.displayName ?? "",
     customerEmail: session.caller.email,
-    armed: session.status === "active" && remote.status !== "loading" && host !== null,
+    armed:
+      session.status === "active" &&
+      remote.status !== "loading" &&
+      host !== null &&
+      !hasUploadedFreeVideoPreview,
     // A call authorised by a Subscription Access ID never runs the unpaid gate.
     authorized: session.access !== null,
     whatsappNumber,
@@ -214,6 +229,14 @@ export function CallSessionRoute() {
     (session.status === "active" || session.status === "reconnecting") && session.startedAt !== null,
   );
 
+  useCallEvidenceScreenshot({
+    session,
+    sessionMatches,
+    liveMode,
+    rtcConnected: live.phase === "connected",
+    localStream: media.stream,
+  });
+
   /**
    * What a brand-new session does first.
    *
@@ -232,7 +255,7 @@ export function CallSessionRoute() {
       return;
     }
 
-    dispatch(config.enableDemoVideo ? { type: "START_CONNECTING" } : { type: "REQUEST_PERMISSIONS" });
+    dispatch({ type: "REQUEST_PERMISSIONS" });
   }, [dispatch, session.status, sessionMatches]);
 
   /**
@@ -269,40 +292,39 @@ export function CallSessionRoute() {
    * rather than resuming a call with a dead camera.
    */
   useEffect(() => {
-    if (!sessionMatches || config.enableDemoVideo) return;
+    if (!sessionMatches) return;
     if (mediaStatus !== "idle") return;
     if (session.status !== "connecting" && session.status !== "ringing" && session.status !== "active") return;
 
     dispatch({ type: "START_SESSION", id: session.id });
   }, [dispatch, mediaStatus, session.id, session.status, sessionMatches]);
 
-  /**
-   * Payment support. The request is created first, so a reference exists before
-   * anyone leaves the app; only then does WhatsApp open in a new tab. In-app
-   * support opens the chat over this screen instead.
-   */
-  const openedFor = useRef<string | null>(null);
-
   const chooseChannel = useCallback(
     (channel: SupportChannel) => {
-      void gate.startPayment(channel, session.caller.email).then((request) => {
-        if (!request) return;
-
-        if (channel === "in_app") {
-          setSupportOpen(true);
-          return;
-        }
-
-        const link = gate.whatsappLinkFor(request);
-        // A missing number means the option should not have been selectable;
-        // in-app support is still one tap away on the waiting screen.
-        if (!link || openedFor.current === request.id) return;
-        openedFor.current = request.id;
-        window.open(link, "_blank", "noopener");
-      });
+      setSupportChannel(channel);
+      setSupportOpen(true);
     },
-    [gate, session.caller.email],
+    [],
   );
+
+  const openSupportChat = useCallback(() => {
+    setSupportChannel("in_app");
+    setSupportOpen(true);
+  }, []);
+
+  const confirmSubscription = useCallback(
+    (channel: SupportChannel, email: string) => gate.startPayment(channel, email),
+    [gate.startPayment],
+  );
+
+  const selectSupportPackage = useCallback(async (plan: SubscriptionPlan) => {
+    const request = gate.request;
+    if (request && request.status !== "confirmed" && request.status !== "cancelled") {
+      const cancelled = await subscriptionRepository.cancelRequest(request.id);
+      if (!cancelled) throw new Error("The current payment request could not be cancelled.");
+    }
+    gate.choosePlan(plan);
+  }, [gate.choosePlan, gate.request]);
 
   const endCall = useCallback(() => {
     // Release the hardware first so the camera indicator goes out immediately.
@@ -314,7 +336,8 @@ export function CallSessionRoute() {
     record("remote-media-ended", "remote_media_ended", {
       endedBeforeSubscriptionCheck: gate.status !== "checking",
     });
-  }, [gate.status, record]);
+    if (hasUploadedFreeVideoPreview) gate.finishPreview();
+  }, [gate.finishPreview, gate.status, hasUploadedFreeVideoPreview, record]);
 
   /**
    * A paid session gets exactly the length its plan sells. When the time is up
@@ -368,7 +391,16 @@ export function CallSessionRoute() {
     <SupportOverlay
       caller={session.caller}
       request={gate.request}
+      sessionId={session.id}
+      plan={gate.selectedPlan}
+      availablePlans={gate.plans}
+      profileId={host?.id ?? ""}
+      profileName={host?.displayName ?? ""}
+      channel={supportChannel}
       whatsappNumber={gate.whatsappNumber}
+      whatsappLinkFor={gate.whatsappLinkFor}
+      onConfirmSubscription={confirmSubscription}
+      onSelectPackage={selectSupportPackage}
       onClose={() => setSupportOpen(false)}
     />
   ) : null;
@@ -409,16 +441,18 @@ export function CallSessionRoute() {
           />
         );
 
-      // Inviting through ringing is one screen: the wording changes when the host
-      // answers, but the caller has not moved anywhere.
       case "inviting":
+        return <LiveRingingScreen host={host} stage="requesting" onCancel={live.cancel} />;
+
       case "ringing":
-        return <LiveRingingScreen host={host} connecting={false} onCancel={live.cancel} />;
+        return <LiveRingingScreen host={host} stage="ringing" onCancel={live.cancel} />;
 
       case "accepted":
+        return <LiveRingingScreen host={host} stage="accepted" onCancel={live.cancel} />;
+
       case "source_selection":
       case "negotiating":
-        return <LiveRingingScreen host={host} connecting onCancel={live.cancel} />;
+        return <LiveRingingScreen host={host} stage="connecting" onCancel={live.cancel} />;
 
       case "connecting":
       case "active":
@@ -543,9 +577,10 @@ export function CallSessionRoute() {
                 gate={gate}
                 host={host}
                 onChooseChannel={chooseChannel}
-                onOpenSupportChat={() => setSupportOpen(true)}
+                onOpenSupportChat={openSupportChat}
                 onStartNewCall={startFreshCall}
                 onGoHome={() => navigate("/")}
+                welcomeBackName={session.caller.fullName}
               />
               {supportOverlay}
             </>
@@ -591,7 +626,17 @@ export function CallSessionRoute() {
       );
 
     case "connecting":
+      return <LiveRingingScreen host={host} stage="connecting" onCancel={live.cancel} />;
+
+    case "inviting":
+      return <LiveRingingScreen host={host} stage="requesting" onCancel={live.cancel} />;
+
     case "ringing":
+      return <LiveRingingScreen host={host} stage="ringing" onCancel={live.cancel} />;
+
+    case "accepted":
+      return <LiveRingingScreen host={host} stage="accepted" onCancel={live.cancel} />;
+
     case "active":
       // Audio calls have their own screen: no camera is requested for them, so
       // there is nothing to show but the person being called.
@@ -633,6 +678,7 @@ export function CallSessionRoute() {
             callStatus={session.status}
             startedAt={session.startedAt}
             onEnd={endCall}
+            timedSourcePreview={hasUploadedFreeVideoPreview}
             accessOverlay={overlay}
             subscriptionChecking={gate.status === "checking"}
             onRemoteEnded={onRemoteEnded}
@@ -665,9 +711,10 @@ export function CallSessionRoute() {
               gate={gate}
               host={host}
               onChooseChannel={chooseChannel}
-              onOpenSupportChat={() => setSupportOpen(true)}
+              onOpenSupportChat={openSupportChat}
               onStartNewCall={startFreshCall}
               onGoHome={() => navigate("/")}
+              welcomeBackName={session.caller.fullName}
             />
             {supportOverlay}
           </>

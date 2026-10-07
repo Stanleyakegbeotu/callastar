@@ -45,7 +45,7 @@ export function perioralRegion(ring:readonly MouthPoint[],width:number,height:nu
 /** Crops current-frame perioral pixels and applies a feathered polygon alpha. */
 export function drawPerioralPatch(
   context:CanvasRenderingContext2D, frame:CanvasImageSource, ring:readonly MouthPoint[],
-  width:number,height:number,faceWidthPx:number,
+  width:number,height:number,faceWidthPx:number, innerRing?:readonly MouthPoint[],
 ):boolean {
   const region=perioralRegion(ring,width,height,faceWidthPx);
   if(!region||context.canvas.width<=0||context.canvas.height<=0)return false;
@@ -61,10 +61,17 @@ export function drawPerioralPatch(
   context.clearRect(0,0,canvasWidth,canvasHeight);
   context.drawImage(frame,bounds.minX,bounds.minY,roiWidth,roiHeight,0,0,canvasWidth,canvasHeight);
   const scaleX=canvasWidth/roiWidth,scaleY=canvasHeight/roiHeight;
+  const fillRing=(target:CanvasRenderingContext2D, points:readonly MouthPoint[], normalized:boolean)=>{
+    target.beginPath();
+    points.forEach((p,i)=>{
+      const x=((normalized?p.x*width:p.x)-bounds.minX)*scaleX;
+      const y=((normalized?p.y*height:p.y)-bounds.minY)*scaleY;
+      i===0?target.moveTo(x,y):target.lineTo(x,y);
+    });
+    target.closePath();target.fillStyle='#fff';target.fill();
+  };
   maskContext.clearRect(0,0,canvasWidth,canvasHeight);
-  maskContext.beginPath();
-  expanded.forEach((p,i)=>{const x=(p.x-bounds.minX)*scaleX,y=(p.y-bounds.minY)*scaleY;i===0?maskContext.moveTo(x,y):maskContext.lineTo(x,y);});
-  maskContext.closePath();maskContext.fillStyle='#fff';maskContext.fill();
+  fillRing(maskContext,expanded,false);
   const feather=Math.max(.5,sigma*(scaleX+scaleY)/2);
   // The contour is one filled polygon, so raster gaps cannot form internally;
   // only the feather is needed here (no full-frame morphology pass).
@@ -72,6 +79,10 @@ export function drawPerioralPatch(
   featherContext.clearRect(0,0,canvasWidth,canvasHeight);
   featherContext.filter=`blur(${feather}px)`;featherContext.drawImage(mask,0,0);maskContext.filter='none';
   maskContext.clearRect(0,0,canvasWidth,canvasHeight);maskContext.drawImage(feathered,0,0);
+  // Three zones: full live cavity and lip surface, then only the perioral
+  // feather blends into the source. This also covers source lips beneath.
+  fillRing(maskContext,ring,true);
+  if(innerRing?.length===ring.length)fillRing(maskContext,innerRing,true);
   context.globalCompositeOperation='destination-in';context.drawImage(mask,0,0);context.globalCompositeOperation='source-over';
   return true;
 }

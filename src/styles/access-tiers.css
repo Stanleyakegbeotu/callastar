@@ -1,13 +1,6 @@
 /*
- * The three access plans as a ladder, and the screens around them on a desktop.
- *
- * Regular, Premium and Gold Access are one product sold three ways, so they are
- * drawn as one family with increasing weight rather than three unrelated cards:
- * plain, then tinted and badged, then solid.
- *
- * "Gold Access" is a product name. The top tier is deliberately NOT gold — it
- * is the deepest navy in the palette, which is how it reads as the most
- * substantial of the three without inventing a colour the brand does not have.
+ * Plus and Pro access plans, styled as two clear tiers. Plus is the
+ * recommended option; Pro uses the deeper treatment for the higher tier.
  */
 
 /* ------------------------------------------------------------- the ladder */
@@ -55,26 +48,28 @@
   margin-inline: auto;
 }
 
+.access-welcome-back {
+  margin: 0.4rem 0 0;
+  color: var(--blue-dark);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
 @media (min-width: 62rem) {
   .cs-sheet.access-panel-wide .plan-screen-heading {
     text-align: center;
   }
 }
 
-/* Entry tier: the quietest card, and the baseline the others are read against. */
-.plan-card.plan-card-regular {
-  background: var(--white);
-}
-
 /* Middle tier: tinted and bordered, carrying the Most Popular badge. */
-.plan-card.plan-card-premium {
+.plan-card.plan-card-plus {
   border-color: var(--blue);
   background: var(--blue-tint);
   box-shadow: 0 0.75rem 2rem oklch(0.45 0.16 258 / 0.14);
 }
 
 /* Top tier: solid navy. Everything inside it inverts. */
-.plan-card.plan-card-gold {
+.plan-card.plan-card-pro {
   border-color: transparent;
   background:
     radial-gradient(circle at 85% 0%, oklch(0.34 0.09 255 / 0.85) 0%, transparent 60%),
@@ -82,28 +77,28 @@
   box-shadow: 0 0.75rem 2rem oklch(0.12 0.03 258 / 0.3);
 }
 
-.plan-card.plan-card-gold .plan-card-name,
-.plan-card.plan-card-gold .plan-card-price {
+.plan-card.plan-card-pro .plan-card-name,
+.plan-card.plan-card-pro .plan-card-price {
   color: var(--white);
 }
 
-.plan-card.plan-card-gold .plan-card-price small,
-.plan-card.plan-card-gold .plan-features li {
+.plan-card.plan-card-pro .plan-card-price small,
+.plan-card.plan-card-pro .plan-features li {
   color: oklch(1 0 0 / 0.75);
 }
 
-.plan-card.plan-card-gold .plan-check {
+.plan-card.plan-card-pro .plan-check {
   background: oklch(1 0 0 / 0.16);
   color: var(--white);
 }
 
-.plan-card.plan-card-gold .plan-choose {
+.plan-card.plan-card-pro .plan-choose {
   border-color: oklch(1 0 0 / 0.3);
   background: var(--white);
   color: var(--navy);
 }
 
-.plan-card.plan-card-gold .plan-choose:hover {
+.plan-card.plan-card-pro .plan-choose:hover {
   background: oklch(1 0 0 / 0.88);
 }
 
@@ -177,7 +172,7 @@
     box-shadow: 0 0.7rem 1.7rem rgb(29 53 94 / 7%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card.plan-card-premium {
+  .cs-sheet.access-panel-wide .plan-card.plan-card-plus {
     border-color: #0872e8;
     background:
       radial-gradient(circle at 95% 0%, rgb(130 194 255 / 27%), transparent 40%),
@@ -185,7 +180,7 @@
     box-shadow: 0 1rem 2.25rem rgb(8 94 203 / 25%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card.plan-card-gold {
+  .cs-sheet.access-panel-wide .plan-card.plan-card-pro {
     border-color: #173866;
     background:
       radial-gradient(circle at 95% 0%, rgb(67 143 244 / 25%), transparent 48%),
@@ -312,54 +307,54 @@
     background: #075bc2;
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-index,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-index,
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-name,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-name,
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-price,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-price {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-index,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-index,
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-name,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-name,
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-price,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-price {
     color: #fff;
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-price small,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-price small {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-price small,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-price small {
     color: rgb(255 255 255 / 78%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-description,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-description,
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-features li,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-features li {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-description,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-description,
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-features li,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-features li {
     color: rgb(255 255 255 / 82%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-duration,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-duration {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-duration,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-duration {
     border-color: rgb(255 255 255 / 25%);
     background: rgb(255 255 255 / 12%);
     color: #fff;
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-card-body,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-card-body {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-card-body,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-body {
     border-top-color: rgb(255 255 255 / 23%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-check,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-check {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-check,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-check {
     background: rgb(255 255 255 / 18%);
     color: #fff;
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-choose,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-choose {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-choose,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-choose {
     background: #fff;
     color: #0a5dc8;
     box-shadow: 0 0.5rem 1.1rem rgb(4 29 68 / 15%);
   }
 
-  .cs-sheet.access-panel-wide .plan-card-premium .plan-choose:hover,
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-choose:hover {
+  .cs-sheet.access-panel-wide .plan-card-plus .plan-choose:hover,
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-choose:hover {
     background: #ecf4ff;
   }
 
@@ -449,13 +444,504 @@
 
 @media (min-width: 62rem) {
   /* Room to lift the recommended card clear of the other two. */
-  .cs-sheet.access-panel-wide .plan-card-premium {
+  .cs-sheet.access-panel-wide .plan-card-plus {
     transform: translateY(-0.5rem);
   }
 
-  .cs-sheet.access-panel-wide .plan-card-gold .plan-badge {
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-badge {
     background: oklch(1 0 0 / 0.16);
     color: var(--white);
+  }
+}
+
+/* Desktop plans sit directly on the page canvas, with a compact comparison. */
+@media (min-width: 62rem) {
+  .access-screen.access-screen-plans {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    padding: calc(var(--safe-top) + 1rem) clamp(2rem, 5vw, 4rem)
+      calc(var(--safe-bottom) + 1rem);
+  }
+
+  .access-screen-plans .access-screen-brand {
+    flex: none;
+    padding-bottom: 0.5rem;
+  }
+
+  .cs-sheet.access-panel-wide {
+    display: flex;
+    width: min(100%, 74rem);
+    max-width: 74rem;
+    max-height: none;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    overflow: visible;
+    margin: 0 auto;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .cs-sheet.access-panel-wide .plan-screen-heading {
+    max-width: none;
+    margin: 0 auto;
+  }
+
+  .cs-sheet.access-panel-wide .plan-screen-eyebrow {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #9fc8ff;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-title {
+    color: #fff;
+    font-size: clamp(1.8rem, 2.4vw, 2.35rem);
+    line-height: 1.08;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-copy {
+    margin-top: 0.4rem;
+    color: rgb(255 255 255 / 76%);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  .cs-sheet.access-panel-wide .plan-list {
+    flex: none;
+    gap: 1rem;
+    margin-top: 1.1rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card {
+    min-height: 0;
+    align-items: center;
+    padding: 1.1rem;
+    border-radius: 1.2rem;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-head {
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-heading {
+    width: 100%;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-name {
+    justify-content: center;
+    font-size: 1.2rem;
+    line-height: 1.15;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-price {
+    font-size: 1.45rem;
+    line-height: 1;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-price small {
+    font-size: 0.68rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-duration {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    gap: 0.35rem;
+    margin: 0.65rem 0 0;
+    color: var(--slate);
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-pro .plan-card-duration {
+    color: rgb(255 255 255 / 78%);
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-body {
+    flex: 1;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features {
+    gap: 0.38rem;
+    justify-items: center;
+    width: 100%;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features li {
+    justify-content: center;
+    gap: 0.45rem;
+    font-size: 0.76rem;
+    line-height: 1.25;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card > .plan-badge {
+    align-self: center;
+    text-align: center;
+  }
+
+  .cs-sheet.access-panel-wide .plan-check {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-choose {
+    justify-content: center;
+    min-height: 2.65rem;
+    border-radius: 0.8rem;
+    padding: 0 0.8rem;
+    font-size: 0.85rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-quality-note {
+    max-width: 58rem;
+    margin: 0.65rem auto 0;
+    padding: 0;
+    color: rgb(255 255 255 / 66%);
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .cs-sheet.access-panel-wide .plan-quality-note .cs-note-icon {
+    color: #9fc8ff;
+  }
+
+  .cs-sheet.access-panel-wide .join-text-action {
+    margin: 0.55rem auto 0;
+    color: rgb(255 255 255 / 85%);
+  }
+}
+
+@media (min-width: 62rem) and (max-height: 50rem) {
+  .access-screen.access-screen-plans {
+    padding-block: 0.5rem;
+  }
+
+  .access-screen-plans .access-screen-brand {
+    padding-bottom: 0.25rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-screen-eyebrow {
+    margin-bottom: 0.2rem;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-title {
+    font-size: 1.7rem;
+  }
+
+  .cs-sheet.access-panel-wide .sheet-copy {
+    margin-top: 0.25rem;
+    font-size: 0.82rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-list {
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card {
+    padding: 0.85rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-card-body {
+    gap: 0.55rem;
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features {
+    gap: 0.28rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-features li {
+    font-size: 0.71rem;
+    line-height: 1.2;
+  }
+
+  .cs-sheet.access-panel-wide .plan-choose {
+    min-height: 2.4rem;
+  }
+
+  .cs-sheet.access-panel-wide .plan-quality-note {
+    margin-top: 0.45rem;
+    font-size: 0.62rem;
+  }
+
+  .cs-sheet.access-panel-wide .join-text-action {
+    margin-top: 0.3rem;
+    font-size: 0.9rem;
+  }
+}
+
+/* A card-free payment step with a clear plan summary and payment choices. */
+@media (min-width: 48rem) {
+  .access-screen.access-screen-payment {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    padding: calc(var(--safe-top) + 1.25rem) clamp(2rem, 5vw, 4rem)
+      calc(var(--safe-bottom) + 1.25rem);
+  }
+
+  .access-screen-payment .access-screen-brand {
+    flex: none;
+    padding-bottom: 0.75rem;
+  }
+
+  .cs-sheet.access-panel-compact {
+    display: flex;
+    width: min(100%, 54rem);
+    max-width: 54rem;
+    max-height: none;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    overflow: visible;
+    margin: 0 auto;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .payment-overview {
+    width: 100%;
+    max-width: 48rem;
+    margin: 0 auto;
+  }
+
+  .cs-sheet.access-panel-compact .sheet-title {
+    color: var(--white);
+    font-size: clamp(2rem, 3vw, 2.8rem);
+    letter-spacing: -0.045em;
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary {
+    gap: 1rem;
+    margin-top: 1.25rem;
+    border-top: 1px solid rgb(255 255 255 / 20%);
+    border-bottom: 1px solid rgb(255 255 255 / 20%);
+    border-radius: 0;
+    padding: 1rem 0;
+    background: transparent;
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    background: transparent;
+    color: #9fc8ff;
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary-text strong,
+  .cs-sheet.access-panel-compact .plan-summary-price {
+    color: var(--white);
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary-text span {
+    color: rgb(255 255 255 / 72%);
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary-price {
+    border-left-color: rgb(255 255 255 / 24%);
+  }
+
+  .cs-sheet.access-panel-compact .sheet-copy {
+    margin-top: 0.85rem;
+    color: rgb(255 255 255 / 74%);
+    font-size: 0.95rem;
+  }
+
+  .payment-methods {
+    width: 100%;
+    max-width: 54rem;
+    margin: 1.4rem auto 0;
+  }
+
+  .payment-methods .pay-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 0;
+  }
+
+  .payment-methods .pay-action {
+    display: grid;
+    min-height: 10rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    gap: 0.9rem;
+    border-color: rgb(255 255 255 / 20%);
+    border-radius: 1.2rem;
+    padding: 1.15rem;
+    background: rgb(255 255 255 / 7%);
+    color: var(--white);
+  }
+
+  .payment-methods .pay-action:hover:not(:disabled) {
+    border-color: rgb(255 255 255 / 48%);
+    background: rgb(255 255 255 / 12%);
+  }
+
+  .payment-methods .pay-action .pay-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    grid-column: 1 / -1;
+    border-radius: 0.85rem;
+  }
+
+  .payment-methods .pay-action-text {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: end;
+    gap: 0.3rem;
+  }
+
+  .payment-methods .pay-action-text strong {
+    color: var(--white);
+    font-size: 1rem;
+  }
+
+  .payment-methods .pay-action-text span {
+    color: rgb(255 255 255 / 72%);
+    font-size: 0.82rem;
+  }
+
+  .payment-methods .pay-action-arrow {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: end;
+    color: #9fc8ff;
+  }
+
+  .payment-methods .pay-action:disabled {
+    border-color: rgb(255 255 255 / 12%);
+    background: rgb(255 255 255 / 4%);
+    color: rgb(255 255 255 / 48%);
+  }
+
+  .payment-methods .pay-action:disabled .pay-action-text strong,
+  .payment-methods .pay-action:disabled .pay-action-text span {
+    color: rgb(255 255 255 / 48%);
+  }
+
+  .payment-methods .sheet-security {
+    max-width: 42rem;
+    margin: 0.9rem auto 0;
+    color: rgb(255 255 255 / 64%);
+    font-size: 0.78rem;
+  }
+
+  .payment-methods .sheet-security svg {
+    color: #9fc8ff;
+  }
+
+  .payment-methods .sheet-actions {
+    margin-top: 0.5rem;
+    padding: 0;
+  }
+
+  .payment-methods .join-text-action {
+    display: block;
+    margin: 0 auto;
+    color: rgb(255 255 255 / 84%);
+  }
+}
+
+@media (min-width: 62rem) {
+  .cs-sheet.access-panel-compact {
+    display: grid;
+    width: min(100%, 72rem);
+    max-width: 72rem;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: center;
+    column-gap: clamp(3rem, 7vw, 6.5rem);
+  }
+
+  .payment-overview {
+    max-width: none;
+    margin: 0;
+  }
+
+  .cs-sheet.access-panel-compact .sheet-title {
+    max-width: 13ch;
+    font-size: clamp(2.6rem, 4vw, 3.8rem);
+    line-height: 1.04;
+  }
+
+  .cs-sheet.access-panel-compact .plan-summary {
+    margin-top: 1.6rem;
+  }
+
+  .cs-sheet.access-panel-compact .sheet-copy {
+    max-width: 36rem;
+    margin-top: 1rem;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .payment-methods {
+    max-width: none;
+    margin: 0;
+  }
+}
+
+@media (min-width: 48rem) and (max-height: 44rem) {
+  .access-screen.access-screen-payment {
+    padding-block: 0.6rem;
+  }
+
+  .access-screen-payment .access-screen-brand {
+    padding-bottom: 0.35rem;
+  }
+
+  .payment-methods {
+    margin-top: 0.9rem;
+  }
+
+  .payment-methods .pay-action {
+    min-height: 8.5rem;
+    gap: 0.6rem;
+    padding: 0.9rem;
+  }
+
+  .payment-methods .sheet-security {
+    margin-top: 0.65rem;
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .access-screen-payment .payment-methods .sheet-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-top: auto;
+    padding-top: 1rem;
+    padding-bottom: calc(var(--safe-bottom) + 1.25rem);
+    background: var(--white);
+    box-shadow: 0 -1rem 1.25rem var(--white);
   }
 }
 
@@ -546,4 +1032,819 @@
   .pay-action {
     transition: none;
   }
+}
+
+/* Full-page payment choice on phones. The desktop presentation stays separate. */
+@media (max-width: 47.99rem) {
+  .access-screen.access-screen-payment {
+    padding-top: calc(var(--safe-top) + 0.9rem);
+    background:
+      radial-gradient(circle at 85% 8%, rgb(33 112 214 / 29%), transparent 38%),
+      linear-gradient(160deg, #102e59 0%, #071d42 55%, #06152e 100%);
+  }
+
+  .access-screen-payment .access-screen-brand {
+    padding-bottom: 0.65rem;
+  }
+
+  .access-screen-payment .cs-sheet.access-panel-compact {
+    width: 100%;
+    max-height: none;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding: clamp(1.25rem, 3.5vh, 2rem) max(1.25rem, var(--safe-right)) calc(var(--safe-bottom) + 1.25rem) max(1.25rem, var(--safe-left));
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .access-screen-payment .payment-overview,
+  .access-screen-payment .payment-methods {
+    width: min(100%, 30rem);
+    margin-inline: auto;
+  }
+
+  .access-screen-payment .sheet-title {
+    max-width: 13ch;
+    color: #fff;
+    font-size: clamp(2.2rem, 9vw, 3rem);
+    letter-spacing: -0.055em;
+    line-height: 1.03;
+  }
+
+  .access-screen-payment .plan-summary {
+    gap: 0.75rem;
+    margin-top: clamp(1.3rem, 3.5vh, 2rem);
+    border-top: 1px solid rgb(255 255 255 / 22%);
+    border-bottom: 1px solid rgb(255 255 255 / 22%);
+    border-radius: 0;
+    padding: 0.9rem 0;
+    background: transparent;
+  }
+
+  .access-screen-payment .plan-summary-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 12%);
+    color: #b5d9ff;
+  }
+
+  .access-screen-payment .plan-summary-text strong,
+  .access-screen-payment .plan-summary-price {
+    color: #fff;
+  }
+
+  .access-screen-payment .plan-summary-text span {
+    color: rgb(255 255 255 / 68%);
+    font-size: 0.78rem;
+  }
+
+  .access-screen-payment .plan-summary-price {
+    border-left-color: rgb(255 255 255 / 22%);
+    font-size: clamp(1.3rem, 5vw, 1.65rem);
+  }
+
+  .access-screen-payment .sheet-copy {
+    margin-top: 1rem;
+    color: rgb(255 255 255 / 79%);
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .access-screen-payment .payment-methods {
+    margin-top: clamp(1.4rem, 3.6vh, 2.2rem);
+  }
+
+  .access-screen-payment .pay-actions {
+    gap: 0.9rem;
+    margin: 0;
+  }
+
+  .access-screen-payment .pay-action {
+    position: relative;
+    min-height: 5.6rem;
+    gap: 0.75rem;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 30%);
+    border-radius: 1.05rem;
+    padding: 0.9rem 0.85rem;
+    color: #fff;
+    box-shadow: 0 0.7rem 1.55rem rgb(0 0 0 / 18%);
+    animation: payment-button-breathe 3.5s ease-in-out infinite;
+    transition: filter 180ms ease, box-shadow 180ms ease;
+  }
+
+  .access-screen-payment .pay-action.pay-action-whatsapp {
+    background: linear-gradient(115deg, #157c4d, #159b5b 70%, #1aae65);
+  }
+
+  .access-screen-payment .pay-action.pay-action-chat {
+    background: linear-gradient(115deg, #1262c6, #0f83f5 72%, #3998ff);
+    animation-delay: 1.75s;
+  }
+
+  .access-screen-payment .pay-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+    border: 1px solid rgb(255 255 255 / 24%);
+    border-radius: 0.75rem;
+    background: rgb(255 255 255 / 15%);
+  }
+
+  .access-screen-payment .pay-icon svg {
+    width: 1.45rem;
+    height: 1.45rem;
+  }
+
+  .access-screen-payment .pay-action-text {
+    gap: 0.2rem;
+  }
+
+  .access-screen-payment .pay-action-text strong {
+    color: #fff;
+    font-size: 0.97rem;
+    font-weight: 760;
+    line-height: 1.2;
+  }
+
+  .access-screen-payment .pay-action-text span {
+    color: rgb(255 255 255 / 82%);
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .access-screen-payment .pay-action-arrow {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    border: 1px solid rgb(255 255 255 / 26%);
+    border-radius: 50%;
+    padding: 0.35rem;
+    color: #fff;
+    animation: payment-arrow-point 2.4s ease-in-out infinite;
+  }
+
+  .access-screen-payment .pay-action-chat .pay-action-arrow {
+    animation-delay: 1.2s;
+  }
+
+  .access-screen-payment .pay-action:disabled {
+    border-color: rgb(255 255 255 / 17%);
+    background: rgb(255 255 255 / 8%);
+    box-shadow: none;
+    animation: none;
+  }
+
+  .access-screen-payment .pay-action:disabled .pay-icon {
+    color: rgb(255 255 255 / 55%);
+  }
+
+  .access-screen-payment .pay-action:disabled .pay-action-text strong,
+  .access-screen-payment .pay-action:disabled .pay-action-text span {
+    color: rgb(255 255 255 / 55%);
+  }
+
+  .access-screen-payment .sheet-security {
+    margin-top: 1.1rem;
+    color: rgb(255 255 255 / 67%);
+    font-size: 0.79rem;
+  }
+
+  .access-screen-payment .sheet-security svg {
+    color: #a7d0ff;
+  }
+
+  .access-screen-payment .payment-methods .sheet-actions {
+    position: static;
+    margin-top: 1.1rem;
+    padding: 0 0 0.25rem;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .access-screen-payment .join-text-action {
+    justify-self: center;
+    color: #c9e0ff;
+  }
+}
+
+@media (max-width: 47.99rem) and (hover: hover) {
+  .access-screen-payment .pay-action:hover:not(:disabled) {
+    filter: brightness(1.09);
+    box-shadow: 0 0.85rem 1.8rem rgb(0 0 0 / 23%);
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .access-screen-payment .pay-action:active:not(:disabled) {
+    animation: none;
+    transform: scale(0.975);
+    filter: brightness(1.08);
+  }
+
+  .access-screen-payment .pay-action:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 3px;
+  }
+}
+
+@keyframes payment-button-breathe {
+  0%, 100% { transform: scale(1); box-shadow: 0 0.7rem 1.55rem rgb(0 0 0 / 18%); }
+  50% { transform: scale(1.012); box-shadow: 0 0.85rem 1.75rem rgb(0 0 0 / 23%); }
+}
+
+@keyframes payment-arrow-point {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(0.25rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .access-screen-payment .pay-action,
+  .access-screen-payment .pay-action-arrow {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ================= mobile first Plus / Pro plan selector ================= */
+
+.access-screen.access-screen-plan-selector {
+  display: block;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 calc(10rem + env(safe-area-inset-bottom));
+  background: #fff;
+  color: var(--navy);
+}
+
+.plan-selector-hero {
+  position: relative;
+  display: flex;
+  width: min(100%, 54rem);
+  height: clamp(15rem, 31svh, 20rem);
+  min-height: 15rem;
+  margin: 0 auto;
+  align-items: flex-end;
+  isolation: isolate;
+}
+
+.plan-selector-cover,
+.plan-selector-hero-wash {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.plan-selector-cover {
+  object-fit: cover;
+  object-position: center 34%;
+}
+
+.plan-selector-hero-wash {
+  background:
+    linear-gradient(to right, rgb(255 255 255 / 24%), transparent 16%, transparent 84%, rgb(255 255 255 / 30%)),
+    linear-gradient(to bottom, rgb(255 255 255 / 0%) 22%, rgb(255 255 255 / 4%) 42%, rgb(255 255 255 / 46%) 68%, rgb(255 255 255 / 88%) 87%, #fff 100%);
+}
+
+.plan-selector-back {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 0.9rem);
+  left: 1rem;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 82%);
+  color: var(--navy);
+  box-shadow: 0 0.25rem 0.9rem rgb(7 29 66 / 12%);
+  backdrop-filter: blur(0.75rem);
+}
+
+.plan-selector-back svg {
+  transform: rotate(180deg);
+}
+
+.plan-selector-intro {
+  width: 100%;
+  padding: 0 1.125rem 0.75rem;
+}
+
+.plan-selector-eyebrow,
+.plan-selector-benefits-heading > div > span {
+  color: var(--blue-dark);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.plan-selector-intro h1 {
+  max-width: 42rem;
+  margin: 0.3rem 0 0;
+  color: var(--navy);
+  font-size: clamp(1.7rem, 6vw, 2.55rem);
+  font-weight: 780;
+  letter-spacing: -0.045em;
+  line-height: 1.07;
+  text-wrap: balance;
+}
+
+.plan-selector-intro > p {
+  max-width: 34rem;
+  margin: 0.5rem 0 0;
+  color: var(--slate);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.plan-selector-intro > .plan-selector-welcome {
+  margin-top: 0.45rem;
+  color: var(--blue-dark);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.plan-selector-content {
+  width: min(100% - 2rem, 44rem);
+  margin: 0 auto;
+  padding: 0.3rem 0 1rem;
+}
+
+.plan-selector-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0.65rem 0 0;
+}
+
+.plan-selector-options-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.plan-selector-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 6.7rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.18rem;
+  border: 1.5px solid var(--line);
+  border-radius: 1.2rem;
+  padding: 0.8rem 2.6rem 0.75rem 0.9rem;
+  background: #fff;
+  color: var(--navy);
+  cursor: pointer;
+  transition: border-color 170ms ease, background-color 170ms ease, box-shadow 170ms ease, transform 170ms ease;
+}
+
+.plan-selector-option.is-selected {
+  border-color: var(--blue);
+  background: color-mix(in oklab, var(--blue-soft) 48%, white);
+  box-shadow: 0 0.45rem 1.1rem rgb(20 86 217 / 10%);
+}
+
+.plan-selector-option.is-pro.is-selected {
+  background: color-mix(in oklab, var(--blue-tint) 54%, white);
+}
+
+.plan-selector-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.plan-selector-option:has(input:focus-visible) {
+  outline: 3px solid color-mix(in oklab, var(--blue) 38%, transparent);
+  outline-offset: 3px;
+}
+
+.plan-selector-popular {
+  position: absolute;
+  top: -0.72rem;
+  left: 0.75rem;
+  max-width: calc(100% - 1.5rem);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  padding: 0.27rem 0.55rem;
+  background: var(--blue);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.plan-selector-option-name {
+  color: var(--navy);
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.plan-selector-option-price {
+  color: var(--navy);
+  font-size: clamp(1.2rem, 4.7vw, 1.5rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+.plan-selector-option-duration {
+  color: var(--slate);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.plan-selector-radio {
+  position: absolute;
+  top: 50%;
+  right: 0.8rem;
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border: 1.5px solid #9aaac0;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateY(-50%);
+}
+
+.plan-selector-radio i {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.plan-selector-option.is-selected .plan-selector-radio {
+  border-color: var(--blue);
+}
+
+.plan-selector-option.is-selected .plan-selector-radio i {
+  background: var(--blue);
+}
+
+.plan-selector-benefits {
+  margin-top: 0.85rem;
+  border: 1px solid #dde7f1;
+  border-radius: 1.2rem;
+  padding: 0.8rem 0.9rem 0.7rem;
+  background: #f6f9fc;
+  animation: plan-benefits-in 180ms ease both;
+}
+
+@keyframes plan-benefits-in {
+  from { opacity: 0.65; transform: translateY(0.25rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.plan-selector-benefits-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.plan-selector-benefits-heading h2 {
+  margin: 0.15rem 0 0;
+  color: var(--navy);
+  font-size: 1.1rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.plan-selector-benefits-heading > svg {
+  flex: none;
+  color: var(--blue);
+}
+
+.plan-selector-includes,
+.plan-selector-description {
+  margin: 0.55rem 0 0;
+  color: var(--slate);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.plan-selector-includes {
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+
+.plan-selector-benefit-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-selector-benefit-list li {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.45rem;
+  color: var(--navy);
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.plan-selector-benefit-list li > span {
+  display: grid;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--blue) 12%, white);
+  color: var(--blue-dark);
+}
+
+.plan-selector-continue {
+  display: flex;
+  width: 100%;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0.8rem 1rem;
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 750;
+  text-align: center;
+  box-shadow: 0 0.4rem 1rem rgb(20 86 217 / 15%);
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.plan-selector-actions {
+  position: fixed;
+  z-index: 5;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 0.55rem max(1rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  background: linear-gradient(to bottom, rgb(255 255 255 / 93%), #fff 24%);
+  box-shadow: 0 -0.5rem 1.5rem rgb(7 29 66 / 5%);
+}
+
+.plan-selector-actions .plan-selector-continue {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+.plan-selector-actions .plan-selector-quality {
+  max-width: 44rem;
+  margin: 0.55rem auto 0;
+}
+
+.plan-selector-continue:hover:not(:disabled) {
+  background: var(--blue-dark);
+}
+
+.plan-selector-continue:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.plan-selector-continue:disabled {
+  background: #9aaac0;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.plan-selector-quality {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.69rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.plan-selector-unavailable {
+  margin: 1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 1rem;
+  background: #f6f9fc;
+  color: var(--slate);
+  text-align: center;
+}
+
+.plan-selector-skeleton {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.plan-selector-skeleton span {
+  min-height: 7.25rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(100deg, #f1f5fa 25%, #e5edf6 42%, #f1f5fa 60%);
+  background-size: 220% 100%;
+  animation: plan-selector-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes plan-selector-shimmer {
+  to { background-position-x: -220%; }
+}
+
+@media (max-width: 359px) {
+  .plan-selector-content { width: calc(100% - 2rem); }
+  .plan-selector-options { gap: 0.6rem; }
+  .plan-selector-option { min-height: 6.4rem; padding-right: 2.25rem; padding-left: 0.7rem; }
+  .plan-selector-radio { right: 0.6rem; width: 1.2rem; height: 1.2rem; }
+  .plan-selector-intro { padding-inline: 1rem; }
+}
+
+@media (min-width: 768px) {
+  .access-screen.access-screen-plan-selector {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding: 0 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  .plan-selector-actions {
+    position: static;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .plan-selector-hero {
+    height: clamp(18rem, 34vh, 22rem);
+  }
+
+  .plan-selector-intro {
+    padding: 0 2rem 1.25rem;
+  }
+
+  .plan-selector-content {
+    padding-top: 0.5rem;
+  }
+
+  .plan-selector-options { gap: 1rem; }
+  .plan-selector-option { min-height: 8rem; padding-inline: 1.25rem 3rem; }
+  .plan-selector-popular { left: 1rem; }
+  .plan-selector-benefits { margin-top: 1.25rem; padding: 1.25rem 1.5rem; }
+  .plan-selector-benefits-heading h2 { font-size: 1.25rem; }
+  .plan-selector-benefit-list { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.5rem; }
+  .plan-selector-continue { min-height: 3.625rem; font-size: 1.0625rem; }
+}
+
+/* Desktop: make the profile introduction and package selector one viewport. */
+@media (min-width: 1024px) {
+  .access-screen.access-screen-plan-selector {
+    display: grid;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    grid-template-columns: minmax(18rem, 0.78fr) minmax(0, 1.42fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+    padding: 0;
+    background: #f7f9fc;
+  }
+
+  .access-screen.access-screen-plan-selector > .plan-selector-hero {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    align-items: flex-end;
+    background: #e8eff8;
+  }
+
+  .plan-selector-hero-wash {
+    background:
+      linear-gradient(to bottom, rgb(7 29 66 / 4%) 20%, rgb(255 255 255 / 25%) 48%, rgb(255 255 255 / 90%) 76%, #fff 100%),
+      linear-gradient(to right, transparent 70%, rgb(247 249 252 / 35%) 100%);
+  }
+
+  .plan-selector-back {
+    top: 2rem;
+    left: 2rem;
+  }
+
+  .plan-selector-intro {
+    padding: 0 clamp(1.75rem, 3vw, 3.25rem) clamp(2.25rem, 6vh, 4rem);
+  }
+
+  .plan-selector-intro h1 {
+    max-width: 12ch;
+    font-size: clamp(2rem, 3.1vw, 3rem);
+    line-height: 1.02;
+  }
+
+  .plan-selector-intro > p {
+    max-width: 32rem;
+    font-size: 0.95rem;
+  }
+
+  .plan-selector-content {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    gap: clamp(0.7rem, 1.6vh, 1.25rem);
+    margin: 0;
+    padding: clamp(1.5rem, 4vh, 3rem) clamp(1.75rem, 4.4vw, 4.5rem);
+  }
+
+  .plan-selector-options {
+    gap: clamp(0.75rem, 1.4vw, 1.25rem);
+    padding-top: 0.75rem;
+  }
+
+  .plan-selector-option {
+    min-height: clamp(6.4rem, 12vh, 8.25rem);
+    border-radius: 1.15rem;
+    padding-inline: clamp(1rem, 2vw, 1.5rem) 3.25rem;
+  }
+
+  .plan-selector-option-name { font-size: 1.05rem; }
+  .plan-selector-option-price { font-size: clamp(1.35rem, 2vw, 1.75rem); }
+  .plan-selector-option-duration { font-size: 0.78rem; }
+  .plan-selector-popular { left: 1.25rem; }
+
+  .plan-selector-benefits {
+    min-height: 0;
+    align-self: center;
+    margin: 0;
+    border-color: #e0e8f2;
+    border-radius: 1.25rem;
+    padding: clamp(1rem, 2.2vh, 1.5rem) clamp(1.1rem, 2vw, 1.75rem);
+    background: #fff;
+    box-shadow: 0 1.25rem 3.25rem rgb(7 29 66 / 5%);
+  }
+
+  .plan-selector-benefits-heading h2 { font-size: 1.3rem; }
+  .plan-selector-includes,
+  .plan-selector-description { margin-top: 0.45rem; font-size: 0.84rem; }
+
+  .plan-selector-benefit-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: clamp(1rem, 2vw, 2rem);
+    row-gap: 0.55rem;
+    margin-top: 0.8rem;
+  }
+
+  .plan-selector-benefit-list li { font-size: 0.84rem; line-height: 1.35; }
+
+  .plan-selector-actions { align-self: auto; }
+  .plan-selector-actions .plan-selector-continue { max-width: none; }
+  .plan-selector-actions .plan-selector-quality { max-width: none; }
+}
+
+@media (min-width: 1024px) and (max-height: 720px) {
+  .plan-selector-intro { padding-bottom: 1.75rem; }
+  .plan-selector-intro h1 { font-size: clamp(1.8rem, 2.7vw, 2.35rem); }
+  .plan-selector-content { gap: 0.55rem; padding-block: 1rem; }
+  .plan-selector-option { min-height: 5.9rem; }
+  .plan-selector-benefits { padding: 0.8rem 1.1rem; }
+  .plan-selector-benefit-list { row-gap: 0.3rem; margin-top: 0.55rem; }
+  .plan-selector-benefit-list li { font-size: 0.78rem; line-height: 1.25; }
+  .plan-selector-continue { min-height: 3.1rem; margin-top: 0.35rem; }
+  .plan-selector-quality { margin-top: 0.35rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-selector-option,
+  .plan-selector-continue { transition: none; }
+  .plan-selector-benefits,
+  .plan-selector-skeleton span { animation: none; }
 }

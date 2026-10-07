@@ -8,18 +8,9 @@
  *                                     `local` is the browser IndexedDB engine
  *                                     used while Supabase is not connected;
  *                                     `supabase` is the production path.
- *   VITE_ADMIN_AUTH_MODE=development  Development-only admin access. Honoured
- *                                     solely in a dev build; a production build
- *                                     ignores it completely.
  *   VITE_CALL_BACKEND=local           Where the public app resolves Call IDs.
  *                                     Defaults to match the admin data mode so
  *                                     locally created profiles are reachable.
- *   VITE_ENABLE_DEMO_VIDEO=true       Play the bundled demo clip instead of
- *                                     asking for the real camera.
- *   VITE_ENABLE_DEV_ADMIN_SHORTCUT=true
- *                                     Arm the hidden five-tap shortcut on the
- *                                     onboarding brand mark. Development only:
- *                                     a production build ignores it entirely.
  *   VITE_SUPPORT_WHATSAPP_NUMBER      Fallback support number for a workspace
  *                                     where no admin has saved one yet. The
  *                                     value in Admin → Settings always wins.
@@ -36,12 +27,8 @@
  *   VITE_RTC_TURN_USERNAME            TURN credential. Use short-lived
  *   VITE_RTC_TURN_CREDENTIAL          credentials; never commit a real secret.
  */
-function readFlag(value: string | undefined): boolean {
-  return value === "true" || value === "1";
-}
-
 export type AdminDataMode = "local" | "supabase";
-export type CallBackendMode = "local" | "mock" | "supabase";
+export type CallBackendMode = "local" | "supabase";
 
 /**
  * Development defaults to the local engine, production to Supabase. The value
@@ -54,7 +41,7 @@ function readAdminDataMode(value: string | undefined): AdminDataMode {
 }
 
 function readCallBackend(value: string | undefined, dataMode: AdminDataMode): CallBackendMode {
-  if (value === "local" || value === "mock" || value === "supabase") return value;
+  if (value === "local" || value === "supabase") return value;
   // Unset: follow the admin data mode, so a profile created in the local
   // dashboard can be called from the local public app without extra setup.
   return dataMode === "local" ? "local" : "supabase";
@@ -63,32 +50,15 @@ function readCallBackend(value: string | undefined, dataMode: AdminDataMode): Ca
 const adminDataMode = readAdminDataMode(import.meta.env.VITE_ADMIN_DATA_MODE);
 
 export const config = {
+  /** Temporarily offer video calls only. */
+  audioCallsEnabled: false,
+
   /** Where the admin dashboard reads and writes profiles, media and sessions. */
   adminDataMode,
-
-  /**
-   * Development admin access, and only that. `import.meta.env.DEV` is part of
-   * the condition on purpose: a production build can never take this path, so
-   * this is not an authentication bypass that can ship.
-   */
-  useDevelopmentAdminAuth:
-    import.meta.env.DEV && import.meta.env.VITE_ADMIN_AUTH_MODE === "development",
 
   /** Explicit only: production uses the Supabase Edge Function backend. */
   callBackend: readCallBackend(import.meta.env.VITE_CALL_BACKEND, adminDataMode),
 
-  /**
-   * When true the active call renders `public/media/call-demo.mp4` and never
-   * calls getUserMedia. The UI labels it as demo footage so prerecorded video
-   * is never passed off as the user's camera.
-   */
-  enableDemoVideo: readFlag(import.meta.env.VITE_ENABLE_DEMO_VIDEO),
-
-  /**
-   * Prefill the Join Call form with demo caller details. The Call ID is never
-   * prefilled: it now comes from a profile someone actually created.
-   */
-  prefillDemoForm: true,
 
   /**
    * Self-view is mirrored, the way phone cameras and every major call app show
@@ -96,15 +66,6 @@ export const config = {
    */
   mirrorLocalVideo: true,
 
-  /**
-   * The hidden five-tap shortcut on the onboarding brand mark.
-   *
-   * A development inspection convenience and nothing more. `import.meta.env.DEV`
-   * is half the condition on purpose: a production bundle evaluates this to
-   * false at build time, so the taps cannot become an authentication bypass.
-   */
-  enableDevAdminShortcut:
-    import.meta.env.DEV && readFlag(import.meta.env.VITE_ENABLE_DEV_ADMIN_SHORTCUT),
 } as const;
 
 /**
@@ -208,10 +169,6 @@ export const SUBSCRIPTION_TIMINGS = {
  * number in source, and never read this in a component — ask the settings
  * repository, which prefers the saved value.
  */
-export const SUPPORT = {
-  fallbackWhatsappNumber: import.meta.env.VITE_SUPPORT_WHATSAPP_NUMBER ?? "",
-} as const;
-
 /**
  * Customer care attachments. Images only: a support thread is for showing a
  * payment receipt, not for moving arbitrary files through the browser.
@@ -229,18 +186,17 @@ export const SUPPORT_LIMITS = {
  */
 export const MEDIA_LIMITS = {
   MAX_AVATAR_BYTES: 10 * 1024 * 1024,
+  MAX_COVER_BYTES: 10 * 1024 * 1024,
   MAX_REMOTE_VIDEO_BYTES: 100 * 1024 * 1024,
   /** One audio file per profile, played as the remote voice on an audio call. */
   MAX_REMOTE_AUDIO_BYTES: 50 * 1024 * 1024,
   AVATAR_MIME_TYPES: ["image/jpeg", "image/png", "image/webp"],
+  COVER_MIME_TYPES: ["image/jpeg", "image/png", "image/webp"],
   /** MP4 first: it is the format that plays everywhere, iOS included. */
   REMOTE_VIDEO_MIME_TYPES: ["video/mp4", "video/webm"],
   /** MP3 and AAC play everywhere; WAV and OGG are accepted where they do. */
   REMOTE_AUDIO_MIME_TYPES: ["audio/mpeg", "audio/mp3", "audio/aac", "audio/mp4", "audio/wav", "audio/ogg", "audio/webm"],
 } as const;
-
-/** Demo clip used only when `config.enableDemoVideo` is on. */
-export const DEMO_VIDEO_SRC = "/media/call-demo.mp4";
 
 /** Comma- or space-separated env list, emptied of blanks. */
 function readList(value: string | undefined): readonly string[] {
@@ -284,7 +240,7 @@ export const isLiveCallingConfigured = SIGNALING.url !== "";
  * What an operator's browser presents to register as a host.
  *
  * A shared secret, and therefore DEVELOPMENT ONLY — `import.meta.env.DEV` is half
- * the condition on purpose, exactly as it is for `useDevelopmentAdminAuth`.
+ * the condition on purpose, so production builds never embed a shared host credential.
  * Anything in a `VITE_` variable is compiled into the bundle and is public, and a
  * public host credential would let a stranger register as any profile and answer
  * its calls. A production build evaluates this to an empty string, so it cannot

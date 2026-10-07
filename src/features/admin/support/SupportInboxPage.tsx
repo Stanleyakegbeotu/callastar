@@ -103,6 +103,7 @@ export function SupportInboxPage() {
                       </span>
                     )}
                   </span>
+                  <span className="admin-inbox-subject">{conversation.customerEmail}</span>
                   <span className="admin-inbox-subject">{conversation.subject}</span>
                   <span className="admin-inbox-preview">
                     {conversation.lastMessageSender === "admin" && <em>You: </em>}

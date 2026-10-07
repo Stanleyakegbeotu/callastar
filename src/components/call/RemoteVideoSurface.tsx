@@ -7,6 +7,8 @@ interface RemoteVideoSurfaceProps {
   className: string;
   /** Whether to try playing with sound. Muted playback is the fallback. */
   wantsAudio: boolean;
+  /** Pauses only this uploaded source while its preview reconnects. */
+  paused?: boolean;
   /** Bumped by a user gesture to retry unmuted playback. */
   unmuteSignal: number;
   /**
@@ -26,6 +28,8 @@ interface RemoteVideoSurfaceProps {
   ended?: boolean;
   /** Fired when the media reaches its natural end. */
   onEnded?: () => void;
+  /** Playback time and duration, used for source-preview interruptions. */
+  onPlaybackProgress?: (currentTime: number, duration: number) => void;
 }
 
 /**
@@ -35,23 +39,25 @@ interface RemoteVideoSurfaceProps {
  *
  * It does NOT loop. The clip stands in for a person, and restarting them from
  * the top when the file runs out would be a visible lie about who is there —
- * what happens instead is the reconnecting state on their surface, over the
- * last frame they were seen in.
+ * what happens instead is the reconnecting state over the last frame they were
+ * seen in. During a free uploaded-source preview, this element pauses briefly
+ * at playback intervals while the rest of the call keeps running.
  *
- * There is deliberately no way to pause this from outside either. A call either
- * runs or it is over; the other person does not freeze while something is
- * checked in the background.
+ * Pausing is limited to the source itself; camera, call controls and the call
+ * timer keep running through the reconnecting interlude.
  */
 export function RemoteVideoSurface({
   url,
   className,
   wantsAudio,
+  paused = false,
   unmuteSignal,
   positionRef,
   onAudioBlocked,
   onReady,
   ended = false,
   onEnded,
+  onPlaybackProgress,
 }: RemoteVideoSurfaceProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -73,7 +79,7 @@ export function RemoteVideoSurface({
     // Already finished. Leave the last frame exactly where it is: this runs
     // again after a swap remounts the element, and playing here would restart
     // someone who has stopped.
-    if (ended) return;
+    if (ended || paused) return;
 
     const attempt = async () => {
       element.muted = !wantsAudio;
@@ -111,7 +117,7 @@ export function RemoteVideoSurface({
       // leaves a decoded buffer attached; clearing the source releases it.
       element.muted = true;
     };
-  }, [ended, onAudioBlocked, positionRef, unmuteSignal, url, wantsAudio]);
+  }, [ended, onAudioBlocked, paused, positionRef, unmuteSignal, url, wantsAudio]);
 
   return (
     <video
@@ -132,6 +138,7 @@ export function RemoteVideoSurface({
       preload="auto"
       onTimeUpdate={(event) => {
         positionRef.current = event.currentTarget.currentTime;
+        onPlaybackProgress?.(event.currentTarget.currentTime, event.currentTarget.duration);
       }}
       onCanPlay={onReady}
       onEnded={onEnded}

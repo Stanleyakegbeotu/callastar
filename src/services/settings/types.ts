@@ -16,13 +16,16 @@ export interface AppSettings {
   whatsappSupportNumber: string | null;
   /** What the admin typed, kept so the field shows it back to them readably. */
   whatsappSupportNumberDisplay: string | null;
+  /** Presence only. The Formspree endpoint is kept server-side and is never returned to the browser. */
+  formspreeConfigured: boolean;
   updatedAt: string;
 }
 
-export type AppSettingsPatch = Partial<Omit<AppSettings, "key" | "updatedAt">>;
+export type AppSettingsPatch = Partial<Omit<AppSettings, "key" | "updatedAt" | "formspreeConfigured">> & { formspreeEndpoint?: string | null };
 
 export const DEFAULT_APP_SETTINGS: Omit<AppSettings, "updatedAt"> = {
   key: "global",
-  whatsappSupportNumber: null,
-  whatsappSupportNumberDisplay: null,
+  whatsappSupportNumber: "14062813342",
+  whatsappSupportNumberDisplay: "+1 (406) 281-3342",
+  formspreeConfigured: false,
 };

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/ui/Icon";
@@ -6,8 +7,7 @@ import type { HostPreview } from "@/types/host";
 
 interface LiveRingingScreenProps {
   host: HostPreview;
-  /** True once the host has answered and is choosing how to appear. */
-  connecting: boolean;
+  stage: "requesting" | "ringing" | "accepted" | "connecting";
   onCancel: () => void;
 }
 
@@ -23,8 +23,46 @@ interface LiveRingingScreenProps {
  * nothing is connected yet, because continuing to say "Ringing…" after a call has
  * been picked up is simply untrue.
  */
-export function LiveRingingScreen({ host, connecting, onCancel }: LiveRingingScreenProps) {
+export function LiveRingingScreen({ host, stage, onCancel }: LiveRingingScreenProps) {
   const { t } = useTranslation();
+  const [requestNoticeComplete, setRequestNoticeComplete] = useState(false);
+  const [acceptedNoticeComplete, setAcceptedNoticeComplete] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setRequestNoticeComplete(true), 1_500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    setAcceptedNoticeComplete(false);
+    if (stage !== "accepted") return undefined;
+    const timer = window.setTimeout(() => setAcceptedNoticeComplete(true), 1_800);
+    return () => window.clearTimeout(timer);
+  }, [stage]);
+
+  const visibleStage =
+    stage === "accepted" && acceptedNoticeComplete
+      ? "connecting"
+      : stage === "ringing" && !requestNoticeComplete
+        ? "requesting"
+        : stage;
+  const waitingForHost = visibleStage === "requesting" || visibleStage === "ringing";
+  const statusCopy =
+    visibleStage === "requesting"
+      ? t("liveCall.sendingRequest", { name: host.displayName })
+      : visibleStage === "accepted"
+        ? t("liveCall.requestAccepted", { name: host.displayName })
+        : visibleStage === "connecting"
+          ? t("liveCall.connecting")
+          : t("liveCall.ringing");
+  const subCopy =
+    visibleStage === "requesting"
+      ? t("liveCall.waitingForAcceptance", { name: host.displayName })
+      : visibleStage === "ringing"
+        ? t("liveCall.waitingForAcceptance", { name: host.displayName })
+        : visibleStage === "accepted"
+          ? t("liveCall.connectingTo", { name: host.displayName })
+          : null;
 
   return (
     <main className="live-ring" aria-labelledby="ring-status">
@@ -38,7 +76,7 @@ export function LiveRingingScreen({ host, connecting, onCancel }: LiveRingingScr
       <div className="live-ring-veil" aria-hidden="true" />
 
       <div className="live-ring-body">
-        <span className={`live-ring-avatar ${connecting ? "" : "is-pulsing"}`.trim()}>
+        <span className={`live-ring-avatar ${waitingForHost ? "is-pulsing" : ""}`.trim()}>
           {host.avatarUrl ? (
             <img src={host.avatarUrl} alt="" />
           ) : (
@@ -50,10 +88,15 @@ export function LiveRingingScreen({ host, connecting, onCancel }: LiveRingingScr
 
         {/* One live region for the whole status, so a screen reader hears the
             change from ringing to connecting once rather than in fragments. */}
-        <p id="ring-status" className="live-ring-status" role="status" aria-live="polite">
-          {connecting ? (
-            t("liveCall.connecting")
-          ) : (
+        <p
+          id="ring-status"
+          className={`live-ring-status ${visibleStage === "accepted" ? "is-accepted" : ""}`.trim()}
+          role="status"
+          aria-live="polite"
+        >
+          {visibleStage === "requesting" && <span className="live-ring-request-spinner" aria-hidden="true" />}
+          {visibleStage === "accepted" && <Icon name="check" className="size-5" />}
+          {visibleStage === "ringing" ? (
             <>
               <span className="live-ring-bars" aria-hidden="true">
                 <i />
@@ -62,12 +105,10 @@ export function LiveRingingScreen({ host, connecting, onCancel }: LiveRingingScr
               </span>
               {t("liveCall.ringing")}
             </>
-          )}
+          ) : statusCopy}
         </p>
 
-        {!connecting && (
-          <p className="live-ring-sub">{t("liveCall.waitingFor", { name: host.shortName })}</p>
-        )}
+        {subCopy && <p className="live-ring-sub">{subCopy}</p>}
       </div>
 
       <div className="live-ring-controls">

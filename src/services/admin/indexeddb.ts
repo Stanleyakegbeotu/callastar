@@ -10,7 +10,7 @@ import { logDiagnostic } from "@/lib/utils";
  */
 
 export const DB_NAME = "callastar-development";
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 export const STORE_PROFILES = "profiles";
 /** File metadata, separate from the bytes so lists never pull a video into memory. */
@@ -34,6 +34,8 @@ export const STORE_SETTINGS = "appSettings";
 /* Version 5: issued access credentials, and what this browser has already used. */
 export const STORE_ACCESS_IDS = "subscriptionAccessIds";
 export const STORE_PREVIEW_ACCESS = "previewAccess";
+/** Version 6: one follow/like state per host and normalized caller email. */
+export const STORE_PROFILE_ENGAGEMENT = "profileEngagement";
 
 export type StorageErrorKind = "quota" | "unsupported" | "blocked" | "unknown";
 
@@ -279,6 +281,10 @@ function upgrade(db: IDBDatabase, oldVersion: number, transaction: IDBTransactio
   if (!db.objectStoreNames.contains(STORE_PREVIEW_ACCESS)) {
     db.createObjectStore(STORE_PREVIEW_ACCESS, { keyPath: "profileId" });
   }
+  if (!db.objectStoreNames.contains(STORE_PROFILE_ENGAGEMENT)) {
+    const engagement = db.createObjectStore(STORE_PROFILE_ENGAGEMENT, { keyPath: "id" });
+    engagement.createIndex("by_profile", "profileId");
+  }
 }
 
 export function openDatabase(): Promise<IDBDatabase> {
@@ -452,6 +458,7 @@ export async function clearLocalDatabase(): Promise<void> {
     STORE_SETTINGS,
     STORE_ACCESS_IDS,
     STORE_PREVIEW_ACCESS,
+    STORE_PROFILE_ENGAGEMENT,
   ];
   await runTransaction(stores, "readwrite", (scope) => {
     scope.store(STORE_PROFILES).clear();

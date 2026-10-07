@@ -7,7 +7,7 @@ import { RemoteConnectionState } from "@/components/call/RemoteConnectionState";
 import { RemoteVideoSurface } from "@/components/call/RemoteVideoSurface";
 import { VideoSurface } from "@/components/call/VideoSurface";
 import { Icon } from "@/components/ui/Icon";
-import { DEMO_VIDEO_SRC, config } from "@/lib/config";
+import { config } from "@/lib/config";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
 import type { LocalMediaController } from "@/types/media";
@@ -34,6 +34,8 @@ interface ActiveVideoCallPageProps {
   subscriptionChecking?: boolean;
   /** Told when the remote clip reaches its natural end. */
   onRemoteEnded?: () => void;
+  /** Free previews of an uploaded host source pause at regular intervals. */
+  timedSourcePreview?: boolean;
 }
 
 /**
@@ -55,6 +57,7 @@ export function ActiveVideoCallPage({
   accessOverlay,
   subscriptionChecking = false,
   onRemoteEnded,
+  timedSourcePreview = false,
 }: ActiveVideoCallPageProps) {
   const [swapped, setSwapped] = useState(false);
   // The self-view tile: which corner it is parked in, and its drag gestures.
@@ -74,36 +77,86 @@ export function ActiveVideoCallPage({
    */
   const [remoteEnded, setRemoteEnded] = useState(false);
   const remoteEndedRef = useRef(false);
+  const [sourceReconnecting, setSourceReconnecting] = useState(false);
+  const sourceReconnectingRef = useRef(false);
+  const sourceReconnectTimer = useRef<number | null>(null);
+  const nextReconnectAt = useRef(5);
+  const timedSourcePreviewRef = useRef(timedSourcePreview);
+  const onRemoteEndedRef = useRef(onRemoteEnded);
+  timedSourcePreviewRef.current = timedSourcePreview;
+  onRemoteEndedRef.current = onRemoteEnded;
   // Survives the remount that swapping causes, so the clip does not restart.
   const remotePosition = useRef(0);
   const seconds = useCallTimer(startedAt, callStatus === "active" && startedAt !== null);
 
   const isVideoCall = callType === "video";
-  const showLocalVideo = media.cameraEnabled && (config.enableDemoVideo || media.stream !== null);
+  const showLocalVideo = media.cameraEnabled && media.stream !== null;
   const remoteReady = callStatus === "active" && remote.status === "ready" && remote.url !== null;
-  const showReconnecting = remoteEnded && callStatus === "active" && !subscriptionChecking;
+  const showReconnecting =
+    (remoteEnded || sourceReconnecting) && callStatus === "active" && !subscriptionChecking;
 
   const handleAudioBlocked = useCallback((blocked: boolean) => setAudioBlocked(blocked), []);
   const handleRemoteReady = useCallback(() => setRemotePlayable(true), []);
+  const startSourceReconnect = useCallback((durationMs: number, final: boolean) => {
+    if (sourceReconnectTimer.current !== null) window.clearTimeout(sourceReconnectTimer.current);
+    sourceReconnectingRef.current = true;
+    setSourceReconnecting(true);
+    if (final) {
+      remoteEndedRef.current = true;
+      setRemoteEnded(true);
+    }
+    sourceReconnectTimer.current = window.setTimeout(() => {
+      sourceReconnectTimer.current = null;
+      sourceReconnectingRef.current = false;
+      setSourceReconnecting(false);
+      if (final) onRemoteEndedRef.current?.();
+    }, durationMs);
+  }, []);
+
+  const handleSourceProgress = useCallback(
+    (currentTime: number, duration: number) => {
+      if (!timedSourcePreviewRef.current || sourceReconnectingRef.current || remoteEndedRef.current) return;
+      // Let the natural end handler start the final, four-second interlude
+      // instead of showing a regular pause at the very end of the source.
+      if (Number.isFinite(duration) && duration - currentTime <= 0.2) return;
+      if (currentTime < nextReconnectAt.current) return;
+      nextReconnectAt.current += 5;
+      startSourceReconnect(5_000, false);
+    },
+    [startSourceReconnect],
+  );
+
   const handleRemoteEnded = useCallback(() => {
     // StrictMode and surface swaps can repeat `ended`; record only the edge.
     if (remoteEndedRef.current) return;
+    if (timedSourcePreviewRef.current) {
+      startSourceReconnect(4_000, true);
+      return;
+    }
     remoteEndedRef.current = true;
     setRemoteEnded(true);
-    onRemoteEnded?.();
-  }, [onRemoteEnded]);
+    onRemoteEndedRef.current?.();
+  }, [startSourceReconnect]);
 
   useEffect(() => {
     remoteEndedRef.current = false;
     setRemoteEnded(false);
+    sourceReconnectingRef.current = false;
+    setSourceReconnecting(false);
+    nextReconnectAt.current = 5;
+    if (sourceReconnectTimer.current !== null) {
+      window.clearTimeout(sourceReconnectTimer.current);
+      sourceReconnectTimer.current = null;
+    }
+    return () => {
+      if (sourceReconnectTimer.current !== null) {
+        window.clearTimeout(sourceReconnectTimer.current);
+        sourceReconnectTimer.current = null;
+      }
+    };
   }, [remote.url]);
 
-  const localVideo = (className: string) =>
-    config.enableDemoVideo ? (
-      <VideoSurface className={className} stream={null} demoSrc={DEMO_VIDEO_SRC} title="Demo footage" />
-    ) : (
-      <VideoSurface className={className} stream={media.stream} mirrored={config.mirrorLocalVideo} />
-    );
+  const localVideo = (className: string) => <VideoSurface className={className} stream={media.stream} mirrored={config.mirrorLocalVideo} />;
 
   const remoteVideo = (className: string) =>
     remoteReady && remote.url ? (
@@ -111,12 +164,14 @@ export function ActiveVideoCallPage({
         url={remote.url}
         className={`${className} remote-fade-in ${swapped ? "main-video-fit" : ""}`.trim()}
         wantsAudio={speakerOn && remote.hasAudio}
+        paused={sourceReconnecting || remoteEnded}
         unmuteSignal={unmuteSignal}
         positionRef={remotePosition}
         onAudioBlocked={handleAudioBlocked}
         onReady={handleRemoteReady}
         ended={remoteEnded}
         onEnded={handleRemoteEnded}
+        onPlaybackProgress={handleSourceProgress}
       />
     ) : null;
 
@@ -156,9 +211,6 @@ export function ActiveVideoCallPage({
         {mainSurface()}
         <div className="video-vignette" />
       </div>
-      {config.enableDemoVideo && isVideoCall && !swapped && (
-        <div className="demo-badge">Demo footage — live camera disabled</div>
-      )}
       <CallStatus displayName={host.displayName} seconds={seconds} status={callStatus} />
 
       {callStatus === "active" && remoteReady && (

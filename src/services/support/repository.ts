@@ -10,6 +10,7 @@ import type {
   SupportConversation,
   SupportMessageView,
 } from "./types";
+import type { PaymentMethod } from "./paymentMethods";
 
 /**
  * The seam for customer care. Both sides of a conversation — the customer's
@@ -33,6 +34,13 @@ export interface SupportRepository {
 
   listMessages(conversationId: string): Promise<SupportMessageView[]>;
   sendMessage(input: SendMessageInput): Promise<SentMessage>;
+  /** Atomically validates, records, and selects one payment method for an active checkout. */
+  selectPaymentMethod(input: {
+    conversationId: string;
+    planId: string;
+    checkoutIntentId: string;
+    method: PaymentMethod;
+  }): Promise<boolean>;
   /** The bytes of one attachment, fetched deliberately and never while listing. */
   getAttachment(assetId: string): Promise<Blob | null>;
 

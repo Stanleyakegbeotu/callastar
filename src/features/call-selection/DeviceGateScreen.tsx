@@ -12,7 +12,7 @@ interface DeviceGateScreenProps {
   reason: CallSupportReason;
   /** Preserved into the shareable link when the caller already has one. */
   callId?: string;
-  onContinueWithAudio: () => void;
+  onContinueWithAudio?: () => void;
   onGoHome: () => void;
 }
 
@@ -83,14 +83,16 @@ export function DeviceGateScreen({ reason, callId, onContinueWithAudio, onGoHome
 
         {/* Only offered where audio genuinely still works. An insecure context or
             a browser without WebRTC blocks both call types equally. */}
-        {isDeviceClass && <p className="device-gate-secondary">{t("deviceGate.secondary")}</p>}
+        {isDeviceClass && onContinueWithAudio && <p className="device-gate-secondary">{t("deviceGate.secondary")}</p>}
 
         <div className="device-gate-actions">
           {isDeviceClass ? (
             <>
-              <Button onClick={onContinueWithAudio} withArrow={false}>
-                {t("deviceGate.continueAudio")}
-              </Button>
+              {onContinueWithAudio && (
+                <Button onClick={onContinueWithAudio} withArrow={false}>
+                  {t("deviceGate.continueAudio")}
+                </Button>
+              )}
               <Button variant="secondary" withArrow={false} onClick={copyLink}>
                 <Icon name="copy" className="size-4" />
                 {t("deviceGate.copyLink")}

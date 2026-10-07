@@ -1589,6 +1589,11 @@ body:has(.studio-stage.is-expanded) .studio-layout > .studio-panel {
   color: #f8fafc;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
+.studio-render-controls .studio-inline-advanced label {
+  display: block;
+  padding: .2rem 0;
+  font-size: .78rem;
+}
 .studio-mobile-shell > .admin-page-header,
 .studio-mobile-shell > .studio-steps,
 .studio-mobile-shell .studio-layout > .studio-panel { display: none !important; }

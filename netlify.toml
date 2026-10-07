@@ -1,0 +1,24 @@
+[build]
+  command = "pnpm build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[edge_functions]]
+  function = "private-access"
+  path = "/*"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive, nosnippet, noimageindex"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=()"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

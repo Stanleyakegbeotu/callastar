@@ -8,6 +8,7 @@ import {
   STORE_BLOBS,
   STORE_EVENTS,
   STORE_PROFILES,
+  STORE_PROFILE_ENGAGEMENT,
   STORE_SESSIONS,
   runTransaction,
   type TransactionScope,
@@ -15,6 +16,7 @@ import {
 import { blobToDataUrl, readAudioMetadata, readVideoMetadata, validateFile } from "./mediaFiles";
 import type { AdminRepository } from "./repository";
 import { computeSessionMetrics } from "./sessionInsights";
+import { assertAudienceCount, engagementDelta, normalizeEngagementEmail, profileAudience, type ProfileEngagement } from "./profileEngagement";
 import type {
   AppendCallEventInput,
   AssetKind,
@@ -148,7 +150,7 @@ async function requireProfile(scope: TransactionScope, id: string): Promise<Host
   return profile;
 }
 
-async function dropAsset(scope: TransactionScope, assetId: string | null): Promise<void> {
+async function dropAsset(scope: TransactionScope, assetId: string | null | undefined): Promise<void> {
   if (!assetId) return;
   await scope.remove(STORE_ASSETS, assetId);
   await scope.remove(STORE_BLOBS, assetId);
@@ -234,10 +236,13 @@ export const localAdminRepository: AdminRepository = {
   async createProfile(input) {
     const displayName = assertDisplayName(input.displayName);
     const shortBio = assertShortBio(input.shortBio);
+    const baseFollowerCount = assertAudienceCount(input.baseFollowerCount ?? 0);
+    const baseLikeCount = assertAudienceCount(input.baseLikeCount ?? 0);
     const id = newId();
 
     const prepared: PreparedAsset[] = [];
     if (input.avatarFile) prepared.push(await prepareAsset(id, "avatar", input.avatarFile));
+    if (input.coverFile) prepared.push(await prepareAsset(id, "cover", input.coverFile));
     if (input.remoteVideoFile) prepared.push(await prepareAsset(id, "remote_video", input.remoteVideoFile));
     if (input.remoteAudioFile) prepared.push(await prepareAsset(id, "remote_audio", input.remoteAudioFile));
 
@@ -249,10 +254,15 @@ export const localAdminRepository: AdminRepository = {
         id,
         displayName,
         shortBio,
+        baseFollowerCount,
+        baseLikeCount,
+        trackedFollowerCount: 0,
+        trackedLikeCount: 0,
         status: input.status,
         callId,
         callIdKey,
         avatarAssetId: null,
+        coverAssetId: null,
         remoteVideoAssetId: null,
         remoteAudioAssetId: null,
         createdAt: timestamp,
@@ -263,6 +273,7 @@ export const localAdminRepository: AdminRepository = {
         await scope.put(STORE_ASSETS, asset.meta);
         await scope.put(STORE_BLOBS, asset.blob, asset.meta.id);
         if (asset.meta.kind === "avatar") profile.avatarAssetId = asset.meta.id;
+        else if (asset.meta.kind === "cover") profile.coverAssetId = asset.meta.id;
         else if (asset.meta.kind === "remote_audio") profile.remoteAudioAssetId = asset.meta.id;
         else profile.remoteVideoAssetId = asset.meta.id;
       }
@@ -275,6 +286,8 @@ export const localAdminRepository: AdminRepository = {
   async updateProfile(id, input) {
     const displayName = input.displayName === undefined ? undefined : assertDisplayName(input.displayName);
     const shortBio = input.shortBio === undefined ? undefined : assertShortBio(input.shortBio);
+    const baseFollowerCount = input.baseFollowerCount === undefined ? undefined : assertAudienceCount(input.baseFollowerCount);
+    const baseLikeCount = input.baseLikeCount === undefined ? undefined : assertAudienceCount(input.baseLikeCount);
 
     return runTransaction([STORE_PROFILES], "readwrite", async (scope) => {
       const profile = await requireProfile(scope, id);
@@ -282,6 +295,8 @@ export const localAdminRepository: AdminRepository = {
         ...profile,
         displayName: displayName ?? profile.displayName,
         shortBio: shortBio ?? profile.shortBio,
+        baseFollowerCount: baseFollowerCount ?? profile.baseFollowerCount ?? 0,
+        baseLikeCount: baseLikeCount ?? profile.baseLikeCount ?? 0,
         status: input.status ?? profile.status,
         updatedAt: nowIso(),
       };
@@ -291,7 +306,7 @@ export const localAdminRepository: AdminRepository = {
   },
 
   async deleteProfile(id) {
-    await runTransaction([STORE_PROFILES, STORE_ASSETS, STORE_BLOBS, STORE_SESSIONS], "readwrite", async (scope) => {
+    await runTransaction([STORE_PROFILES, STORE_ASSETS, STORE_BLOBS, STORE_SESSIONS, STORE_PROFILE_ENGAGEMENT], "readwrite", async (scope) => {
       const profile = await requireProfile(scope, id);
 
       // Call history is a record of something that happened, so deleting the
@@ -307,6 +322,42 @@ export const localAdminRepository: AdminRepository = {
         await dropAsset(scope, asset.id);
       }
       await scope.remove(STORE_PROFILES, profile.id);
+      const engagement = await scope.getAllFromIndex<ProfileEngagement>(STORE_PROFILE_ENGAGEMENT, "by_profile", profile.id);
+      for (const row of engagement) await scope.remove(STORE_PROFILE_ENGAGEMENT, row.id);
+    });
+  },
+
+  async getProfileEngagement(profileId, callerEmail) {
+    const email = normalizeEngagementEmail(callerEmail);
+    const id = JSON.stringify([profileId, email]);
+    return runTransaction([STORE_PROFILES, STORE_PROFILE_ENGAGEMENT], "readonly", async (scope) => {
+      const profile = await requireProfile(scope, profileId);
+      const previous = await scope.get<ProfileEngagement>(STORE_PROFILE_ENGAGEMENT, id);
+      return { ...profileAudience(profile), following: previous?.following ?? false, liked: previous?.liked ?? false };
+    });
+  },
+
+  async setProfileEngagement(profileId, callerEmail, change) {
+    const email = normalizeEngagementEmail(callerEmail);
+    const id = JSON.stringify([profileId, email]);
+    return runTransaction([STORE_PROFILES, STORE_PROFILE_ENGAGEMENT], "readwrite", async (scope) => {
+      const profile = await requireProfile(scope, profileId);
+      const previous = await scope.get<ProfileEngagement>(STORE_PROFILE_ENGAGEMENT, id);
+      const delta = engagementDelta(previous, change);
+      const timestamp = nowIso();
+      const next: HostProfile = {
+        ...profile,
+        trackedFollowerCount: Math.max(0, (profile.trackedFollowerCount ?? 0) + delta.followerDelta),
+        trackedLikeCount: Math.max(0, (profile.trackedLikeCount ?? 0) + delta.likeDelta),
+        updatedAt: timestamp,
+      };
+      const engagement: ProfileEngagement = {
+        id, profileId, callerEmail: email,
+        following: delta.following, liked: delta.liked, updatedAt: timestamp,
+      };
+      await scope.put(STORE_PROFILE_ENGAGEMENT, engagement);
+      await scope.put(STORE_PROFILES, next);
+      return { ...profileAudience(next), following: delta.following, liked: delta.liked };
     });
   },
 
@@ -342,6 +393,31 @@ export const localAdminRepository: AdminRepository = {
       const profile = await requireProfile(scope, id);
       await dropAsset(scope, profile.avatarAssetId);
       const next: HostProfile = { ...profile, avatarAssetId: null, updatedAt: nowIso() };
+      await scope.put(STORE_PROFILES, next);
+      return next;
+    });
+  },
+
+  async setCover(id, file) {
+    const prepared = await prepareAsset(id, "cover", file);
+
+    return runTransaction([STORE_PROFILES, STORE_ASSETS, STORE_BLOBS], "readwrite", async (scope) => {
+      const profile = await requireProfile(scope, id);
+      await scope.put(STORE_ASSETS, prepared.meta);
+      await scope.put(STORE_BLOBS, prepared.blob, prepared.meta.id);
+      await dropAsset(scope, profile.coverAssetId);
+
+      const next: HostProfile = { ...profile, coverAssetId: prepared.meta.id, updatedAt: nowIso() };
+      await scope.put(STORE_PROFILES, next);
+      return next;
+    });
+  },
+
+  async removeCover(id) {
+    return runTransaction([STORE_PROFILES, STORE_ASSETS, STORE_BLOBS], "readwrite", async (scope) => {
+      const profile = await requireProfile(scope, id);
+      await dropAsset(scope, profile.coverAssetId);
+      const next: HostProfile = { ...profile, coverAssetId: null, updatedAt: nowIso() };
       await scope.put(STORE_PROFILES, next);
       return next;
     });
@@ -446,18 +522,23 @@ export const localAdminRepository: AdminRepository = {
       const avatar = profile.avatarAssetId
         ? ((await scope.get<Blob>(STORE_BLOBS, profile.avatarAssetId)) ?? null)
         : null;
-      return { profile, avatar };
+      const cover = profile.coverAssetId
+        ? ((await scope.get<Blob>(STORE_BLOBS, profile.coverAssetId)) ?? null)
+        : null;
+      return { profile, avatar, cover };
     });
 
     if (!found) return null;
 
     const publicProfile: PublicHostProfile = {
+      ...profileAudience(found.profile),
       id: found.profile.id,
       displayName: found.profile.displayName,
       shortBio: found.profile.shortBio,
       avatarDataUrl: found.avatar
         ? await blobToDataUrl(found.avatar)
         : initialsAvatarDataUrl(found.profile.displayName),
+      coverDataUrl: found.cover ? await blobToDataUrl(found.cover) : null,
       remoteVideoAssetId: found.profile.remoteVideoAssetId,
       remoteAudioAssetId: found.profile.remoteAudioAssetId ?? null,
       status: found.profile.status,
@@ -476,18 +557,23 @@ export const localAdminRepository: AdminRepository = {
       const avatar = profile.avatarAssetId
         ? ((await scope.get<Blob>(STORE_BLOBS, profile.avatarAssetId)) ?? null)
         : null;
-      return { profile, avatar };
+      const cover = profile.coverAssetId
+        ? ((await scope.get<Blob>(STORE_BLOBS, profile.coverAssetId)) ?? null)
+        : null;
+      return { profile, avatar, cover };
     });
 
     if (!found) return null;
 
     return {
+      ...profileAudience(found.profile),
       id: found.profile.id,
       displayName: found.profile.displayName,
       shortBio: found.profile.shortBio,
       avatarDataUrl: found.avatar
         ? await blobToDataUrl(found.avatar)
         : initialsAvatarDataUrl(found.profile.displayName),
+      coverDataUrl: found.cover ? await blobToDataUrl(found.cover) : null,
       remoteVideoAssetId: found.profile.remoteVideoAssetId,
       remoteAudioAssetId: found.profile.remoteAudioAssetId ?? null,
       status: found.profile.status,

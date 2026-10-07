@@ -1,4 +1,5 @@
 import type { SubscriptionRequestStatus, SupportChannel } from "@/services/subscriptions/types";
+import { formatMinorUnits } from "@/services/subscriptions/money";
 
 /**
  * How subscription requests are described, defined once.
@@ -31,15 +32,9 @@ export const CHANNEL_LABELS: Record<SupportChannel, string> = {
   in_app: "In-app chat",
 };
 
-/** Money is stored in cents; it is only ever formatted for display. */
-export function formatUsdCents(cents: number): string {
-  const whole = cents / 100;
-  return whole.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: whole % 1 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
+/** Money is stored in the configured currency's minor units. */
+export function formatPlanPrice(amountMinorUnits: number, currencyCode: string): string {
+  return formatMinorUnits(amountMinorUnits, currencyCode);
 }
 
 /** A request nobody has finished dealing with yet. */

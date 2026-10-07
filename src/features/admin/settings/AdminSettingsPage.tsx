@@ -20,6 +20,8 @@ import { AdminPageHeader } from "../layout/AdminPageHeader";
 export function AdminSettingsPage() {
   const toast = useToast();
   const [number, setNumber] = useState("");
+  const [formspreeEndpoint, setFormspreeEndpoint] = useState("");
+  const [formspreeConfigured, setFormspreeConfigured] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,6 +35,7 @@ export function AdminSettingsPage() {
       .then((settings) => {
         if (cancelled) return;
         setSavedDigits(settings.whatsappSupportNumber);
+        setFormspreeConfigured(settings.formspreeConfigured);
         // Show back what they typed if we have it; otherwise group the digits so
         // a stored number is still readable.
         setNumber(
@@ -63,11 +66,14 @@ export function AdminSettingsPage() {
       const saved = await settingsRepository.updateAppSettings({
         whatsappSupportNumber: check.normalized,
         whatsappSupportNumberDisplay: number.trim(),
+        ...(formspreeEndpoint.trim() ? { formspreeEndpoint: formspreeEndpoint.trim() } : {}),
       });
       setSavedDigits(saved.whatsappSupportNumber);
+      setFormspreeConfigured(saved.formspreeConfigured);
+      setFormspreeEndpoint("");
       // Any payment screen open in another tab re-reads the number.
       broadcastLocalEvent("settings-updated");
-      toast.success("WhatsApp support number updated.");
+      toast.success("Support settings updated.");
     } catch (cause) {
       logDiagnostic("admin-settings-save", cause);
       setError("That change could not be saved.");
@@ -144,6 +150,19 @@ export function AdminSettingsPage() {
               {saving ? "Saving…" : "Save Changes"}
             </button>
           </div>
+        </form>
+      </section>
+
+      <section className="admin-card">
+        <div className="admin-card-heading"><h2>Protected payment notification</h2></div>
+        <p className="admin-hint">CallaStar sends selected payment and support events to this Formspree endpoint from the backend. The endpoint itself is never exposed to customers or returned to this browser.</p>
+        <form className="admin-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          <div className="admin-field">
+            <label htmlFor="formspree-endpoint">Formspree endpoint</label>
+            <input id="formspree-endpoint" className="admin-input" type="url" inputMode="url" autoComplete="off" placeholder={formspreeConfigured ? "Configured — enter a new endpoint to replace" : "https://formspree.io/f/..."} value={formspreeEndpoint} onChange={(event) => setFormspreeEndpoint(event.currentTarget.value)} disabled={loading} />
+            <p className="admin-note">{formspreeConfigured ? "An endpoint is configured. Leave this blank to keep the saved endpoint." : "No endpoint is configured yet. Notifications remain in the admin dashboard."}</p>
+          </div>
+          <div className="admin-form-actions"><button type="submit" className="admin-button admin-button-primary" disabled={saving || loading}>{saving ? "Saving…" : "Save Support Settings"}</button></div>
         </form>
       </section>
     </>

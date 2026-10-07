@@ -10,7 +10,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/ToastProvider";
 import { useSubscriptionRequest } from "../hooks/useCrmData";
 import { AdminPageHeader } from "../layout/AdminPageHeader";
-import { CHANNEL_LABELS, REQUEST_STATUS_LABELS, REQUEST_STATUS_TONE, formatUsdCents } from "./subscriptionInsights";
+import { CHANNEL_LABELS, REQUEST_STATUS_LABELS, REQUEST_STATUS_TONE, formatPlanPrice } from "./subscriptionInsights";
 
 type PendingAction = "confirm" | "reject" | null;
 
@@ -109,7 +109,7 @@ export function SubscriptionRequestDetailPage() {
     <>
       <AdminPageHeader
         title={request.reference}
-        description={`${request.planNameSnapshot} · ${formatUsdCents(request.amountUsdCents)}`}
+        description={`${request.planNameSnapshot} · ${formatPlanPrice(request.amountMinorUnits, request.currencyCode)}`}
         eyebrow={
           <Link className="admin-link" to="/admin/subscriptions">
             Subscriptions
@@ -143,7 +143,7 @@ export function SubscriptionRequestDetailPage() {
                 <dt>Amount</dt>
                 {/* The amount as it was quoted. A later price change does not
                     reach back into a request somebody already made. */}
-                <dd>{formatUsdCents(request.amountUsdCents)}</dd>
+                <dd>{formatPlanPrice(request.amountMinorUnits, request.currencyCode)}</dd>
               </div>
               <div>
                 <dt>Channel</dt>

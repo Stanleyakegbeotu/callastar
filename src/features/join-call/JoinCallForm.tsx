@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import { CallaStarMark } from "@/components/branding/CallaStarMark";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Spinner } from "@/components/ui/Spinner";
 import { looksLikeCallId } from "@/lib/callId";
 import { classifyEntryId, resolveEntryId, type EntryOutcome } from "@/services/access/resolveEntry";
-import { CALL_TIMINGS, config, isLiveCallingConfigured } from "@/lib/config";
-import { DEMO_CALLER, EMPTY_CALLER } from "@/lib/constants";
+import { CALL_TIMINGS, isLiveCallingConfigured } from "@/lib/config";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
 
+import { CountryPhoneField } from "./CountryPhoneField";
 import {
   hasErrors,
   normaliseJoinCall,
@@ -19,6 +20,7 @@ import {
   type JoinCallField,
   type JoinCallValues,
 } from "./validation";
+import { HostSocialActions } from "./HostSocialActions";
 
 interface JoinCallFormProps {
   callType: CallType;
@@ -48,12 +50,13 @@ const DETAIL_FIELDS: { field: JoinCallField; placeholder: string; icon: IconName
   { field: "email", placeholder: "Email Address", icon: "mail", type: "email", autoComplete: "email" },
 ];
 
+const CALL_ID_PLACEHOLDER = "CS-7K4P-Q9MX-2J8R";
+
 function initialValues(): JoinCallValues {
-  const caller = config.prefillDemoForm ? DEMO_CALLER : EMPTY_CALLER;
   return {
-    fullName: caller.fullName,
-    phone: caller.phone,
-    email: caller.email,
+    fullName: "",
+    phone: "",
+    email: "",
     // Never prefilled: a Call ID belongs to a profile someone created.
     callId: "",
   };
@@ -84,6 +87,14 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
     setValues(next);
     if (touched[field]) {
       setErrors((previous) => ({ ...previous, [field]: validateField(field, next) }));
+    }
+  };
+
+  const handlePhoneChange = (phone: string) => {
+    const next = { ...values, phone };
+    setValues(next);
+    if (touched.phone) {
+      setErrors((previous) => ({ ...previous, phone: validateField("phone", next) }));
     }
   };
 
@@ -149,12 +160,9 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
   };
 
   const renderDetails = () => (
-    <form className="join-dialog" onSubmit={handleDetailsSubmit} noValidate>
+    <form className="join-dialog join-details" onSubmit={handleDetailsSubmit} noValidate>
       <div className="join-dialog-head">
-        <span className="join-progress">Step 1 of 3</span>
-        <button type="button" className="join-close" onClick={onCancel} aria-label="Close">
-          <Icon name="close" className="size-5" />
-        </button>
+        <CallaStarMark size={64} className="join-heartbeat" />
       </div>
       <h1 className="join-title">Your details</h1>
       <p className="join-copy">Tell us who&apos;s joining the call.</p>
@@ -162,24 +170,34 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
       <div className="join-fields">
         {DETAIL_FIELDS.map(({ field, placeholder, icon, type, autoComplete }) => (
           <div key={field}>
-            <div className="cs-field">
-              <span className="cs-field-icon">
-                <Icon name={icon} className="size-6" />
-              </span>
-              <input
-                className="cs-input"
-                type={type}
-                value={values[field]}
-                onChange={handleChange(field)}
-                onBlur={handleBlur(field)}
-                placeholder={placeholder}
-                aria-label={placeholder}
-                aria-invalid={errors[field] ? true : undefined}
-                autoComplete={autoComplete}
+            {field === "phone" ? (
+              <CountryPhoneField
+                value={values.phone}
+                onChange={handlePhoneChange}
+                onBlur={handleBlur("phone")}
+                invalid={Boolean(errors.phone)}
+                describedBy={errors.phone ? "join-phone-error" : undefined}
               />
-            </div>
+            ) : (
+              <div className="cs-field">
+                <span className="cs-field-icon">
+                  <Icon name={icon} className="size-6" />
+                </span>
+                <input
+                  className="cs-input"
+                  type={type}
+                  value={values[field]}
+                  onChange={handleChange(field)}
+                  onBlur={handleBlur(field)}
+                  placeholder={placeholder}
+                  aria-label={placeholder}
+                  aria-invalid={errors[field] ? true : undefined}
+                  autoComplete={autoComplete}
+                />
+              </div>
+            )}
             {errors[field] && (
-              <p className="field-error" role="alert">
+              <p className="field-error" id={field === "phone" ? "join-phone-error" : undefined} role="alert">
                 {errors[field]}
               </p>
             )}
@@ -208,17 +226,27 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
       </p>
 
       <div className="join-fields">
-        <input
-          className="cs-input join-code-input"
-          value={values.callId}
-          onChange={handleChange("callId")}
-          onBlur={handleBlur("callId")}
-          placeholder="CS-7K4P-Q9MX-2J8R"
-          aria-label="Call ID"
-          aria-invalid={errors.callId ? true : undefined}
-          autoComplete="off"
-          spellCheck={false}
-        />
+        <div className="join-code-field">
+          <input
+            className="cs-input join-code-input"
+            value={values.callId}
+            onChange={handleChange("callId")}
+            onBlur={handleBlur("callId")}
+            placeholder={CALL_ID_PLACEHOLDER}
+            aria-label="Call ID"
+            aria-invalid={errors.callId ? true : undefined}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {!values.callId && (
+            <span className="join-code-prompt" aria-hidden="true">
+              <span className="join-code-example">
+                <span className="join-code-caret" />
+                {CALL_ID_PLACEHOLDER}
+              </span>
+            </span>
+          )}
+        </div>
         {errors.callId && (
           <p className="field-error" role="alert">
             {errors.callId}
@@ -290,28 +318,48 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
     if (!profile) return null;
 
     return (
-      <section className="join-dialog join-dialog-centered">
-        <h1 className="join-title">Ready to call</h1>
+      <section className="join-dialog join-dialog-centered ready-card">
+        <span className={`ready-status ${profile.available ? "is-online" : "is-offline"}`}>
+          <span aria-hidden="true" />
+          {profile.available ? "Online" : "Offline"}
+        </span>
+        <h1 className="join-title ready-heading">Ready to call</h1>
 
-        <div className="ready-avatar">
-          <img src={profile.avatarUrl} alt="" />
-          <span className="ready-verified" aria-label="Verified profile">
-            <Icon name="check" className="size-4" />
-          </span>
-          <span className="ready-online" aria-hidden="true" />
+        <div className="ready-cover" role="img" aria-label={profile.coverUrl ? `${profile.displayName} cover photo` : "Cover photo placeholder"}>
+          {profile.coverUrl ? (
+            <img className="ready-cover-image" src={profile.coverUrl} alt="" />
+          ) : (
+            <span className="ready-cover-placeholder" aria-hidden="true">
+              <Icon name="image" className="size-4" />
+              Cover photo
+            </span>
+          )}
         </div>
 
-        <p className="ready-name">{profile.displayName}</p>
-        {profile.shortBio && <p className="ready-role">{profile.shortBio}</p>}
-        <span className="ready-status">
-          <span aria-hidden="true" />
-          Ready to connect
-        </span>
+        <div className="ready-profile">
+          <div className="ready-avatar">
+            <img src={profile.avatarUrl} alt="" />
+            <span className="ready-verified" aria-label="Verified profile">
+              <Icon name="check" className="size-4" />
+            </span>
+          </div>
+          <p className="ready-name">{profile.displayName}</p>
+          <HostSocialActions key={profile.id} host={profile} callerEmail={values.email} />
+        </div>
 
-        <hr className="ready-divider" />
-        <p className="join-copy">You&apos;re about to connect with {profile.displayName}.</p>
+        <div className="ready-call-details">
+          <hr className="ready-divider" />
+          <p className="join-copy">You&apos;re about to connect with {profile.displayName}.</p>
 
-        <div className="join-actions">
+          {callType === "video" && (
+            <p className="ready-reward-indicator">
+              <Icon name="video" className="size-5" />
+              <span><strong>1</strong> free video call reward</span>
+            </p>
+          )}
+
+
+          <div className="join-actions">
           {/*
             On the live path this goes straight to the call, which checks that
             somebody is actually there to answer and only then explains the
@@ -322,19 +370,20 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
             Without a signalling service there is no presence to check, so the
             original explainer step below still applies.
           */}
-          <Button
-            onClick={() =>
-              isLiveCallingConfigured && resolvedHost
-                ? onSubmit(normaliseJoinCall(values), resolvedHost)
-                : setStep("permission")
-            }
-          >
-            Start Call
-          </Button>
+            <Button
+              onClick={() =>
+                isLiveCallingConfigured && resolvedHost
+                  ? onSubmit(normaliseJoinCall(values), resolvedHost)
+                  : setStep("permission")
+              }
+            >
+              Start Call
+            </Button>
+          </div>
+          <p className="join-disclaimer ready-footnote">
+            {callType === "video" ? "Camera and microphone" : "Microphone"} access will be requested next.
+          </p>
         </div>
-        <p className="join-disclaimer ready-footnote">
-          {callType === "video" ? "Camera and microphone" : "Microphone"} access will be requested next.
-        </p>
       </section>
     );
   };
@@ -342,7 +391,7 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
   const renderPermission = () => (
     <section className="join-dialog join-dialog-centered join-permission">
       <div className="join-status-icon">
-        <Icon name={callType === "video" ? "video" : "mic"} className="size-6" />
+        <Icon name={callType === "video" ? "camera" : "mic"} className="size-6" />
       </div>
       <h1 className="join-title">Allow {callType === "video" ? "camera & microphone" : "microphone"}</h1>
       <p className="join-copy">
@@ -351,8 +400,8 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
       </p>
       {callType === "video" && (
         <ul className="permission-list">
-          <li>Camera — lets you appear on the call</li>
-          <li>Microphone — lets the other person hear you</li>
+          <li><strong>Camera</strong> lets you appear on the call</li>
+          <li><strong>Microphone</strong> lets the other person hear you</li>
         </ul>
       )}
       <div className="join-actions">
@@ -367,7 +416,7 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome }: JoinCa
   );
 
   return (
-    <div className="join-dialog-shell">
+    <div className={`join-dialog-shell ${step === "confirmation" ? "is-confirmation" : ""}`}>
       {step === "details" && renderDetails()}
       {step === "call-id" && renderCallId()}
       {step === "resolving" && renderResolving()}

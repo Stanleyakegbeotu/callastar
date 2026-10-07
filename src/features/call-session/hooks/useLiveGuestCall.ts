@@ -5,6 +5,7 @@ import { normalizeCallId } from "@/lib/callId";
 import { CALL_TIMINGS } from "@/lib/config";
 import { useRtcSession } from "@/features/calls/hooks/useRtcSession";
 import { authorizeCall } from "@/services/signaling/callAuthorization";
+import { sendAdminEvent } from "@/services/notifications/adminEvents";
 import {
   signalingProvider,
   type CallEndReason,
@@ -29,6 +30,7 @@ import type { CallFailureReason } from "@/types/call";
  */
 
 export interface LiveGuestCall {
+  phase: ReturnType<typeof useRtcSession>["phase"];
   remoteStream: MediaStream | null;
   /** True once a remote track has arrived, which is when video can be shown. */
   hasRemoteMedia: boolean;
@@ -227,6 +229,7 @@ export function useLiveGuestCall({
             // socket that another party receives.
             caller: { displayName: caller.fullName },
           });
+          sendAdminEvent("new_call", callAttemptId, `${caller.fullName} started a ${callType} call with ${host?.displayName ?? "a host"}.`);
           dispatch({ type: "START_RINGING" });
           callDiagnostic("invite-sent", { callType });
         } catch (error) {
@@ -266,6 +269,7 @@ export function useLiveGuestCall({
           // "Connecting…" from here, even though the host has still to choose a
           // source — nobody should be left listening to a ring that is over.
           dispatch({ type: "CALL_ACCEPTED" });
+          sendAdminEvent("call_answered", callAttemptId, `${host?.displayName ?? "The host"} answered ${caller.fullName}'s call.`);
           setConnecting(true);
           // An audio call has no source to choose, so there is nothing to wait
           // for: negotiation begins as soon as it is answered.
@@ -317,6 +321,7 @@ export function useLiveGuestCall({
           return;
 
         case "call.end": {
+          if (message.reason === "hangup") sendAdminEvent("call_completed", callAttemptId, `The call with ${host?.displayName ?? "the host"} was completed.`);
           const failure = failureFor(message.reason);
           onEndReason?.(message.reason);
           if (failure) {
@@ -373,7 +378,7 @@ export function useLiveGuestCall({
         });
       },
     });
-  }, [callAttemptId, callType, dispatch, enabled, host?.shortName, onEndReason]);
+  }, [callAttemptId, callType, caller.fullName, dispatch, enabled, host?.shortName, onEndReason]);
 
   /* ------------------------------------------- 4. defensive ring backstop */
 
@@ -466,6 +471,7 @@ export function useLiveGuestCall({
   }, [enabled, status]);
 
   return {
+    phase: rtc.phase,
     remoteStream: rtc.remoteStream,
     hasRemoteMedia: rtc.hasRemoteMedia,
     cancel,

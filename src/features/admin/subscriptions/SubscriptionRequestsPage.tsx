@@ -7,7 +7,7 @@ import type { SubscriptionRequestStatus, SupportChannel } from "@/services/subsc
 import { EmptyState } from "../components/EmptyState";
 import { useSubscriptionRequests } from "../hooks/useCrmData";
 import { AdminPageHeader } from "../layout/AdminPageHeader";
-import { CHANNEL_LABELS, REQUEST_STATUS_LABELS, REQUEST_STATUS_TONE, formatUsdCents } from "./subscriptionInsights";
+import { CHANNEL_LABELS, REQUEST_STATUS_LABELS, REQUEST_STATUS_TONE, formatPlanPrice } from "./subscriptionInsights";
 
 const STATUS_FILTERS: { value: SubscriptionRequestStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -114,7 +114,7 @@ export function SubscriptionRequestsPage() {
                     </span>
                   </td>
                   <td data-label="Plan">{request.planNameSnapshot}</td>
-                  <td data-label="Amount">{formatUsdCents(request.amountUsdCents)}</td>
+                  <td data-label="Amount">{formatPlanPrice(request.amountMinorUnits, request.currencyCode)}</td>
                   <td data-label="Channel">{CHANNEL_LABELS[request.channel]}</td>
                   <td data-label="Status">
                     <span className={`admin-badge admin-badge-${REQUEST_STATUS_TONE[request.status]}`}>

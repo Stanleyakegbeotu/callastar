@@ -3,7 +3,6 @@
 interface ImportMetaEnv {
   readonly VITE_ENABLE_DEMO_VIDEO?: string;
   readonly VITE_ADMIN_DATA_MODE?: string;
-  readonly VITE_ADMIN_AUTH_MODE?: string;
   readonly VITE_CALL_BACKEND?: string;
   readonly VITE_SUBSCRIPTION_PREVIEW_MS?: string;
   readonly VITE_SUBSCRIPTION_CHECK_MS?: string;
@@ -11,7 +10,6 @@ interface ImportMetaEnv {
   readonly VITE_RING_TIMEOUT_MS?: string;
   readonly VITE_SOURCE_SELECTION_MS?: string;
   readonly VITE_SUPPORT_WHATSAPP_NUMBER?: string;
-  readonly VITE_ENABLE_DEV_ADMIN_SHORTCUT?: string;
 
   /** Real-time calling. See `server/signaling/README.md`. */
   readonly VITE_SIGNALING_TRANSPORT?: string;

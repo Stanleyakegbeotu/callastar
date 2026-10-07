@@ -27,7 +27,122 @@
 }
 
 .host-state-brand-left {
-  justify-content: flex-start;
+  justify-content: center;
+}
+
+/* Returning callers see one open page, with no host or feature cards. */
+.host-state.host-state-returning {
+  max-width: 34rem;
+  gap: 1.5rem;
+}
+
+.returning-host {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.returning-host-avatar {
+  position: relative;
+  display: block;
+  width: 4.25rem;
+  height: 4.25rem;
+  flex: none;
+}
+
+.returning-host-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.returning-host-avatar .host-card-dot {
+  right: 0;
+  bottom: 0;
+  border-color: var(--white);
+}
+
+.returning-host-details {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.returning-host-details > strong {
+  color: var(--navy);
+  font-size: 1.125rem;
+  font-weight: 750;
+}
+
+.returning-host-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--success);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.returning-host-status .host-card-chip-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+}
+
+.returning-host-details .host-card-callid {
+  font-size: 0.8125rem;
+}
+
+.host-state.host-state-returning .cs-display {
+  max-width: 29rem;
+  margin-top: 0.15rem;
+}
+
+.host-state.host-state-returning .cs-lede {
+  margin-top: -0.75rem;
+  font-size: 1.125rem;
+}
+
+.returning-plan-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--slate);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.returning-plan-note-icon {
+  display: grid;
+  flex: none;
+  padding-top: 0.1rem;
+  color: var(--blue);
+}
+
+.returning-plan-note p {
+  margin: 0;
+}
+
+.returning-plan-note strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.returning-footnote {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.returning-footnote .host-state-footnote-icon {
+  width: auto;
+  height: auto;
+  background: transparent;
+  color: var(--muted);
 }
 
 .host-state .cs-display {
@@ -470,5 +585,72 @@
     .host-state-brand {
       margin-bottom: 0.25rem;
     }
+  }
+}
+
+/* A roomy, card-free desktop composition for returning callers. */
+@media (min-width: 56rem) {
+  .host-state.host-state-returning {
+    display: grid;
+    width: 100%;
+    max-width: 72rem;
+    min-height: 100dvh;
+    grid-template-columns: minmax(0, 1.15fr) minmax(17rem, 0.85fr);
+    align-content: center;
+    align-items: center;
+    column-gap: clamp(2.5rem, 6vw, 5.5rem);
+    row-gap: 0;
+    padding: calc(var(--safe-top) + 2rem) clamp(2rem, 5vw, 4.5rem)
+      calc(var(--safe-bottom) + 2rem);
+  }
+
+  .host-state.host-state-returning > .host-state-brand {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    margin-bottom: clamp(2.5rem, 7vh, 4.5rem);
+  }
+
+  .returning-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .host-state.host-state-returning .cs-display {
+    max-width: 40rem;
+    margin: 0.5rem 0 0;
+    font-size: clamp(2.75rem, 4.5vw, 4rem);
+  }
+
+  .host-state.host-state-returning .cs-lede {
+    max-width: 36rem;
+    margin: -0.5rem 0 0;
+    font-size: 1.2rem;
+  }
+
+  .returning-plan-note {
+    max-width: 36rem;
+    margin-top: 0.25rem;
+  }
+
+  .returning-decision {
+    display: grid;
+    align-content: center;
+    gap: 1.5rem;
+    min-width: 0;
+    min-height: 15rem;
+    padding-left: clamp(2rem, 5vw, 4rem);
+    border-left: 1px solid var(--line);
+  }
+
+  .returning-decision .host-state-actions {
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+  }
+
+  .returning-footnote {
+    max-width: 24rem;
   }
 }

@@ -26,7 +26,7 @@ export interface SupportConversationState {
  */
 export function useSupportConversation(
   conversationId: string | null,
-  viewer: MessageSender,
+  viewer: Exclude<MessageSender, "assistant">,
 ): SupportConversationState {
   const [conversation, setConversation] = useState<SupportConversation | null>(null);
   const [messages, setMessages] = useState<SupportMessageView[]>([]);

@@ -11,4 +11,4 @@ export const transformationModelPaths = {
 } as const;
 
 /** When the generator last verified the binaries. Diagnostics only. */
-export const transformationModelsPreparedAt = "2026-10-04T13:29:09.780Z";
+export const transformationModelsPreparedAt = "2026-10-07T08:23:28.831Z";

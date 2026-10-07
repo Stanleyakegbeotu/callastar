@@ -1,12 +1,17 @@
+import type { MouseEventHandler } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Icon } from "@/components/ui/Icon";
+import { CallaStarMark } from "./CallaStarMark";
 
 interface CallaStarLogoProps {
-  /** White treatment for use over imagery. */
+  /** Kept for existing call surfaces that need the white treatment. */
   inverse?: boolean;
-  /** Mark only, no wordmark. */
   compact?: boolean;
+  variant?: "horizontal" | "mark";
+  theme?: "light" | "dark";
+  size?: number;
+  className?: string;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
 }
 
 /**
@@ -14,20 +19,43 @@ interface CallaStarLogoProps {
  * call screen releases the camera and the landing screen clears the session, so
  * this is always a safe exit mid-call.
  */
-export function CallaStarLogo({ inverse = false, compact = false }: CallaStarLogoProps) {
+export function CallaStarLogo({
+  inverse = false,
+  compact = false,
+  variant = "horizontal",
+  theme,
+  size,
+  className = "",
+  onClick,
+}: CallaStarLogoProps) {
   const navigate = useNavigate();
+  const treatment = theme ?? (inverse ? "dark" : "light");
+  const markOnly = compact || variant === "mark";
 
   return (
     <button
       type="button"
-      className={`brand ${inverse ? "brand-inverse" : ""}`.trim()}
-      onClick={() => navigate("/")}
+      className={`brand ${className}`.trim()}
+      onClick={onClick ?? (() => navigate("/"))}
       aria-label="Return to CallaStar home"
     >
-      <span className="brand-mark">
-        <Icon name="video" className="size-5" />
-      </span>
-      {!compact && <span>CallaStar</span>}
+      {markOnly ? (
+        <CallaStarMark theme={treatment} size={size ?? 36} />
+      ) : (
+        <img
+          className="brand-image brand-image-horizontal"
+          src={
+            treatment === "dark"
+              ? "/branding/callastar-logo-horizontal-light.svg"
+              : "/branding/callastar-logo-horizontal.svg"
+          }
+          width="280"
+          height="72"
+          style={{ height: size ?? 36 }}
+          alt=""
+          aria-hidden="true"
+        />
+      )}
     </button>
   );
 }
