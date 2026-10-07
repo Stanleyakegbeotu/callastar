@@ -77,13 +77,10 @@ export function LiveCallCanvas({
    * streams between two elements and touches nothing else: no getUserMedia, no
    * renegotiation, no timer reset.
    */
-  const [swapped, setSwapped] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
 
-  const mainStream = swapped ? localStream : remoteStream;
-  const pipStream = swapped ? remoteStream : localStream;
-  const mainIsLocal = swapped;
+  const mainStream = remoteStream;
 
   /**
    * The checkpoint takes visual priority over reconnecting, so the two are never
@@ -94,15 +91,15 @@ export function LiveCallCanvas({
   return (
     <main className="live-call">
       <div className="live-call-stage">
-        {!mainIsLocal && uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-main" /> : mainIsLocal || hasRemoteMedia ? (
+        {uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-main" /> : hasRemoteMedia ? (
           <RtcVideo
-            key={mainIsLocal ? "main-local" : "main-remote"}
+            key="main-remote"
             stream={mainStream}
             className="live-call-main"
-            muted={mainIsLocal}
-            mirrored={mainIsLocal}
+            muted={false}
+            mirrored={false}
             playSignal={playSignal}
-            onBlocked={mainIsLocal ? undefined : setAudioBlocked}
+            onBlocked={setAudioBlocked}
           />
         ) : (
           // Before the first remote frame: the person, not a black rectangle.
@@ -142,27 +139,22 @@ export function LiveCallCanvas({
       )}
 
       {showCameraControls && (
-        <button
-          type="button"
-          className="live-call-pip"
-          onClick={() => setSwapped((value) => !value)}
-          aria-label={swapped ? remoteShortName : t("liveCall.you")}
-        >
-          {mainIsLocal && uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-pip-video" /> : pipStream ? (
+        <div className="live-call-pip" aria-label={`${t("liveCall.you")}; ${remoteShortName} is in the main view`}>
+          {localStream ? (
             <RtcVideo
-              key={mainIsLocal ? "pip-remote" : "pip-local"}
-              stream={pipStream}
+              key="pip-local"
+              stream={localStream}
               className="live-call-pip-video"
-              muted={!mainIsLocal}
-              mirrored={!mainIsLocal}
+              muted
+              mirrored
             />
           ) : (
             <span className="live-call-pip-off">
               <Icon name="cameraOff" className="size-5" />
             </span>
           )}
-          <span className="live-call-pip-name">{swapped ? remoteShortName : t("liveCall.you")}</span>
-        </button>
+          <span className="live-call-pip-name">{t("liveCall.you")}</span>
+        </div>
       )}
 
       <div className="live-call-controls">

@@ -34,13 +34,18 @@ Deno.serve(async (request) => {
 
   if (body.status === undefined) return json({ status: session.status });
   if (typeof body.status !== "string" || !allowedTransitions[session.status]?.includes(body.status)) return json({ error: "invalid_transition" }, 409);
-  const now = new Date().toISOString();
-  const update: Record<string, unknown> = { status: body.status };
-  if (body.status === "active") update.connected_at = now;
-  if (["ended", "cancelled", "failed", "declined", "no_answer"].includes(body.status)) update.ended_at = typeof body.endedAt === "string" && !Number.isNaN(Date.parse(body.endedAt)) ? body.endedAt : now;
-  if (body.durationSeconds === null || (Number.isInteger(body.durationSeconds) && body.durationSeconds >= 0 && body.durationSeconds <= 86400)) update.duration_seconds = body.durationSeconds;
-  if (typeof body.failureCode === "string") update.failure_code = body.failureCode.slice(0, 80);
-  const { error } = await client.from("call_sessions").update(update).eq("id", session.id);
+  const endedAt = typeof body.endedAt === "string" && !Number.isNaN(Date.parse(body.endedAt)) ? body.endedAt : null;
+  const durationSeconds = body.durationSeconds === null || (Number.isInteger(body.durationSeconds) && body.durationSeconds >= 0 && body.durationSeconds <= 86400)
+    ? body.durationSeconds : null;
+  const failureCode = typeof body.failureCode === "string" ? body.failureCode.slice(0, 80) : null;
+  const { data: transitioned, error } = await client.rpc("transition_call_session", {
+    p_session_id: session.id,
+    p_status: body.status,
+    p_ended_at: endedAt,
+    p_duration_seconds: durationSeconds,
+    p_failure_code: failureCode,
+  });
   if (error) return json({ error: "session_update_failed" }, 500);
+  if (transitioned !== true) return json({ error: "invalid_transition" }, 409);
   return json({ status: body.status });
 });

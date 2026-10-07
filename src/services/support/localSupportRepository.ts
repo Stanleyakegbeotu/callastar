@@ -327,17 +327,24 @@ export const localSupportRepository: SupportRepository = {
     return blob ?? null;
   },
 
-  async markRead(conversationId, reader) {
-    await runTransaction([STORE_CONVERSATIONS], "readwrite", async (scope) => {
+  async markRead(conversationId, reader, lastReadMessageId) {
+    if (!lastReadMessageId) return;
+    await runTransaction([STORE_CONVERSATIONS, STORE_MESSAGES], "readwrite", async (scope) => {
       const conversation = await scope.get<SupportConversation>(STORE_CONVERSATIONS, conversationId);
       if (!conversation) return;
-      if (reader === "admin" && conversation.unreadForAdmin === 0) return;
-      if (reader === "customer" && conversation.unreadForCustomer === 0) return;
+      const message = await scope.get<SupportMessage>(STORE_MESSAGES, lastReadMessageId);
+      if (!message || message.conversationId !== conversationId) return;
+      const incoming = reader === "customer" ? message.sender !== "customer" : message.sender === "customer";
+      if (!incoming) return;
+      const readAt = reader === "customer" ? conversation.customerLastReadAt : conversation.adminLastReadAt;
+      const nextReadAt = readAt && readAt > message.createdAt ? readAt : message.createdAt;
 
       await scope.put(STORE_CONVERSATIONS, {
         ...conversation,
         unreadForAdmin: reader === "admin" ? 0 : conversation.unreadForAdmin,
         unreadForCustomer: reader === "customer" ? 0 : conversation.unreadForCustomer,
+        customerLastReadAt: reader === "customer" ? nextReadAt : conversation.customerLastReadAt,
+        adminLastReadAt: reader === "admin" ? nextReadAt : conversation.adminLastReadAt,
       });
     });
   },

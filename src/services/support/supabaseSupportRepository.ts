@@ -52,6 +52,8 @@ function fromConversation(row: Row): SupportConversation {
     lastMessageSender: row.last_message_sender,
     unreadForAdmin: row.unread_for_admin,
     unreadForCustomer: row.unread_for_customer,
+    customerLastReadAt: row.customer_last_read_at ?? null,
+    adminLastReadAt: row.admin_last_read_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -72,6 +74,8 @@ function toConversationPatch(patch: Partial<SupportConversation>): Row {
     lastMessageSender: "last_message_sender",
     unreadForAdmin: "unread_for_admin",
     unreadForCustomer: "unread_for_customer",
+    customerLastReadAt: "customer_last_read_at",
+    adminLastReadAt: "admin_last_read_at",
   };
   const result: Row = {};
   for (const [key, value] of Object.entries(patch) as [keyof SupportConversation, unknown][]) {
@@ -300,7 +304,6 @@ export const supabaseSupportRepository: SupportRepository = {
       ? `event:${input.conversationId}:${input.idempotencyKey}`
       : newId();
     const assetId = attachment ? newId() : null;
-    const timestamp = new Date().toISOString();
     const body = input.body.trim().slice(0, SUPPORT_LIMITS.MESSAGE_MAX);
     let storagePath: string | null = null;
     let dimensions = { width: null as number | null, height: null as number | null };
@@ -326,7 +329,6 @@ export const supabaseSupportRepository: SupportRepository = {
         action_value: null,
         attachment_id: assetId,
         reply_to_message_id: input.replyToMessageId ?? null,
-        created_at: timestamp,
       })
       .select("*")
       .single();
@@ -358,7 +360,6 @@ export const supabaseSupportRepository: SupportRepository = {
           width: dimensions.width,
           height: dimensions.height,
           storage_path: storagePath,
-          created_at: timestamp,
         })
         .select("*")
         .single();
@@ -369,7 +370,7 @@ export const supabaseSupportRepository: SupportRepository = {
     const fromCustomer = input.sender === "customer";
     const updated = await this.updateConversation(input.conversationId, {
       lastMessagePreview: preview(body, attachment !== null),
-      lastMessageAt: timestamp,
+      lastMessageAt: messageRow.created_at,
       lastMessageSender: input.sender,
       unreadForAdmin: fromCustomer ? conversation.unreadForAdmin + 1 : conversation.unreadForAdmin,
       unreadForCustomer: fromCustomer ? conversation.unreadForCustomer : conversation.unreadForCustomer + 1,
@@ -417,14 +418,18 @@ export const supabaseSupportRepository: SupportRepository = {
     return data;
   },
 
-  async markRead(conversationId, reader) {
+  async markRead(conversationId, reader, lastReadMessageId) {
+    if (!lastReadMessageId) return;
     if (customerIdentity && reader === "customer") {
-      await customerAction("mark_read", { conversationId });
+      await customerAction("mark_read", { conversationId, lastReadMessageId });
       return;
     }
-    const conversation = await this.getConversation(conversationId);
-    if (!conversation) return;
-    await this.updateConversation(conversationId, reader === "admin" ? { unreadForAdmin: 0 } : { unreadForCustomer: 0 });
+    const { error } = await requireSupabase().rpc("mark_support_conversation_read", {
+      p_conversation_id: conversationId,
+      p_reader: reader,
+      p_last_read_message_id: lastReadMessageId,
+    });
+    if (error) throw error;
   },
 
   async countUnreadForAdmin() {

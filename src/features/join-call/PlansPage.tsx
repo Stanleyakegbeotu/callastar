@@ -161,7 +161,6 @@ export function PlansPage() {
           profileName={host.displayName}
           channel={supportChannel}
           whatsappNumber={gate.whatsappNumber}
-          whatsappLinkFor={gate.whatsappLinkFor}
           onConfirmSubscription={confirmSubscription}
           onSelectPackage={selectSupportPackage}
           onClose={() => setSupportOpen(false)}

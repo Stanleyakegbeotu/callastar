@@ -34,12 +34,27 @@ export function useSupportConversation(
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [documentActive, setDocumentActive] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus());
   const mounted = useRef(true);
+  const markedThrough = useRef("");
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const update = () => setDocumentActive(document.visibilityState === "visible" && document.hasFocus());
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    update();
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
     };
   }, []);
 
@@ -62,8 +77,6 @@ export function useSupportConversation(
         setConversation(thread);
         setMessages(list);
         setError(null);
-        // Looking at a thread is what marks it read; nothing else does.
-        await supportRepository.markRead(conversationId, viewer);
       } catch (cause) {
         logDiagnostic("support-load", cause);
         if (mounted.current) setError("We could not load this conversation.");
@@ -77,6 +90,29 @@ export function useSupportConversation(
   useEffect(() => {
     void load(true);
   }, [load, nonce]);
+
+  const incoming = messages.filter((view) => viewer === "customer"
+    ? view.message.sender !== "customer"
+    : view.message.sender === "customer");
+  const lastIncoming = incoming.at(-1)?.message ?? null;
+
+  useEffect(() => {
+    if (!conversationId || loading || !conversation || !documentActive || !lastIncoming) return;
+    const cursor = viewer === "customer" ? conversation.customerLastReadAt : conversation.adminLastReadAt;
+    if (cursor && cursor >= lastIncoming.createdAt) return;
+    const key = `${conversationId}:${viewer}:${lastIncoming.id}`;
+    if (markedThrough.current === key) return;
+    markedThrough.current = key;
+    void supportRepository.markRead(conversationId, viewer, lastIncoming.id)
+      .then(() => setConversation((current) => current?.id !== conversationId ? current : ({
+        ...current,
+        ...(viewer === "customer" ? { unreadForCustomer: 0, customerLastReadAt: lastIncoming.createdAt } : { unreadForAdmin: 0, adminLastReadAt: lastIncoming.createdAt }),
+      })))
+      .catch((cause: unknown) => {
+        if (markedThrough.current === key) markedThrough.current = "";
+        logDiagnostic("support-mark-read", cause);
+      });
+  }, [conversation, conversationId, documentActive, lastIncoming, loading, viewer]);
 
   /** The other side wrote something. */
   useEffect(() => {

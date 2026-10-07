@@ -18,6 +18,21 @@ export interface CallSessionCredentials {
   sessionToken: string;
 }
 
+export interface PreparedCallAccess {
+  grantId: string;
+  planId: string;
+  planName: string;
+  sessionDurationMinutes: number;
+}
+
+export class FreeTrialExhaustedError extends Error {
+  constructor() { super("Your Free Trial has already been used."); this.name = "FreeTrialExhaustedError"; }
+}
+
+export class FreeTrialInProgressError extends Error {
+  constructor() { super("A Free Trial call is already being started for this email."); this.name = "FreeTrialInProgressError"; }
+}
+
 export interface ResolvedHost extends HostPreview {
   shortBio?: string | null;
 }
@@ -39,7 +54,10 @@ export interface CallBackend {
     code: string,
     callType: CallType,
     caller: CallerDetails,
+    localAttemptId?: string,
   ): Promise<CallSessionCredentials & { host: ResolvedHost }>;
+  /** Production preflight: reserves trial or claims paid access before permissions/signalling. */
+  prepareCallSession?(code: string, callType: CallType, caller: CallerDetails, localAttemptId: string): Promise<PreparedCallAccess | null>;
   updateCallSession(
     credentials: CallSessionCredentials,
     status: "ringing" | "active" | "ended" | "cancelled" | "failed",
@@ -67,6 +85,34 @@ export interface CallSessionRecorder {
 }
 
 const cloudSessionCredentials = new Map<string, Promise<CallSessionCredentials>>();
+const cloudCallAccess = new Map<string, PreparedCallAccess | null>();
+
+async function prepareCloudCallSession(localAttemptId: string, code: string, callType: CallType, caller: CallerDetails) {
+  let pending = cloudSessionCredentials.get(localAttemptId);
+  if (!pending) {
+    pending = (async () => {
+      const { data, error } = await requireSupabase().functions.invoke("start-call-session", {
+        body: { code, callType, caller, clientAttemptId: localAttemptId },
+      });
+      if (!error && data?.code === "FREE_TRIAL_EXHAUSTED") throw new FreeTrialExhaustedError();
+      if (!error && data?.code === "FREE_TRIAL_IN_PROGRESS") throw new FreeTrialInProgressError();
+      if (error || !data?.sessionId || !data?.sessionToken) throw new Error("Call session could not be prepared.");
+      const access = data.access && typeof data.access.grantId === "string" ? data.access as PreparedCallAccess : null;
+      cloudCallAccess.set(localAttemptId, access);
+      sendAdminEvent("new_call", data.sessionId, `${caller.fullName} started a ${callType} call with ${data.host.displayName}.`);
+      return { sessionId: data.sessionId as string, sessionToken: data.sessionToken as string };
+    })();
+    cloudSessionCredentials.set(localAttemptId, pending);
+  }
+  try {
+    const credentials = await pending;
+    return { credentials, access: cloudCallAccess.get(localAttemptId) ?? null };
+  } catch (cause) {
+    if (cloudSessionCredentials.get(localAttemptId) === pending) cloudSessionCredentials.delete(localAttemptId);
+    cloudCallAccess.delete(localAttemptId);
+    throw cause;
+  }
+}
 
 /** Opaque credential pair held in memory and used only for this live call. */
 export async function getCloudCallSessionCredentials(localSessionId: string): Promise<CallSessionCredentials | null> {
@@ -98,15 +144,16 @@ const supabaseBackend: CallBackend = {
       },
     };
   },
-  async startCallSession(code, callType, caller) {
-    const { data, error } = await requireSupabase().functions.invoke("start-call-session", {
-      body: { code, callType, caller },
-    });
-    if (error || !data?.sessionId || !data?.sessionToken) throw new Error("We couldn't start your call.");
-    sendAdminEvent("new_call", data.sessionId, `${caller.fullName} started a ${callType} call with ${data.host.displayName}.`);
+  async prepareCallSession(code, callType, caller, localAttemptId) {
+    return (await prepareCloudCallSession(localAttemptId, code, callType, caller)).access;
+  },
+  async startCallSession(code, callType, caller, localAttemptId = `cs_${crypto.randomUUID()}`) {
+    const { credentials, access } = await prepareCloudCallSession(localAttemptId, code, callType, caller);
+    const { data, error } = await requireSupabase().functions.invoke("resolve-call-id", { body: { code } });
+    if (error || !data?.found) throw new Error("We couldn't start your call.");
     return {
-      sessionId: data.sessionId,
-      sessionToken: data.sessionToken,
+      ...credentials,
+      access,
       host: {
         id: data.host.id,
         displayName: data.host.displayName,
@@ -138,15 +185,7 @@ const supabaseBackend: CallBackend = {
   },
   sessions: {
     async create(input) {
-      const pending = (async () => {
-        const { data, error } = await requireSupabase().functions.invoke("start-call-session", {
-          body: { code: input.callIdSnapshot, callType: input.callType, caller: input.caller },
-        });
-        if (error || !data?.sessionId || !data?.sessionToken) throw new Error("Call session could not be recorded.");
-        return { sessionId: data.sessionId as string, sessionToken: data.sessionToken as string };
-      })();
-      cloudSessionCredentials.set(input.id, pending);
-      await pending;
+      await prepareCloudCallSession(input.id, input.callIdSnapshot, input.callType, input.caller);
     },
     async transition(localSessionId, patch) {
       const credentials = await getCloudCallSessionCredentials(localSessionId);

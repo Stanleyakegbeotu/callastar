@@ -115,6 +115,14 @@ export function CallSessionRoute() {
       : null;
   const sessionMatches = session.id !== "" && session.id === sessionId;
 
+  // Eligibility is checked at call initiation only. Exhaustion sends this
+  // caller to package selection while preserving their host and support context.
+  useEffect(() => {
+    if (sessionMatches && session.status === "failed" && session.failureReason === "free_trial_exhausted") {
+      navigate("/plans", { replace: true });
+    }
+  }, [navigate, session.failureReason, session.status, sessionMatches]);
+
   // Everything that happens to this call is persisted here, exactly once.
   const { record } = useSessionRecorder({
     session,
@@ -400,7 +408,6 @@ export function CallSessionRoute() {
       profileName={host?.displayName ?? ""}
       channel={supportChannel}
       whatsappNumber={gate.whatsappNumber}
-      whatsappLinkFor={gate.whatsappLinkFor}
       onConfirmSubscription={confirmSubscription}
       onSelectPackage={selectSupportPackage}
       onClose={() => setSupportOpen(false)}

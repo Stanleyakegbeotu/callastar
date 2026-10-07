@@ -75,7 +75,8 @@ export type CallFailureReason =
   | "media_unavailable"
   | "source_unavailable"
   | "ring_timeout"
-  | "call_declined";
+  | "call_declined"
+  | "free_trial_exhausted";
 
 /**
  * Paid access attached to a call.

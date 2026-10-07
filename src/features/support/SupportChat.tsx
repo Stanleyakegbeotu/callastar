@@ -354,6 +354,7 @@ export function SupportChat({
               <MessageBubble
                 view={view}
                 mine={view.message.sender === viewer}
+                recipientReadAt={viewer === "customer" ? state.conversation?.adminLastReadAt ?? null : state.conversation?.customerLastReadAt ?? null}
                 onReply={() => setReplyTo(view)}
                 onOpenImage={(assetId, fileName) => setViewing({ assetId, fileName })}
               />
@@ -401,7 +402,7 @@ export function SupportChat({
         {viewer === "customer" && (onContinueToWhatsapp || onContinueInApp) && isPaymentMethod(state.conversation?.checkoutDraft?.selectedPaymentMethod) && (
           <div className="chat-welcome-actions chat-decision-actions">
             <p>How would you like to continue?</p>
-            {onContinueToWhatsapp && <button type="button" onClick={onContinueToWhatsapp}>{t("support.continueToWhatsapp")}</button>}
+            {onContinueToWhatsapp && <button type="button" className="chat-whatsapp-cta" onClick={onContinueToWhatsapp}><Icon name="whatsapp" className="size-5" />{t("support.continueToWhatsapp")}</button>}
             {onContinueInApp && <button type="button" onClick={onContinueInApp}>Continue in CallaStar</button>}
           </div>
         )}
@@ -511,6 +512,7 @@ export function SupportChat({
 interface BubbleProps {
   view: SupportMessageView;
   mine: boolean;
+  recipientReadAt: string | null;
   onReply: () => void;
   onOpenImage: (assetId: string, fileName: string) => void;
 }
@@ -522,7 +524,7 @@ interface BubbleProps {
  * works. The same action has a button, because a drag is not available to
  * someone using a keyboard or a screen reader.
  */
-function MessageBubble({ view, mine, onReply, onOpenImage }: BubbleProps) {
+function MessageBubble({ view, mine, recipientReadAt, onReply, onOpenImage }: BubbleProps) {
   const { message, asset, replyTo } = view;
   const url = useAttachmentUrl(asset?.id ?? null);
   const [offset, setOffset] = useState(0);
@@ -530,6 +532,8 @@ function MessageBubble({ view, mine, onReply, onOpenImage }: BubbleProps) {
 
   const imageOnly = asset !== null && message.body.trim().length === 0;
   const isAdminMessage = message.sender !== "customer";
+  const hasHumanReceipt = mine && (message.sender === "customer" || message.sender === "admin");
+  const isRead = hasHumanReceipt && recipientReadAt !== null && recipientReadAt >= message.createdAt;
   const brandAvatar = isAdminMessage ? (
     <span className="chat-brand-avatar" role="img" aria-label="CallaStar">
       <CallaStarMark size={22} />
@@ -588,7 +592,10 @@ function MessageBubble({ view, mine, onReply, onOpenImage }: BubbleProps) {
 
         {message.body.trim().length > 0 && <span className="chat-text">{message.body}</span>}
 
-        <span className="chat-meta">{messageTime(message.createdAt)}</span>
+        <span className="chat-meta">
+          <time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>
+          {hasHumanReceipt && <span className={`chat-read-receipt ${isRead ? "is-read" : ""}`} aria-label={isRead ? "Read" : "Sent"} title={isRead ? "Read" : "Sent"}>{isRead ? "✓✓" : "✓"}</span>}
+        </span>
       </div>
 
       {isAdminMessage && mine && brandAvatar}

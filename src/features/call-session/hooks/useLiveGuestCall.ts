@@ -7,6 +7,7 @@ import { config } from "@/lib/config";
 import { useRtcSession } from "@/features/calls/hooks/useRtcSession";
 import { authorizeCall } from "@/services/signaling/callAuthorization";
 import { sendAdminEvent } from "@/services/notifications/adminEvents";
+import { callBackend, FreeTrialExhaustedError } from "@/services/callBackend";
 import {
   signalingProvider,
   type CallEndReason,
@@ -156,52 +157,61 @@ export function useLiveGuestCall({
 
     const controller = new AbortController();
 
-    void authorizeCall(callId, controller.signal).then((result) => {
-      if (controller.signal.aborted) return;
-      callDiagnostic("authorize", { status: result.state });
+    void (async () => {
+      try {
+        // The server reserves the one free trial (or claims a paid grant)
+        // before camera permission, signalling authorization, or an invite.
+        if (callBackend.prepareCallSession) {
+          const access = await callBackend.prepareCallSession(callId, callType, caller, sessionId);
+          if (controller.signal.aborted) return;
+          if (access) dispatch({ type: "SET_ACCESS", access: {
+            accessIdRecordId: access.grantId,
+            planId: access.planId,
+            planName: access.planName,
+            sessionDurationMinutes: access.sessionDurationMinutes,
+            validatedAt: Date.now(),
+          } });
+        }
 
-      if (result.state === "available") {
-        dispatch({ type: "HOST_AVAILABLE", callAttemptId: result.callAttemptId });
-        // The token authorises exactly this attempt and is kept out of state, so
-        // it cannot reach history, a log or a re-render.
-        tokenRef.current = result.token;
-        return;
-      }
+        const result = await authorizeCall(callId, controller.signal);
+        if (controller.signal.aborted) return;
+        callDiagnostic("authorize", { status: result.state });
 
-      const name = host?.shortName ?? "This host";
-      if (result.state === "busy") {
-        dispatch({
-          type: "FAIL_CALL",
-          reason: "host_busy",
-          error: `${name} is unavailable right now. Please try again shortly.`,
-        });
-        return;
+        if (result.state === "available") {
+          dispatch({ type: "HOST_AVAILABLE", callAttemptId: result.callAttemptId });
+          // The token authorises exactly this attempt and is kept out of state, so
+          // it cannot reach history, a log or a re-render.
+          tokenRef.current = result.token;
+          return;
+        }
+
+        const name = host?.shortName ?? "This host";
+        if (result.state === "busy") {
+          dispatch({ type: "FAIL_CALL", reason: "host_busy", error: `${name} is unavailable right now. Please try again shortly.` });
+          return;
+        }
+        if (result.state === "rate_limited") {
+          dispatch({ type: "FAIL_CALL", reason: "signaling_unavailable", error: "Too many attempts. Please wait a moment and try again." });
+          return;
+        }
+        if (result.state === "unreachable") {
+          dispatch({ type: "FAIL_CALL", reason: "signaling_unavailable", error: "We could not reach CallaStar. Check your connection and try again." });
+          return;
+        }
+        dispatch({ type: "FAIL_CALL", reason: "host_offline", error: `${name} isn't available to receive calls right now.` });
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        if (cause instanceof FreeTrialExhaustedError) {
+          dispatch({ type: "FAIL_CALL", reason: "free_trial_exhausted", error: cause.message });
+          return;
+        }
+        callError("call-preflight", cause);
+        dispatch({ type: "FAIL_CALL", reason: "signaling_unavailable", error: "We could not prepare this call. Check your connection and try again." });
       }
-      if (result.state === "rate_limited") {
-        dispatch({
-          type: "FAIL_CALL",
-          reason: "signaling_unavailable",
-          error: "Too many attempts. Please wait a moment and try again.",
-        });
-        return;
-      }
-      if (result.state === "unreachable") {
-        dispatch({
-          type: "FAIL_CALL",
-          reason: "signaling_unavailable",
-          error: "We could not reach CallaStar. Check your connection and try again.",
-        });
-        return;
-      }
-      dispatch({
-        type: "FAIL_CALL",
-        reason: "host_offline",
-        error: `${name} isn't available to receive calls right now.`,
-      });
-    });
+    })();
 
     return () => controller.abort();
-  }, [callId, dispatch, enabled, host?.shortName, status]);
+  }, [callId, callType, caller, dispatch, enabled, host?.shortName, sessionId, status]);
 
   const tokenRef = useRef<string>("");
 

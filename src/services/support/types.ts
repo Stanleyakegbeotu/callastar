@@ -76,6 +76,10 @@ export interface SupportConversation {
   lastMessageSender: MessageSender;
   unreadForAdmin: number;
   unreadForCustomer: number;
+  /** Last customer message that was actually visible while Customer Care was open. */
+  customerLastReadAt?: string | null;
+  /** Last admin message actually visible in the customer thread. */
+  adminLastReadAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

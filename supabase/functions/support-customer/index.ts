@@ -184,8 +184,12 @@ Deno.serve(async (request) => {
       }
       case "mark_read": {
         const conversation = await scoped(body.conversationId);
-        if (!conversation) return jsonForRequest({ ok: true }, 200, request);
-        const { error } = await client.from("support_conversations").update({ unread_for_customer: 0 }).eq("id", conversation.id);
+        if (!conversation || typeof body.lastReadMessageId !== "string") return jsonForRequest({ ok: true }, 200, request);
+        const { error } = await client.rpc("mark_support_conversation_read", {
+          p_conversation_id: conversation.id,
+          p_reader: "customer",
+          p_last_read_message_id: body.lastReadMessageId,
+        });
         if (error) throw error;
         return jsonForRequest({ ok: true }, 200, request);
       }
@@ -201,7 +205,6 @@ Deno.serve(async (request) => {
         if (!messageBody && !file) return jsonForRequest({ error: "message_required" }, 400, request);
         if (file && (typeof file.base64 !== "string" || !["image/jpeg", "image/png", "image/webp", "image/heic"].includes(file.mimeType) || !Number.isInteger(file.fileSize) || file.fileSize <= 0 || file.fileSize > 10 * 1024 * 1024)) return jsonForRequest({ error: "invalid_attachment" }, 400, request);
         const id = typeof body.idempotencyKey === "string" ? `event:${conversation.id}:${body.idempotencyKey}` : crypto.randomUUID();
-        const timestamp = new Date().toISOString();
         const assetId = file ? crypto.randomUUID() : null;
         let storagePath: string | null = null;
         if (file && assetId) {
@@ -212,7 +215,7 @@ Deno.serve(async (request) => {
           const { error } = await client.storage.from("support-attachments").upload(storagePath, bytes, { contentType: file.mimeType, upsert: false });
           if (error) throw error;
         }
-        const { data: message, error: insertError } = await client.from("support_messages").insert({ id, conversation_id: conversation.id, sender, body: messageBody, action_type: null, action_value: null, attachment_id: assetId, reply_to_message_id: null, created_at: timestamp }).select("*").single();
+        const { data: message, error: insertError } = await client.from("support_messages").insert({ id, conversation_id: conversation.id, sender, body: messageBody, action_type: null, action_value: null, attachment_id: assetId, reply_to_message_id: null }).select("*").single();
         if (insertError?.code === "23505") {
           const { data: existing } = await client.from("support_messages").select("*").eq("id", id).single();
           return jsonForRequest({ message: existing, asset: null, conversation }, 200, request);
@@ -223,11 +226,11 @@ Deno.serve(async (request) => {
           const { data, error } = await client.from("support_assets").insert({ id: assetId, conversation_id: conversation.id, message_id: id,
             file_name: String(file.fileName ?? "image").slice(0, 180), mime_type: file.mimeType, file_size: file.fileSize,
             width: Number.isInteger(file.width) ? file.width : null, height: Number.isInteger(file.height) ? file.height : null,
-            storage_path: storagePath, created_at: timestamp }).select("*").single();
+            storage_path: storagePath }).select("*").single();
           if (error) throw error;
           asset = data;
         }
-        const { data: updated, error } = await client.from("support_conversations").update({ last_message_preview: preview(messageBody, Boolean(file)), last_message_at: timestamp, last_message_sender: sender, unread_for_admin: sender === "customer" ? conversation.unread_for_admin + 1 : conversation.unread_for_admin, status: sender === "customer" ? "open" : conversation.status, updated_at: timestamp }).eq("id", conversation.id).select("*").single();
+        const { data: updated, error } = await client.from("support_conversations").update({ last_message_preview: preview(messageBody, Boolean(file)), last_message_at: message.created_at, last_message_sender: sender, unread_for_admin: sender === "customer" ? conversation.unread_for_admin + 1 : conversation.unread_for_admin, unread_for_customer: sender === "admin" ? conversation.unread_for_customer + 1 : conversation.unread_for_customer, status: sender === "customer" ? "open" : sender === "admin" ? "pending" : conversation.status, updated_at: message.created_at }).eq("id", conversation.id).select("*").single();
         if (error) throw error;
         return jsonForRequest({ message, asset, conversation: updated }, 200, request);
       }

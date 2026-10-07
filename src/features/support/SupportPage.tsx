@@ -128,26 +128,19 @@ export function SupportThreadPage() {
 
   const continueWhatsapp = useCallback(async () => {
     if (!whatsappNumber) return;
-    const target = window.open("about:blank", "_blank");
-    if (target) target.opener = null;
-    try {
-      const request = await createResumedPaymentRequest();
-      if (!request) {
-        target?.close();
-        return;
-      }
-      const method = state.conversation?.checkoutDraft?.selectedPaymentMethod ?? "payment method";
-      const firstName = state.conversation?.customerName.trim().split(/\s+/)[0] || "a CallaStar customer";
-      const link = buildWhatsappLink(whatsappNumber,
-        `Hello, I'm ${firstName}. I selected ${String(method).replace(/_/g, " ")} for the ${request.planNameSnapshot} plan and would like to continue my payment.`);
-      if (link && target) target.location.href = link;
-      else if (link) window.open(link, "_blank", "noopener");
-      else target?.close();
-    } catch (cause) {
-      target?.close();
-      logDiagnostic("support-continue-whatsapp", cause);
-    }
-  }, [createResumedPaymentRequest, state.conversation?.checkoutDraft?.selectedPaymentMethod, state.conversation?.customerName, whatsappNumber]);
+    const draft = state.conversation?.checkoutDraft;
+    const method = draft?.selectedPaymentMethod ?? "payment method";
+    const firstName = state.conversation?.customerName.trim().split(/\s+/)[0] || "a CallaStar customer";
+    const planName = draft?.planName ?? resumePlan?.displayName ?? "CallaStar";
+    const link = buildWhatsappLink(whatsappNumber,
+      `Hello, I'm ${firstName}. I'm continuing my CallaStar payment for the ${planName} plan. Selected payment method: ${String(method).replace(/_/g, " ")}. I'd like to continue and finalize the payment here.`);
+    if (!link) return;
+
+    // Navigate in the tap itself. iOS Safari blocks a window opened after an
+    // awaited request, which was the source of the blank WhatsApp tab.
+    window.location.assign(link);
+    void createResumedPaymentRequest().catch((cause: unknown) => logDiagnostic("support-continue-whatsapp", cause));
+  }, [createResumedPaymentRequest, resumePlan?.displayName, state.conversation?.checkoutDraft, state.conversation?.customerName, whatsappNumber]);
 
   const continueInApp = useCallback(async () => {
     if (!currentConversationId || !checkoutDraft) return;

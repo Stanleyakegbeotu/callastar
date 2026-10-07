@@ -5,6 +5,7 @@ import { SupportChat } from "@/features/support/SupportChat";
 import { announcePackageChange } from "@/features/support/supportAutomation";
 import { useSupportConversation } from "@/features/support/hooks/useSupportConversation";
 import { initI18n } from "@/i18n";
+import { buildWhatsappLink } from "@/lib/phone";
 import { supportRepository } from "@/services/support/repository";
 import type { SubscriptionPlan } from "@/services/subscriptions/types";
 import "@/styles/globals.css";
@@ -77,7 +78,10 @@ function Fixture() {
         subtitle="Customer care"
         onBack={() => setOpen(false)}
         onPaymentMethodSubmitted={() => undefined}
-        onContinueToWhatsapp={() => { window.open("https://wa.me/123", "_blank", "noopener"); }}
+        onContinueToWhatsapp={() => {
+          const link = buildWhatsappLink("+1 (415) 555-0123", "Payment method: Bank Transfer");
+          if (link) window.location.assign(link);
+        }}
         onContinueInApp={() => { window.dispatchEvent(new Event("callastar:continue-in-app")); }}
         packagePlan={selectedPlan}
         packageOptions={[plan, proPlan]}

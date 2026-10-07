@@ -47,8 +47,8 @@ export interface SupportRepository {
   /** The bytes of one attachment, fetched deliberately and never while listing. */
   getAttachment(assetId: string): Promise<Blob | null>;
 
-  /** Clear the unread counter for whichever side just looked at the thread. */
-  markRead(conversationId: string, reader: "customer" | "admin"): Promise<void>;
+  /** Advance a read cursor only through the last incoming message actually shown. */
+  markRead(conversationId: string, reader: "customer" | "admin", lastReadMessageId?: string | null): Promise<void>;
   countUnreadForAdmin(): Promise<number>;
 }
 

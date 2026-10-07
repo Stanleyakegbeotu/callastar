@@ -8,9 +8,8 @@ import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent }
  * known corners always leave the centre of the call clear and always put the
  * tile somewhere the next person to pick it up can find it.
  *
- * Dragging and tapping share one pointer, so they are told apart by distance:
- * under the threshold is a tap that swaps the participants, over it is a drag
- * and the click that follows is suppressed.
+ * Pointer movement below the threshold leaves the tile parked; movement above
+ * it follows the finger and snaps to the nearest safe corner on release.
  */
 export type PipCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -28,8 +27,6 @@ export interface DraggablePip {
     onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
     onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
   };
-  /** Wrap the tile's click so a drag never counts as a tap. */
-  guardClick: (onTap: () => void) => () => void;
 }
 
 export function useDraggablePip(initial: PipCorner = "top-right"): DraggablePip {
@@ -75,18 +72,6 @@ export function useDraggablePip(initial: PipCorner = "top-right"): DraggablePip 
     setCorner(top ? (left ? "top-left" : "top-right") : left ? "bottom-left" : "bottom-right");
   }, []);
 
-  const guardClick = useCallback(
-    (onTap: () => void) => () => {
-      // A drag ends in a click too; only a tap should swap the participants.
-      if (moved.current) {
-        moved.current = false;
-        return;
-      }
-      onTap();
-    },
-    [],
-  );
-
   return {
     corner,
     dragging,
@@ -97,6 +82,5 @@ export function useDraggablePip(initial: PipCorner = "top-right"): DraggablePip 
       onPointerUp: finish,
       onPointerCancel: finish,
     },
-    guardClick,
   };
 }

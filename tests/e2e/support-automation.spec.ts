@@ -115,6 +115,11 @@ test("a returning customer can resume pending method selection or ask for help",
 });
 
 test("accountless Customer Care opens directly and payment offers both handoff choices", async ({ page }) => {
+  let handoffUrl = "";
+  await page.route("https://wa.me/**", async (route) => {
+    handoffUrl = route.request().url();
+    await route.abort();
+  });
   await page.addInitScript(() => {
     (window as Window & { openedUrls?: string[] }).openedUrls = [];
     window.open = ((url?: string | URL | null) => {
@@ -133,6 +138,6 @@ test("accountless Customer Care opens directly and payment offers both handoff c
   await page.getByRole("button", { name: "Continue in CallaStar" }).click();
   expect(await page.evaluate(() => window.openedUrls?.length ?? 0)).toBe(0);
   await page.getByRole("button", { name: "Continue on WhatsApp" }).click();
-  await expect.poll(() => page.evaluate(() => window.openedUrls?.length ?? 0)).toBe(1);
-  await expect(page.getByPlaceholder(/Message CallaStar support/i)).toBeVisible();
+  await expect.poll(() => handoffUrl).toMatch(/^https:\/\/wa\.me\/\d{8,}\?text=/);
+  expect(new URL(handoffUrl).searchParams.get("text")).toContain("Bank Transfer");
 });

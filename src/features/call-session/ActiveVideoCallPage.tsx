@@ -62,7 +62,6 @@ export function ActiveVideoCallPage({
   timedSourcePreview = false,
   uploadedMedia,
 }: ActiveVideoCallPageProps) {
-  const [swapped, setSwapped] = useState(false);
   // The self-view tile: which corner it is parked in, and its drag gestures.
   const pip = useDraggablePip();
   // Intent only: browsers cannot route audio output the way a native app can.
@@ -166,7 +165,7 @@ export function ActiveVideoCallPage({
     remoteReady && effectiveRemoteUrl ? (
       <RemoteVideoSurface
         url={effectiveRemoteUrl}
-        className={`${className} remote-fade-in ${swapped ? "main-video-fit" : ""}`.trim()}
+        className={`${className} remote-fade-in`}
         wantsAudio={speakerOn && (uploadedMedia?.hasAudio ?? remote.hasAudio)}
         paused={sourceReconnecting || remoteEnded}
         unmuteSignal={unmuteSignal}
@@ -189,30 +188,17 @@ export function ActiveVideoCallPage({
       : <div className="remote-source-status" role="status"><span>Loading video…</span></div>
     : null;
 
-  /** Whichever participant is currently large. */
+  /** The host's selected source always occupies the main surface. */
   const mainSurface = () => {
-    if (!isVideoCall || swapped) {
-      return (
-        <>
+    return (
+      <>
           {/* The avatar fills the frame behind the fitted video, blurred, so
               the letterboxing reads as depth rather than as black bars. */}
           {hostImage("main-video main-video-backdrop")}
           {remoteVideo("main-video main-video-overlay")}
           {uploadedSourceStatus}
           {showReconnecting && <RemoteConnectionState variant="main" />}
-        </>
-      );
-    }
-
-    if (showLocalVideo) return localVideo("main-video");
-
-    return (
-      <div className="camera-off-state">
-        <div className="camera-off-icon">
-          <Icon name="cameraOff" className="size-8" />
-        </div>
-        <div>Your camera is off</div>
-      </div>
+      </>
     );
   };
 
@@ -249,26 +235,8 @@ export function ActiveVideoCallPage({
       )}
 
       {isVideoCall && callStatus === "active" && (
-        <ParticipantTile label={swapped ? "You" : host.shortName} pip={pip} onSwap={() => setSwapped(!swapped)}>
-          {swapped ? (
-            showLocalVideo ? (
-              // Same MediaStream as the main surface, simply attached to the
-              // smaller element — the camera is never opened twice.
-              localVideo("pip-video")
-            ) : (
-              <span className="pip-camera-off">
-                <Icon name="cameraOff" className="size-5" />
-              </span>
-            )
-          ) : (
-            <>
-              <img src={host.avatarUrl} alt={`${host.shortName} video preview`} />
-              {remoteVideo("pip-video pip-video-overlay")}
-              {uploadedSourceStatus}
-              {showReconnecting && <RemoteConnectionState variant="tile" />}
-              {remote.status === "unavailable" && <span className="pip-note">No video</span>}
-            </>
-          )}
+        <ParticipantTile label="You" pip={pip}>
+          {showLocalVideo ? localVideo("pip-video") : <span className="pip-camera-off"><Icon name="cameraOff" className="size-5" /></span>}
         </ParticipantTile>
       )}
 

@@ -12,6 +12,7 @@ import { SupportChat } from "./SupportChat";
 import { useSupportConversation } from "./hooks/useSupportConversation";
 import { resolveConversation } from "./supportEntry";
 import { announcePackageChange } from "./supportAutomation";
+import { buildWhatsappLink } from "@/lib/phone";
 
 interface SupportOverlayProps {
   caller: CallerDetails;
@@ -24,7 +25,6 @@ interface SupportOverlayProps {
   profileName: string;
   channel: SupportChannel;
   whatsappNumber: string | null;
-  whatsappLinkFor: (request: SubscriptionRequest, message?: string) => string | null;
   onConfirmSubscription: (channel: SupportChannel, email: string) => Promise<SubscriptionRequest | null>;
   onSelectPackage: (plan: SubscriptionPlan) => Promise<void>;
   onClose: () => void;
@@ -48,7 +48,6 @@ export function SupportOverlay({
   profileName,
   channel,
   whatsappNumber,
-  whatsappLinkFor,
   onConfirmSubscription,
   onSelectPackage,
   onClose,
@@ -154,23 +153,25 @@ export function SupportOverlay({
     }
   }, [channel, conversationId, onConfirmSubscription, plan, request, state.reload, supportCustomer.email]);
 
-  const continueWhatsapp = useCallback(async () => {
+  const continueWhatsapp = useCallback(() => {
     const method = state.conversation?.checkoutDraft?.selectedPaymentMethod;
     if (!method || !plan || !whatsappNumber) return;
-    const target = window.open("about:blank", "_blank", "noopener");
-    try {
-      const created = request ?? await onConfirmSubscription("whatsapp", supportCustomer.email);
-      const firstName = supportCustomer.name.trim().split(/\s+/)[0] || "a CallaStar customer";
-      const link = created && whatsappLinkFor(created, `Hello, I'm ${firstName}. I selected ${method.replace(/_/g, " ")} for the ${plan.displayName} plan and would like to continue my payment.`);
-      if (link && target) target.location.href = link;
-      else if (link) window.open(link, "_blank", "noopener");
-      else target?.close();
-      if (created && conversationId) await supportRepository.updateConversation(conversationId, { subscriptionRequestId: created.id });
-    } catch (error) {
-      target?.close();
-      logDiagnostic("support-continue-whatsapp", error);
+    const firstName = supportCustomer.name.trim().split(/\s+/)[0] || "a CallaStar customer";
+    const link = buildWhatsappLink(whatsappNumber,
+      `Hello, I'm ${firstName}. I'm continuing my CallaStar payment for the ${plan.displayName} plan. Selected payment method: ${method.replace(/_/g, " ")}. I'd like to continue and finalize the payment here.`);
+    if (!link) return;
+    window.location.assign(link);
+
+    // Request persistence is useful bookkeeping, but must never delay or block
+    // the navigation initiated by the customer's tap.
+    if (!request) {
+      void onConfirmSubscription("whatsapp", supportCustomer.email)
+        .then(async (created) => {
+          if (created && conversationId) await supportRepository.updateConversation(conversationId, { subscriptionRequestId: created.id });
+        })
+        .catch((error: unknown) => logDiagnostic("support-continue-whatsapp", error));
     }
-  }, [conversationId, onConfirmSubscription, plan, request, state.conversation?.checkoutDraft?.selectedPaymentMethod, supportCustomer.email, supportCustomer.name, whatsappLinkFor, whatsappNumber]);
+  }, [conversationId, onConfirmSubscription, plan, request, state.conversation?.checkoutDraft?.selectedPaymentMethod, supportCustomer.email, supportCustomer.name, whatsappNumber]);
 
   const continueInApp = useCallback(async () => {
     const conversation = state.conversation;

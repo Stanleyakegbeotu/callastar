@@ -732,6 +732,30 @@
   padding-left: 2.25rem;
 }
 
+.chat-welcome-actions .chat-whatsapp-cta,
+.chat-welcome-actions .chat-whatsapp-cta:first-child {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-color: #25d366;
+  background: #25d366;
+  color: #fff;
+  box-shadow: none;
+}
+
+.chat-welcome-actions .chat-whatsapp-cta:hover:not(:disabled) {
+  border-color: #128c4a;
+  background: #128c4a;
+  color: #fff;
+}
+
+.chat-welcome-actions .chat-whatsapp-cta:focus-visible {
+  outline: 3px solid #075e36;
+  outline-offset: 3px;
+}
+
 .chat-payment-actions,
 .chat-payment-methods {
   width: min(calc(100% - 2.25rem), 30rem);
@@ -843,10 +867,25 @@
 }
 
 .chat-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
   align-self: flex-end;
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
+  white-space: nowrap;
+}
+
+.chat-read-receipt {
+  letter-spacing: -0.22em;
+  padding-right: 0.16em;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.chat-read-receipt.is-read {
+  color: #1685ef;
 }
 
 .chat-bubble-image .chat-meta {
