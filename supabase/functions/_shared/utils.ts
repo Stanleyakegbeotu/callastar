@@ -9,6 +9,26 @@ export const corsHeaders = {
 };
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+const configuredCorsOrigins = () => {
+  const configured = Deno.env.get("CALLASTAR_PUBLIC_ORIGINS") ?? Deno.env.get("CALLASTAR_PUBLIC_ORIGIN") ?? "http://localhost:8443";
+  return configured.split(",").map((origin) => origin.trim()).filter(Boolean);
+};
+export function corsHeadersFor(request: Request) {
+  const allowedOrigins = configuredCorsOrigins();
+  const origin = request.headers.get("Origin");
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : (allowedOrigins[0] ?? "http://localhost:8443");
+  return {
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Vary": "Origin",
+  };
+}
+export const jsonForRequest = (body: unknown, status: number, request: Request) => new Response(JSON.stringify(body), { status, headers: { ...corsHeadersFor(request), "Content-Type": "application/json" } });
+export function isAllowedCorsOrigin(request: Request) {
+  const origin = request.headers.get("Origin");
+  return !origin || configuredCorsOrigins().includes(origin);
+}
 export const normalizeCode = (code: string) => code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 export const displayCode = (code: string) => code.replace(/^(CS)(.{4})(.{4})(.{4})$/, "$1-$2-$3-$4");
 export async function hash(value: string) { const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)); return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join(""); }

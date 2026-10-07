@@ -10,7 +10,7 @@ From this repository, link the intended Supabase project, review the additive mi
 
 Generate a unique 32-byte key for this project, base64-encode it, and add it to Supabase Edge Function secrets as `CALL_ID_ENCRYPTION_KEY` before creating new Call IDs. Call IDs remain hashed for resolution and encrypted at rest so an authenticated admin can retrieve the active share code. Keep the encryption key backed up securely; losing it means active codes must be rotated.
 
-`CALLASTAR_PUBLIC_ORIGIN` is currently set to the local Vite origin for development. Update it to the final HTTPS app origin before hosting the frontend.
+Edge Function CORS uses the exact origin in the server-only `CALLASTAR_PUBLIC_ORIGIN` setting. Values contain only scheme and host, with no path or trailing slash. The linked project is currently configured for `http://localhost:8443`; update it to the production HTTPS origin before hosting the frontend. `bootstrap-admin` also supports an optional comma-separated `CALLASTAR_PUBLIC_ORIGINS` allowlist when that function needs multiple origins, and rejects requests outside it.
 
 The first administrator is created from `/admin/login` using the one-time `bootstrap-admin` function. The bootstrap secret is server-only and is also available to the local operator at `%LOCALAPPDATA%\CallaStar\admin-bootstrap-secret.txt`; enter it only during first setup, then delete that file. The database enforces one active admin, and admin authorization requires an active `admin_profiles` record connected to Supabase Auth.
 

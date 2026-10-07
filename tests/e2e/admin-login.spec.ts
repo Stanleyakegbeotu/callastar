@@ -184,7 +184,7 @@ test("successful first-admin creation uses bootstrap, Supabase Auth, then the ad
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true }),
+      body: JSON.stringify({ success: true }),
     })
   })
   await page.route("**/auth/v1/token?grant_type=password", fulfillAdminSession)
@@ -221,6 +221,82 @@ test("successful first-admin creation uses bootstrap, Supabase Auth, then the ad
   )
   expect(localStorage).not.toContain(TEST_PASSWORD)
   expect(localStorage).not.toContain(TEST_BOOTSTRAP_SECRET)
+})
+
+test("bootstrap HTTP errors show the server result without attempting sign-in", async ({
+  page,
+}) => {
+  await mockAdminExists(page, false)
+  await page.route("**/functions/v1/bootstrap-admin", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: false,
+        code: "INVALID_BOOTSTRAP_SECRET",
+        message: "Admin setup could not be completed.",
+      }),
+    }),
+  )
+  let signInRequested = false
+  await page.route("**/auth/v1/token?grant_type=password", (route) => {
+    signInRequested = true
+    return route.fulfill({ status: 400, body: "{}" })
+  })
+
+  await page.goto("/admin/login")
+  await page.getByRole("button", { name: "Create Admin" }).click()
+  await page.getByLabel("Display name").fill("CallaStar Admin")
+  await page.getByLabel("Email").fill(TEST_EMAIL)
+  await page.getByLabel("Password", { exact: true }).fill(TEST_PASSWORD)
+  await page.getByLabel("Confirm password", { exact: true }).fill(TEST_PASSWORD)
+  await page
+    .getByLabel("Bootstrap secret", { exact: true })
+    .fill(TEST_BOOTSTRAP_SECRET)
+  await page.getByRole("button", { name: "Create Admin", exact: true }).click()
+
+  await expect(
+    page.getByText(
+      "That setup secret was not accepted. Check it and try again.",
+    ),
+  ).toBeVisible()
+  expect(signInRequested).toBe(false)
+})
+
+test("a 200 response without the bootstrap success contract is rejected", async ({
+  page,
+}) => {
+  await mockAdminExists(page, false)
+  await page.route("**/functions/v1/bootstrap-admin", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: false, code: "ADMIN_CREATION_FAILED" }),
+    }),
+  )
+  let signInRequested = false
+  await page.route("**/auth/v1/token?grant_type=password", (route) => {
+    signInRequested = true
+    return route.fulfill({ status: 400, body: "{}" })
+  })
+
+  await page.goto("/admin/login")
+  await page.getByRole("button", { name: "Create Admin" }).click()
+  await page.getByLabel("Display name").fill("CallaStar Admin")
+  await page.getByLabel("Email").fill(TEST_EMAIL)
+  await page.getByLabel("Password", { exact: true }).fill(TEST_PASSWORD)
+  await page.getByLabel("Confirm password", { exact: true }).fill(TEST_PASSWORD)
+  await page
+    .getByLabel("Bootstrap secret", { exact: true })
+    .fill(TEST_BOOTSTRAP_SECRET)
+  await page.getByRole("button", { name: "Create Admin", exact: true }).click()
+
+  await expect(
+    page.getByText(
+      "Admin setup returned an unexpected response. Please try again in a moment.",
+    ),
+  ).toBeVisible()
+  expect(signInRequested).toBe(false)
 })
 
 test("ten brand clicks reveal only the login route, including on touch devices", async ({

@@ -130,27 +130,86 @@ export function AdminLoginPage() {
     setSubmitting(true)
     try {
       if (isCreating) {
-        const { error: bootstrapError } = await client.functions.invoke(
-          "bootstrap-admin",
-          {
+        const { data: bootstrapData, error: bootstrapError } =
+          await client.functions.invoke<{
+            success?: boolean
+            created?: boolean
+            code?: string
+            error?: string
+          }>("bootstrap-admin", {
             body: { email, password, displayName, bootstrapSecret },
-          },
-        )
+          })
         if (bootstrapError) {
-          const status = (bootstrapError as typeof bootstrapError & {
-            context?: { status?: number }
-          }).context?.status
-          if (status === 409 || bootstrapError.message.includes("409")) {
+          const context = (bootstrapError as typeof bootstrapError & {
+            context?: unknown
+          }).context
+          let status: number | undefined
+          let responseCode: string | undefined
+          if (context instanceof Response) {
+            status = context.status
+            try {
+              const payload = (await context.clone().json()) as {
+                code?: unknown
+                error?: unknown
+              }
+              responseCode =
+                typeof payload.code === "string"
+                  ? payload.code
+                  : typeof payload.error === "string"
+                    ? payload.error
+                    : undefined
+            } catch {
+              // Some gateway and network errors do not include a JSON response.
+            }
+          }
+
+          console.warn("[admin-bootstrap] invocation failed", {
+            status: status ?? null,
+            code: responseCode ?? null,
+            errorType: bootstrapError.name,
+          })
+
+          if (
+            status === 409 ||
+            responseCode === "ADMIN_ALREADY_EXISTS" ||
+            responseCode === "bootstrap_already_used"
+          ) {
             setAdminExists(true)
             setCreating(false)
             setPageError(
               "Admin setup is already complete. Sign in with the existing account.",
             )
-          } else {
+          } else if (
+            status === 401 ||
+            responseCode === "INVALID_BOOTSTRAP_SECRET" ||
+            responseCode === "bootstrap_not_authorized"
+          ) {
             setSetupSecretError(
-              "Admin setup could not be completed. Check the setup secret and try again.",
+              "That setup secret was not accepted. Check it and try again.",
+            )
+          } else if (status === 400) {
+            setPageError("Check the admin details and try again.")
+          } else if (status === undefined) {
+            setPageError(
+              "Could not reach admin setup. Check your connection and try again.",
+            )
+          } else {
+            setPageError(
+              "Admin setup could not be completed. Please try again in a moment.",
             )
           }
+          return
+        }
+        if (
+          bootstrapData?.success !== true &&
+          bootstrapData?.created !== true
+        ) {
+          console.warn("[admin-bootstrap] unexpected success response", {
+            responseShape: bootstrapData ? Object.keys(bootstrapData) : [],
+          })
+          setPageError(
+            "Admin setup returned an unexpected response. Please try again in a moment.",
+          )
           return
         }
         setBootstrapSecret("")
