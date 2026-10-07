@@ -1,67 +1,79 @@
 # Private site access gate
 
-CallaStar's Netlify Edge Function gates every incoming path before static
-assets and the SPA rewrite are served. Without a valid `human_verified` cookie,
-the edge returns a small verification document with a neutral CallaStar-branded
-background. It does not load the application bundle or request application
-data. The visual blur is only a backdrop; it is not used to conceal loaded
-private content.
+CallaStar's Netlify Edge Function gates every incoming application route before
+static assets or the SPA rewrite are served. Without a valid `human_verified`
+cookie, the edge returns a self-contained CallaStar confirmation page; it does
+not load the application bundle or request application data. The manual gate
+reduces casual automated access and provides an intentional user confirmation
+step. It is not sophisticated bot detection and is not authentication.
 
-The same policy applies to every visitor. There is no user-agent or crawler
-detection. `robots.txt`, the HTML robots directives, and the `X-Robots-Tag`
-header discourage compliant crawlers, while the signed cookie controls page
-access. This does not guarantee that sophisticated automation cannot access the
-site. Supabase RLS, admin authorization, and private storage policies remain the
-authorization boundary for application data and APIs.
+The signed cookie controls only access to the public website. Admin access
+continues to require Supabase Auth and the existing administrator authorization
+checks. Supabase RLS, Edge Function authorization, and private storage policies
+remain the authorization boundary for application data and APIs. The human
+verification cookie never authorizes admin API calls.
 
-## Netlify environment variables
+## Netlify environment variable
 
-Set these in Netlify's environment-variable settings, with the **Functions**
-scope enabled, then create a new deploy. Do not put them in `netlify.toml`, a
-`VITE_` variable, frontend source, or a committed environment file.
+Configure `ACCESS_GATE_SECRET` in Netlify's environment settings with the Edge
+Functions scope enabled. Use at least 32 cryptographically random bytes. This
+is the only gate-specific secret. Do not place it in a `VITE_` variable,
+frontend source, HTML, or a committed environment file. It is intentionally
+absent from `.env.example` because the Netlify edge runtime is its only
+consumer.
 
-| Variable | Purpose |
-| --- | --- |
-| `ACCESS_GATE_SECRET` | Random signing secret; use at least 32 random bytes. |
-| `TURNSTILE_SITE_KEY` | Public Turnstile site key emitted into the verification document. |
-| `TURNSTILE_SECRET_KEY` | Server-only key used to validate challenge tokens. |
+Generate a value with a secure generator, for example:
 
-Generate the signing secret with a cryptographically secure generator, for
-example `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
-The code fails closed if the signing or challenge secret is missing or invalid.
-Use a real Turnstile widget for each deployed hostname; Cloudflare's published
-test keys belong only in local automated test environments.
+```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
 
-## Cookie and endpoints
+## Confirmation nonce and cookie
 
-After Turnstile Siteverify returns success for the current hostname and the
-`private_access` action, the edge signs a versioned payload containing `issuedAt`,
-`expiresAt`, and a random nonce with HMAC-SHA-256. The cookie contains the
-base64url payload and signature. Every protected request verifies the signature
-and expiration before it can reach the SPA. The 30-day cookie is `HttpOnly`,
-`Secure`, `SameSite=Lax`, and `Path=/`.
+The edge creates a random, versioned confirmation nonce with an issue time and
+an expiry 10 minutes later, then signs its payload using HMAC-SHA-256 and
+`ACCESS_GATE_SECRET`. The browser cannot mint a valid nonce. The verify endpoint
+accepts a confirmation only after the nonce signature, purpose, age, confirmation
+flag, honeypot, request origin, and host are checked. A 900 ms minimum elapsed
+time is required; this brief interaction check is not bot detection.
 
-- `POST /api/verify-human` validates the token server-side and issues the cookie
-  only after successful validation.
-- `POST /api/clear-access` clears the cookie. It does not grant access.
+After a valid confirmation, the edge signs a versioned cookie payload containing
+`issuedAt`, `expiresAt`, and a random nonce. Every protected request checks the
+signature and expiry. Forged values such as `human_verified=true`, altered
+signatures, expired tokens, and tokens signed by another key are rejected. The
+cookie lasts 30 days and is `HttpOnly`, `Secure`, `SameSite=Lax`, and `Path=/`.
 
-Verification attempts have a 20-per-10-minute sliding-window limit per client
-IP within each edge runtime instance. Edge instances do not share this in-memory
-counter, so use a persistent rate-limit service or provider firewall rule if a
-distributed hard limit is required. Existing backend APIs continue to enforce
-their own authentication, authorization, and RLS.
+- `POST /api/verify-human` validates the signed nonce and issues the cookie.
+- `POST /api/clear-access` clears the cookie; it does not grant access.
 
-## Request handling and testing
+Verification attempts are limited to 20 per 10 minutes per client IP within an
+edge runtime instance. Instances do not share this in-memory counter, so it is
+not a globally authoritative rate limit. Use a persistent rate-limit service or
+provider firewall rule if a distributed hard limit is required.
 
-The edge allows the robots file and favicon through without verification. The
-verification interface is self-contained; other assets and application routes
-are withheld until the cookie verifies. API routes on the Supabase origin are
-not made public by this site gate and must continue to enforce their backend
-policies.
+Verification accepts only the production origin `https://callastar.netlify.app`
+and the explicit local origins `http://localhost:5173` and
+`http://localhost:8443`. Wildcard CORS is not used.
 
-Local unit tests exercise valid, malformed, forged, altered, and expired tokens;
-direct root and deep-link requests; the verify and clear endpoints; and rate
-limits. The browser test covers the compact interface at phone, tablet, and
-desktop widths, keyboard activation, loading, success, failure, and retry. The
-Netlify Functions-scoped environment variables still need to be configured in
-the target Netlify site before a real Turnstile challenge can pass there.
+## Request handling and crawling
+
+The gate covers SPA routes, including direct deep links such as `/admin/login`,
+and static `/assets/*.js` and `/assets/*.css` requests. Only the robots file,
+favicon resources, the service-worker script (so existing installs can update),
+and the two gate endpoints are available before verification. The robots file
+and HTML/HTTP directives (`noindex`, `nofollow`, and
+`X-Robots-Tag`) remain enabled. The verification page uses inline HTML, CSS, and
+JavaScript only; it does not load the app bundle or third-party verification
+services.
+
+The Netlify edge mapping in `netlify.toml` remains on `/*` ahead of the SPA
+rewrite. API routes on the Supabase origin are not made public by this site gate
+and must continue to enforce their own authorization and RLS policies. PWA
+service-worker navigation requests remain network-first, so the edge gate stays
+authoritative for protected access.
+
+The focused unit tests cover nonce and cookie signatures, tampering, expiry,
+rate limiting, origin and host checks, the honeypot, direct route and asset
+gating, robots headers, and cookie clearing. The browser tests cover the
+checkbox and keyboard behavior, submit/retry flow, and mobile, tablet, and
+desktop viewport widths.
