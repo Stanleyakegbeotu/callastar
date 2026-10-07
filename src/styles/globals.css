@@ -1719,6 +1719,26 @@ input:focus-visible {
   z-index: 1;
 }
 
+.remote-source-status {
+  position: absolute;
+  z-index: 2;
+  inset: auto 1rem 5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  color: white;
+  text-shadow: 0 1px 4px #000;
+}
+
+.remote-source-status button {
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  background: rgb(0 0 0 / 55%);
+  color: white;
+}
+
 .video-pip .pip-video-overlay {
   position: absolute;
   inset: 0;
@@ -3275,3 +3295,4 @@ input:focus-visible {
 .call-evidence-details div { min-width: 0; }
 .call-evidence-details dt { color: var(--text-muted, #64748b); font-size: 0.78rem; }
 .call-evidence-details dd { overflow-wrap: anywhere; margin: 0.2rem 0 0; }
+.page-error { padding: 2rem; max-width: 48rem; margin: 2rem auto; }

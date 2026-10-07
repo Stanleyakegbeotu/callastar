@@ -388,6 +388,10 @@ deno_version = 2
 [functions.bootstrap-admin]
 verify_jwt = false
 
+# Call playback is authorized by its opaque per-session token in the handler.
+[functions.get-session-media]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

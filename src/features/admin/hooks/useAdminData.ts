@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { logDiagnostic } from "@/lib/utils";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
+import { withDeadline } from "@/lib/withDeadline";
 import { adminRepository } from "@/services/admin/repository";
 import type {
   CallEventRecord,
@@ -29,7 +31,7 @@ export interface AsyncState<T> {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Something went wrong reading local data.";
+  return error instanceof Error ? error.message : "Unable to load data. Please retry.";
 }
 
 export function useAsync<T>(load: () => Promise<T>, initial: T): AsyncState<T> {
@@ -43,11 +45,12 @@ export function useAsync<T>(load: () => Promise<T>, initial: T): AsyncState<T> {
     setLoading(true);
     setError(null);
 
-    load()
+    withDeadline(Promise.resolve().then(load))
       .then((value) => {
         if (!cancelled) setData(value);
       })
       .catch((cause: unknown) => {
+        productionDiagnostic("ADMIN_ROUTE_LOAD_FAILED", { stage: "data_read" });
         logDiagnostic("admin-read", cause);
         if (!cancelled) setError(messageOf(cause));
       })
@@ -134,36 +137,50 @@ export function useAssetMeta(assetId: string | null): AsyncState<StoredAssetMeta
  * An object URL for one stored asset, revoked when the asset changes or the
  * component unmounts. Blobs are only read here — never while listing profiles.
  */
-export function useAssetUrl(assetId: string | null): string | null {
+export function useAssetPlayback(assetId: string | null) {
   const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const retry = useCallback(() => { setUrl(null); setError(null); setNonce((n) => n + 1); }, []);
+  const fail = useCallback(() => { productionDiagnostic("MEDIA_LOAD_FAILED"); setUrl(null); setError("Media could not be loaded. Please retry."); }, []);
 
   useEffect(() => {
     if (!assetId) {
       setUrl(null);
+      setError(null);
       return;
     }
 
     let cancelled = false;
     let created: string | null = null;
+    setUrl(null);
+    setError(null);
 
-    void adminRepository
-      .getAssetBlob(assetId)
-      .then((blob) => {
-        if (cancelled || !blob) return;
+    void (async () => {
+      if (adminRepository.getAssetUrl) {
+        const remote = await adminRepository.getAssetUrl(assetId, nonce > 0);
+        if (!remote) throw new Error("Media unavailable.");
+        if (!cancelled) setUrl(remote);
+      } else {
+        const blob = await adminRepository.getAssetBlob(assetId);
+        if (!blob) throw new Error("Media unavailable.");
+        if (cancelled) return;
         created = URL.createObjectURL(blob);
         setUrl(created);
-      })
-      .catch((error: unknown) => logDiagnostic("asset-url", error));
+      }
+    })().catch(() => { if (!cancelled) fail(); });
 
     return () => {
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
       setUrl(null);
     };
-  }, [assetId]);
+  }, [assetId, nonce, fail]);
 
-  return url;
+  return { url, error, retry, fail };
 }
+
+export function useAssetUrl(assetId: string | null): string | null { return useAssetPlayback(assetId).url; }
 
 /** Preview URL for a file chosen but not yet saved. Revoked on every change. */
 export function useFilePreview(file: File | null): string | null {

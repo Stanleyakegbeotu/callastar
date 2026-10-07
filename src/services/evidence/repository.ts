@@ -2,6 +2,7 @@ import { config } from "@/lib/config";
 import { requireSupabase } from "@/lib/supabase/client";
 import { getCloudCallSessionCredentials } from "@/services/callBackend";
 import { logDiagnostic } from "@/lib/utils";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import { localCallEvidenceStore } from "./localStore";
 import { sendAdminEvent } from "@/services/notifications/adminEvents";
 import type { BeginEvidenceInput, CallEvidence, EvidenceHandle, LocalCallEvidence } from "./types";
@@ -65,7 +66,9 @@ async function saveCloudCapture(input: CaptureSaveInput & { width: number; heigh
 export const callEvidenceRepository = {
   async saveLocal(input: CaptureSaveInput & { width: number; height: number }): Promise<{ record: LocalCallEvidence; created: boolean }> {
     if (cloudEnabled()) {
-      const record = await saveCloudCapture(input);
+      let record: LocalCallEvidence;
+      try { record = await saveCloudCapture(input); }
+      catch (error) { productionDiagnostic("CALL_EVIDENCE_UPLOAD_FAILED"); throw error; }
       notifyEvidenceUpdated();
       logDiagnostic("CALL_EVIDENCE_CLOUD_SAVED", { recordId: record.id });
       sendAdminEvent("call_evidence_captured", input.callSessionId, `A call evidence screenshot was saved for ${input.hostName}.`);
@@ -111,7 +114,9 @@ export const callEvidenceRepository = {
   },
   async saveCaptureFailure(input: BeginEvidenceInput, reason: string): Promise<LocalCallEvidence> {
     if (cloudEnabled()) {
-      const handle = await invoke<CloudBeginResult>("begin-call-evidence", input as unknown as Record<string, unknown>);
+      const credentials = await getCloudCallSessionCredentials(input.callSessionId);
+      if (!credentials) throw new Error("Secure call session credentials are unavailable.");
+      const handle = await invoke<CloudBeginResult>("begin-call-evidence", { ...input, callSessionId: credentials.sessionId, sessionToken: credentials.sessionToken });
       if (handle.token) await invoke("finish-call-evidence", { action: "failed", ...handle, reason });
       return {
         id: handle.id, callSessionId: input.callSessionId, callerName: input.callerName, callerEmail: input.callerEmail,

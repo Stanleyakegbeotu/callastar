@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import { Link, useNavigate } from "react-router-dom";
 
 import { adminRepository } from "@/services/admin/repository";
@@ -16,14 +17,20 @@ export function CreateProfilePage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState("Creating profile…");
 
   const handleSubmit = async (values: ProfileFormValues) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    const start = performance.now();
     setSubmitting(true);
     setError(null);
 
     try {
       const profile = await adminRepository.createProfile({
+        onProgress: setProgress,
         displayName: values.displayName,
         shortBio: values.shortBio,
         status: values.status,
@@ -39,7 +46,10 @@ export function CreateProfilePage() {
       navigate(`/admin/profiles/${profile.id}`, { replace: true, state: { created: true } });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create this profile.");
+      submittingRef.current = false;
       setSubmitting(false);
+    } finally {
+      productionDiagnostic("PROFILE_CREATE_TIMING", { stage: "total", durationMs: Math.round(performance.now() - start) });
     }
   };
 
@@ -64,6 +74,7 @@ export function CreateProfilePage() {
       <ProfileForm
         mode="create"
         submitting={submitting}
+        progressLabel={progress}
         submitLabel="Create profile"
         onSubmit={(values) => void handleSubmit(values)}
         onCancel={() => navigate("/admin/profiles")}

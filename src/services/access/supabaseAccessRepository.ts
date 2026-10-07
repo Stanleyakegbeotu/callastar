@@ -10,8 +10,8 @@ import type { AccessRepository } from "./repository";
  * returns only the host and plan. Generation moves there too, so the plaintext
  * is created and shown without ever being stored.
  */
-function notConnected(): never {
-  throw new Error("Supabase access repository is not connected.");
+async function notConnected(): Promise<never> {
+  throw new Error("Subscription Access IDs are unavailable in this deployment.");
 }
 
 export const supabaseAccessRepository: AccessRepository = {

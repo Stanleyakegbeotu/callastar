@@ -46,7 +46,7 @@ self.addEventListener("fetch", (event) => {
     // Every document navigation must reach Netlify's edge gate, including
     // offline requests. Never serve an application document from a cache.
     event.respondWith(
-      fetch(request).catch(
+      fetch(request, { cache: "no-store" }).catch(
         () =>
           new Response("CallaStar is offline. Reconnect to continue.", {
             status: 503,

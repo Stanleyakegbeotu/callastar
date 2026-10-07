@@ -1,5 +1,6 @@
 import { logDiagnostic } from "@/lib/utils";
 import { adminRepository } from "@/services/admin/repository";
+import { resolveAdminMedia } from "./privateMedia";
 
 /**
  * How a stored media asset becomes something playable.
@@ -90,10 +91,12 @@ export const localMediaAssetProvider: MediaAssetProvider = {
 export const remoteMediaAssetProvider: MediaAssetProvider = {
   reachableAcrossDevices: true,
 
-  async resolvePlayback() {
-    // Not "no media": remote storage is not connected. The distinction is what
-    // stops this looking like a profile that simply has nothing uploaded.
-    return { available: false, reason: "storage_unreachable" };
+  async resolvePlayback(assetId) {
+    try {
+      const asset = await resolveAdminMedia(assetId);
+      if (!asset) return { available: false, reason: "not_uploaded" };
+      return { available: true, hasAudio: asset.hasAudio, source: { url: asset.url, expiresAt: asset.expiresAt, release: () => {} } };
+    } catch { return { available: false, reason: "storage_unreachable" }; }
   },
 };
 

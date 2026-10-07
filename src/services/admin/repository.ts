@@ -54,6 +54,8 @@ export interface AdminRepository {
   getAssetMeta(assetId: string): Promise<StoredAssetMeta | null>;
   /** The bytes. Only call this for a preview or for playback in a live call. */
   getAssetBlob(assetId: string): Promise<Blob | null>;
+  /** Remote previews stream a signed URL instead of downloading the whole file. */
+  getAssetUrl?(assetId: string, refresh?: boolean): Promise<string | null>;
   listRemoteVideos(): Promise<RemoteVideoRow[]>;
 
   /** Public lookup: active profiles only, and only fields a caller may see. */

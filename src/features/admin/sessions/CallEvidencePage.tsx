@@ -15,6 +15,8 @@ export function CallEvidencePage() {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [imageNonce, setImageNonce] = useState(0);
   const thumbnailKeys = rows.filter((row) => row.status === "ready").map((row) => row.id).join("|");
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function CallEvidencePage() {
   useEffect(() => {
     let cancelled = false;
     const owned: string[] = [];
-    void Promise.all(rows.filter((row) => row.status === "ready").map(async (row) => {
+    void Promise.all(rows.filter((row) => row.status === "ready" && !row.thumbnailUrl).map(async (row) => {
       try {
         const url = await callEvidenceRepository.imageUrl(row.id);
         owned.push(url);
@@ -47,7 +49,7 @@ export function CallEvidencePage() {
     })).then((pairs) => {
       if (cancelled) return;
       const urls = new Map(pairs);
-      setRows((current) => current.map((row) => ({ ...row, thumbnailUrl: urls.get(row.id) ?? null })));
+      setRows((current) => current.map((row) => ({ ...row, thumbnailUrl: row.thumbnailUrl ?? urls.get(row.id) ?? null })));
     });
     return () => { cancelled = true; owned.forEach((url) => { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }); };
   }, [thumbnailKeys]);
@@ -56,13 +58,14 @@ export function CallEvidencePage() {
     let cancelled = false;
     let ownedUrl: string | null = null;
     setUrl(null);
+    setImageFailed(false);
     if (selected) void callEvidenceRepository.imageUrl(selected).then((next) => {
       if (cancelled) { if (next.startsWith("blob:")) URL.revokeObjectURL(next); return; }
       ownedUrl = next;
       setUrl(next);
-    }).catch((cause: unknown) => { logDiagnostic("CALL_EVIDENCE_ADMIN_IMAGE_FAILED", cause); if (!cancelled) setError(cause instanceof Error ? cause.message : "Evidence image unavailable."); });
+    }).catch((cause: unknown) => { logDiagnostic("CALL_EVIDENCE_ADMIN_IMAGE_FAILED", cause); if (!cancelled) { setImageFailed(true); setError("Evidence image unavailable. Please retry."); } });
     return () => { cancelled = true; if (ownedUrl?.startsWith("blob:")) URL.revokeObjectURL(ownedUrl); };
-  }, [selected]);
+  }, [selected, imageNonce]);
 
   const chosen = rows.find((row) => row.id === selected);
   return <>
@@ -72,7 +75,7 @@ export function CallEvidencePage() {
     {loading ? <p className="admin-hint">Loading call evidence…</p> : rows.length === 0 ? <p className="admin-hint">No call evidence yet.</p> : <div className="evidence-layout">
       <div className="evidence-list">
         {rows.map((row) => <button type="button" className={`evidence-item ${selected === row.id ? "is-selected" : ""}`} key={row.id} onClick={() => setSelected(row.id)}>
-          {row.thumbnailUrl && <img className="call-evidence-thumbnail" src={row.thumbnailUrl} alt="" aria-hidden="true" />}
+          {row.thumbnailUrl && <img className="call-evidence-thumbnail" src={row.thumbnailUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
           <strong>{row.callerName || row.callerEmail}</strong>
           <span>{row.hostName} · {formatDateTime(row.capturedAt ?? row.createdAt)}</span>
           <small>{row.planType.replace("_", " ")} video · {row.durationSeconds === null ? "Duration pending" : formatDuration(row.durationSeconds)}</small>
@@ -83,7 +86,8 @@ export function CallEvidencePage() {
         {chosen ? <>
           <h2>{chosen.callerName} with {chosen.hostName}</h2>
           <p className="admin-hint">{formatDateTime(chosen.capturedAt ?? chosen.createdAt)} · {chosen.durationSeconds === null ? "Duration pending" : formatDuration(chosen.durationSeconds)}</p>
-          {chosen.status === "ready" && url ? <img className="call-evidence-image" src={url} alt={`Call evidence for ${chosen.callerName} and ${chosen.hostName}`} /> : <p className="admin-hint">{chosen.status === "capture_failed" ? `Snapshot unavailable${chosen.failureReason ? `: ${chosen.failureReason}` : "."}` : "Preparing secure evidence image…"}</p>}
+          {imageFailed ? <p role="alert">Evidence image unavailable. <button className="admin-button admin-button-secondary" onClick={() => { setError(null); setImageNonce((n) => n + 1); }}>Retry</button></p>
+            : chosen.status === "ready" && url ? <img className="call-evidence-image" src={url} onError={() => setImageFailed(true)} alt={`Call evidence for ${chosen.callerName} and ${chosen.hostName}`} /> : <p className="admin-hint">{chosen.status === "capture_failed" ? `Snapshot unavailable${chosen.failureReason ? `: ${chosen.failureReason}` : "."}` : chosen.status === "ready" ? "Preparing secure evidence image…" : "No snapshot is available yet."}</p>}
           <dl className="call-evidence-details">
             <div><dt>Plan</dt><dd>{chosen.packageName ?? (chosen.planType === "free_trial" ? "Free Trial" : chosen.planType.toUpperCase())}</dd></div>
             <div><dt>Call status</dt><dd>{chosen.callStatus}</dd></div>

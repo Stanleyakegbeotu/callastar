@@ -5,9 +5,14 @@ import { Icon } from "@/components/ui/Icon";
 import { formatDuration, getInitials } from "@/lib/utils";
 
 import { RtcVideo } from "./RtcVideo";
+import { UploadedCallVideo } from "./UploadedCallVideo";
 import { ReconnectingOverlay } from "./CallOverlays";
 
 export interface LiveCallCanvasProps {
+  uploadedSource?: boolean;
+  uploadedUrl?: string | null;
+  uploadedError?: boolean;
+  onRetryUploaded?: () => void;
   /** Who is on the other end, for the top bar and the waiting state. */
   remoteName: string;
   remoteShortName: string;
@@ -43,6 +48,10 @@ export interface LiveCallCanvasProps {
  * there is one canvas and the two sides simply pass different streams to it.
  */
 export function LiveCallCanvas({
+  uploadedSource = false,
+  uploadedUrl = null,
+  uploadedError = false,
+  onRetryUploaded = () => {},
   remoteName,
   remoteShortName,
   remoteAvatarUrl,
@@ -85,7 +94,7 @@ export function LiveCallCanvas({
   return (
     <main className="live-call">
       <div className="live-call-stage">
-        {mainIsLocal || hasRemoteMedia ? (
+        {!mainIsLocal && uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-main" /> : mainIsLocal || hasRemoteMedia ? (
           <RtcVideo
             key={mainIsLocal ? "main-local" : "main-remote"}
             stream={mainStream}
@@ -139,7 +148,7 @@ export function LiveCallCanvas({
           onClick={() => setSwapped((value) => !value)}
           aria-label={swapped ? remoteShortName : t("liveCall.you")}
         >
-          {pipStream ? (
+          {mainIsLocal && uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-pip-video" /> : pipStream ? (
             <RtcVideo
               key={mainIsLocal ? "pip-remote" : "pip-local"}
               stream={pipStream}

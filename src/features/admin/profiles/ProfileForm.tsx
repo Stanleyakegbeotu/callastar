@@ -36,6 +36,7 @@ interface ProfileFormProps {
   avatarAssetId?: string | null;
   coverAssetId?: string | null;
   submitting: boolean;
+  progressLabel?: string;
   submitLabel: string;
   onSubmit: (values: ProfileFormValues) => void;
   onCancel: () => void;
@@ -65,6 +66,7 @@ export function ProfileForm({
   avatarAssetId = null,
   coverAssetId = null,
   submitting,
+  progressLabel = "Saving…",
   submitLabel,
   onSubmit,
   onCancel,
@@ -329,7 +331,7 @@ export function ProfileForm({
           Cancel
         </button>
         <button type="submit" className="admin-button admin-button-primary" disabled={submitting}>
-          {submitting ? "Saving…" : submitLabel}
+          {submitting ? progressLabel : submitLabel}
         </button>
       </div>
 

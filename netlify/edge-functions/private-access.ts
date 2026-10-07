@@ -293,6 +293,11 @@ export function createPrivateAccessHandler({
     if (await isValidAccessToken(cookie, secret))
       return withResponseHeaders(await context.next())
 
+    // A module/media fetch must never receive verification HTML with HTTP 200.
+    // It stays protected; only a document navigation can complete verification.
+    if (pathname.startsWith("/assets/") || request.headers.get("sec-fetch-dest") === "video" || request.headers.get("sec-fetch-dest") === "audio")
+      return jsonResponse({ error: "verification_required" }, 403)
+
     let nonce = ""
     try {
       const secret = getEnv("ACCESS_GATE_SECRET")

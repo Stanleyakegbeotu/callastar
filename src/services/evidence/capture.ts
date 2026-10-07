@@ -1,4 +1,5 @@
 import { boundedEvidenceSize } from "./capturePolicy";
+import { videoHasFrame, waitForRenderedFrame } from "@/services/media/renderedFrame";
 
 export interface CapturedEvidenceImage { blob: Blob; width: number; height: number; videoWidth: number; videoHeight: number; readyState: number }
 
@@ -26,7 +27,15 @@ function drawVideo(context: CanvasRenderingContext2D, video: HTMLVideoElement, x
   return true;
 }
 
-export function captureCallVideoComposition(localStream: MediaStream): Promise<CapturedEvidenceImage> {
+export async function captureCallVideoComposition(_localStream: MediaStream, stillActive = () => true): Promise<CapturedEvidenceImage> {
+  const surface = document.querySelector<HTMLElement>(".live-call");
+  const main = surface?.querySelector<HTMLVideoElement>("video.live-call-main");
+  if (!main) throw new Error("main_call_video_missing");
+  const source = main.currentSrc; const stream = main.srcObject;
+  await waitForRenderedFrame(main);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  if (!stillActive() || !main.isConnected || !videoHasFrame(main) || main.currentSrc !== source || main.srcObject !== stream || surface?.querySelector("video.live-call-main") !== main)
+    throw new Error("call_video_changed_before_capture");
   return new Promise((resolve, reject) => {
     const callSurface = document.querySelector<HTMLElement>(".live-call");
     if (!callSurface) return reject(new Error("call_video_surface_missing"));
@@ -39,8 +48,10 @@ export function captureCallVideoComposition(localStream: MediaStream): Promise<C
     const context = canvas.getContext("2d");
     if (!context) return reject(new Error("canvas_unavailable"));
     context.fillStyle = "#111820"; context.fillRect(0, 0, canvas.width, canvas.height);
-    let drawn = 0; let drawnLocal = false; let videoWidth = 0; let videoHeight = 0; let readyState = 0;
-    for (const video of callSurface.querySelectorAll("video")) {
+    let drawn = 0; let drawnMain = false; let videoWidth = 0; let videoHeight = 0; let readyState = 0;
+    // The main output is required. PiP is optional and painted on top.
+    const videos = [main, ...callSurface.querySelectorAll<HTMLVideoElement>(".live-call-pip video")];
+    for (const video of videos) {
       const rect = video.getBoundingClientRect();
       const left = Math.max(bounds.left, rect.left); const top = Math.max(bounds.top, rect.top);
       const right = Math.min(bounds.right, rect.right); const bottom = Math.min(bounds.bottom, rect.bottom);
@@ -51,13 +62,13 @@ export function captureCallVideoComposition(localStream: MediaStream): Promise<C
       const width = (right - left) * scale; const height = (bottom - top) * scale;
       if (drawVideo(context, video, x, y, width, height)) {
         drawn++;
-        if (video.srcObject === localStream) drawnLocal = true;
+        if (video === main) drawnMain = true;
         videoWidth = Math.max(videoWidth, video.videoWidth); videoHeight = Math.max(videoHeight, video.videoHeight);
         readyState = Math.max(readyState, video.readyState);
       }
     }
-    if (!drawn || !drawnLocal) return reject(new Error("local_call_video_not_ready"));
-    canvas.toBlob((blob) => blob?.size
+    if (!drawn || !drawnMain) return reject(new Error("main_call_video_not_ready"));
+    canvas.toBlob((blob) => blob?.size && stillActive()
       ? resolve({ blob, width: canvas.width, height: canvas.height, videoWidth, videoHeight, readyState })
       : reject(new Error("jpeg_encode_failed")), "image/jpeg", 0.86);
   });

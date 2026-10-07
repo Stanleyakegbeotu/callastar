@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch } from "react";
 import { callDiagnostic, callError } from "@/lib/callDiagnostics";
 import { normalizeCallId } from "@/lib/callId";
 import { CALL_TIMINGS } from "@/lib/config";
+import { config } from "@/lib/config";
 import { useRtcSession } from "@/features/calls/hooks/useRtcSession";
 import { authorizeCall } from "@/services/signaling/callAuthorization";
 import { sendAdminEvent } from "@/services/notifications/adminEvents";
@@ -309,7 +310,7 @@ export function useLiveGuestCall({
               unavailableReason: message.unavailableReason ?? null,
             },
           });
-          if (message.unavailableReason) {
+          if (message.unavailableReason && !(config.callBackend === "supabase" && message.sourceKind === "uploaded-source" && message.unavailableReason === "storage_unreachable")) {
             dispatch({
               type: "FAIL_CALL",
               reason: "source_unavailable",

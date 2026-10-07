@@ -9,7 +9,7 @@ import type { HostProfile } from "@/services/admin/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { MediaBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { useAssetMeta, useAssetUrl, useFilePreview } from "../hooks/useAdminData";
+import { useAssetMeta, useAssetPlayback, useFilePreview } from "../hooks/useAdminData";
 import { VideoUpload } from "./VideoUpload";
 
 interface RemoteVideoCardProps {
@@ -32,7 +32,8 @@ function describeDuration(seconds: number | null): string | null {
  */
 export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
   const toast = useToast();
-  const videoUrl = useAssetUrl(profile.remoteVideoAssetId);
+  const playback = useAssetPlayback(profile.remoteVideoAssetId);
+  const videoUrl = playback.url;
   const { data: meta } = useAssetMeta(profile.remoteVideoAssetId);
 
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -81,7 +82,7 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
   const reachable = mediaAssetProvider.reachableAcrossDevices;
 
   return (
-    <section className="admin-card">
+    <section className="admin-card" id="media">
       <div className="admin-card-heading">
         <h2 className="admin-card-label">Remote call video</h2>
         <MediaBadge present={profile.remoteVideoAssetId !== null} />
@@ -92,9 +93,9 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
         <>
           {/* Native controls on purpose: this is a review of a file, not a call. */}
           {videoUrl ? (
-            <video className="admin-video-preview" src={videoUrl} controls playsInline preload="metadata" />
+            <video className="admin-video-preview" src={videoUrl} onError={playback.fail} controls playsInline preload="metadata" />
           ) : (
-            <div className="admin-video-placeholder">Loading video…</div>
+            <div className="admin-video-placeholder">{playback.error ?? "Loading video…"}{playback.error && <button className="admin-button admin-button-secondary" onClick={playback.retry}>Retry</button>}</div>
           )}
 
           {meta && (

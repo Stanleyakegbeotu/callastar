@@ -15,7 +15,7 @@ import { AdminPageHeader } from "../layout/AdminPageHeader";
  * so the list stays fast however large the uploads are.
  */
 export function MediaPage() {
-  const { data: rows, loading, error } = useRemoteVideos();
+  const { data: rows, loading, error, reload } = useRemoteVideos();
 
   return (
     <>
@@ -27,6 +27,7 @@ export function MediaPage() {
       {error && (
         <p className="admin-error-banner" role="alert">
           {error}
+          <button className="admin-button admin-button-secondary" onClick={reload}>Retry</button>
         </p>
       )}
 
@@ -34,7 +35,7 @@ export function MediaPage() {
         <p className="admin-hint">Loading media…</p>
       ) : rows.length === 0 ? (
         <EmptyState
-          title="No media yet"
+          title="No media added yet."
           description="Create a profile and upload its remote call video to see it here."
           action={
             <Link className="admin-button admin-button-primary" to="/admin/profiles/new">

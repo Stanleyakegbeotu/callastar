@@ -59,6 +59,7 @@ export interface StoredAssetMeta {
 }
 
 export interface CreateProfileInput {
+  onProgress?: (stage: string) => void;
   displayName: string;
   shortBio: string;
   status: ProfileStatus;

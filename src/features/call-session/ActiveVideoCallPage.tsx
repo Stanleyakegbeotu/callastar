@@ -36,6 +36,8 @@ interface ActiveVideoCallPageProps {
   onRemoteEnded?: () => void;
   /** Free previews of an uploaded host source pause at regular intervals. */
   timedSourcePreview?: boolean;
+  /** Private uploaded source playback for production calls. */
+  uploadedMedia?: { url: string | null; error: boolean; hasAudio?: boolean; retry: () => void };
 }
 
 /**
@@ -58,6 +60,7 @@ export function ActiveVideoCallPage({
   subscriptionChecking = false,
   onRemoteEnded,
   timedSourcePreview = false,
+  uploadedMedia,
 }: ActiveVideoCallPageProps) {
   const [swapped, setSwapped] = useState(false);
   // The self-view tile: which corner it is parked in, and its drag gestures.
@@ -91,7 +94,8 @@ export function ActiveVideoCallPage({
 
   const isVideoCall = callType === "video";
   const showLocalVideo = media.cameraEnabled && media.stream !== null;
-  const remoteReady = callStatus === "active" && remote.status === "ready" && remote.url !== null;
+  const effectiveRemoteUrl = uploadedMedia ? uploadedMedia.url : remote.url;
+  const remoteReady = callStatus === "active" && (uploadedMedia ? effectiveRemoteUrl !== null : remote.status === "ready" && effectiveRemoteUrl !== null);
   const showReconnecting =
     (remoteEnded || sourceReconnecting) && callStatus === "active" && !subscriptionChecking;
 
@@ -154,16 +158,16 @@ export function ActiveVideoCallPage({
         sourceReconnectTimer.current = null;
       }
     };
-  }, [remote.url]);
+  }, [effectiveRemoteUrl]);
 
   const localVideo = (className: string) => <VideoSurface className={className} stream={media.stream} mirrored={config.mirrorLocalVideo} />;
 
   const remoteVideo = (className: string) =>
-    remoteReady && remote.url ? (
+    remoteReady && effectiveRemoteUrl ? (
       <RemoteVideoSurface
-        url={remote.url}
+        url={effectiveRemoteUrl}
         className={`${className} remote-fade-in ${swapped ? "main-video-fit" : ""}`.trim()}
-        wantsAudio={speakerOn && remote.hasAudio}
+        wantsAudio={speakerOn && (uploadedMedia?.hasAudio ?? remote.hasAudio)}
         paused={sourceReconnecting || remoteEnded}
         unmuteSignal={unmuteSignal}
         positionRef={remotePosition}
@@ -179,6 +183,12 @@ export function ActiveVideoCallPage({
     <img className={className} src={host.avatarUrl} alt={`${host.shortName} on camera`} />
   );
 
+  const uploadedSourceStatus = uploadedMedia && callStatus === "active" && !remoteReady
+    ? uploadedMedia.error
+      ? <div className="remote-source-status" role="status"><span>Video could not be loaded.</span><button type="button" onClick={uploadedMedia.retry}>Retry</button></div>
+      : <div className="remote-source-status" role="status"><span>Loading video…</span></div>
+    : null;
+
   /** Whichever participant is currently large. */
   const mainSurface = () => {
     if (!isVideoCall || swapped) {
@@ -188,6 +198,7 @@ export function ActiveVideoCallPage({
               the letterboxing reads as depth rather than as black bars. */}
           {hostImage("main-video main-video-backdrop")}
           {remoteVideo("main-video main-video-overlay")}
+          {uploadedSourceStatus}
           {showReconnecting && <RemoteConnectionState variant="main" />}
         </>
       );
@@ -253,6 +264,7 @@ export function ActiveVideoCallPage({
             <>
               <img src={host.avatarUrl} alt={`${host.shortName} video preview`} />
               {remoteVideo("pip-video pip-video-overlay")}
+              {uploadedSourceStatus}
               {showReconnecting && <RemoteConnectionState variant="tile" />}
               {remote.status === "unavailable" && <span className="pip-note">No video</span>}
             </>

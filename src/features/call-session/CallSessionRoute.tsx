@@ -34,6 +34,7 @@ import { useCameraPermission } from "./hooks/useCameraPermission";
 import { useLocalMedia } from "./hooks/useLocalMedia";
 import { useCallAccessGate } from "./hooks/useCallAccessGate";
 import { useRemoteVideo } from "./hooks/useRemoteVideo";
+import { useUploadedCallMedia } from "./hooks/useUploadedCallMedia";
 import { useRingbackTone } from "./hooks/useRingbackTone";
 import { SubscriptionAccessScreen } from "./subscription/SubscriptionAccessScreen";
 import { SubscriptionCheckpoint } from "./subscription/SubscriptionCheckpoint";
@@ -84,7 +85,8 @@ export function CallSessionRoute() {
   const [supportChannel, setSupportChannel] = useState<SupportChannel>("in_app");
 
   // The remote clip is only fetched once the call is actually active.
-  const remote = useRemoteVideo(host, session.status === "active", session.type);
+  const remote = useRemoteVideo(host, !liveMode && session.status === "active", session.type, session.id);
+  const uploadedMedia = useUploadedCallMedia(session.id, liveMode && session.remoteSource.kind === "uploaded-source" && ["negotiating", "active", "reconnecting"].includes(session.status), session.remoteSource.playbackUrl);
   const hasUploadedFreeVideoPreview =
     !liveMode &&
     session.type === "video" &&
@@ -498,6 +500,10 @@ export function CallSessionRoute() {
             localStream={media.stream}
             remoteStream={live.remoteStream}
             hasRemoteMedia={live.hasRemoteMedia}
+            uploadedSource={session.remoteSource.kind === "uploaded-source"}
+            uploadedUrl={uploadedMedia.url}
+            uploadedError={uploadedMedia.error}
+            onRetryUploaded={uploadedMedia.retry}
             seconds={liveSeconds}
             micEnabled={media.micEnabled}
             cameraEnabled={media.cameraEnabled}
@@ -679,6 +685,7 @@ export function CallSessionRoute() {
             startedAt={session.startedAt}
             onEnd={endCall}
             timedSourcePreview={hasUploadedFreeVideoPreview}
+            uploadedMedia={liveMode && session.remoteSource.kind === "uploaded-source" ? uploadedMedia : undefined}
             accessOverlay={overlay}
             subscriptionChecking={gate.status === "checking"}
             onRemoteEnded={onRemoteEnded}

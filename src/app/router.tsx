@@ -92,10 +92,12 @@ export function AppRouter() {
           <Route path="profiles/new" element={<CreateProfilePage />} />
           <Route path="profiles/:profileId" element={<ProfileDetailPage />} />
           <Route path="profiles/:profileId/edit" element={<EditProfilePage />} />
+          <Route path="profiles/:profileId/media" element={<ProfileDetailPage />} />
           <Route path="media" element={<MediaPage />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
           <Route path="evidence" element={<CallEvidencePage />} />
+          <Route path="call-evidence" element={<Navigate to="/admin/evidence" replace />} />
           <Route path="recordings" element={<Navigate to="/admin/evidence" replace />} />
           {/* Plans before :requestId, or "plans" would be read as an id. */}
           <Route path="subscriptions" element={<SubscriptionRequestsPage />} />
@@ -107,6 +109,7 @@ export function AppRouter() {
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="studio" element={<TransformationStudioPage />} />
           <Route path="settings" element={<AdminSettingsPage />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -114,7 +114,7 @@ export function ProfileAvailabilityCard({ profile, onChanged }: ProfileAvailabil
           <Icon name="pencil" className="size-4" />
           Edit
         </Link>
-        <Link className="availability-action" to={`/admin/profiles/${profile.id}#media`}>
+        <Link className="availability-action" to={`/admin/profiles/${profile.id}/media`}>
           <Icon name="image" className="size-4" />
           Media
         </Link>

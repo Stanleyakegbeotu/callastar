@@ -1515,3 +1515,4 @@ body:has(.audio-call) {
   overflow: hidden;
   overscroll-behavior: none;
 }
+.live-call-media-status { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 1rem; background: #111820; color: white; }

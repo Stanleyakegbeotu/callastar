@@ -1,10 +1,10 @@
-/** Keep the app shell available offline without caching calls, API data or media. */
+/** Protected documents and bundles always require the online access gate. */
 export function registerServiceWorker(): void {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
 
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error: unknown) => {
-      console.warn("CallaStar could not register its offline app shell.", error);
+    void navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).then((registration) => registration.update()).catch(() => {
+      console.warn("CallaStar could not update its service worker.");
     });
   }, { once: true });
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { CallaStarLogo } from "@/components/branding/CallaStarLogo";
+import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 import { Icon } from "@/components/ui/Icon";
 import { config } from "@/lib/config";
 import { supabase } from "@/lib/supabase/client";
@@ -84,7 +85,7 @@ export function AdminLayout() {
             {config.adminDataMode === "local" && <span className="admin-chip">Local data</span>}
           </div>
           <div className="admin-page-content">
-            <Outlet />
+            <PageErrorBoundary key={location.pathname} admin><Outlet /></PageErrorBoundary>
           </div>
         </main>
       </div>

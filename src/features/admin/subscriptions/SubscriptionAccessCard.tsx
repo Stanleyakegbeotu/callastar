@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { formatDateTime, copyText, logDiagnostic } from "@/lib/utils";
+import { withDeadline } from "@/lib/withDeadline";
 import { accessRepository } from "@/services/access/repository";
 import { formatAccessId, maskAccessId } from "@/services/access/accessCode";
 import type { SubscriptionAccessId } from "@/services/access/types";
@@ -33,15 +34,21 @@ export function SubscriptionAccessCard({ profile }: { profile: HostProfile }) {
   const [freshCodes, setFreshCodes] = useState<Record<string, string>>({});
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlanId | null>(null);
   const [revoking, setRevoking] = useState<SubscriptionAccessId | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyNonce, setHistoryNonce] = useState(0);
 
   const reload = useCallback(() => {
-    void accessRepository
-      .listProfileAccessIds(profile.id)
-      .then(setIssued)
-      .catch((error: unknown) => logDiagnostic("access-history", error));
-  }, [profile.id]);
+    setHistoryNonce((n) => n + 1);
+  }, []);
 
-  useEffect(reload, [reload]);
+  useEffect(() => {
+    let active = true;
+    setHistoryError(null);
+    void withDeadline(Promise.resolve().then(() => accessRepository.listProfileAccessIds(profile.id)))
+      .then((rows) => { if (active) setIssued(rows); })
+      .catch(() => { if (active) setHistoryError("Subscription Access IDs are unavailable. Other profile actions remain available."); });
+    return () => { active = false; };
+  }, [profile.id, historyNonce]);
 
   const generate = async (plan: SubscriptionPlan) => {
     setBusyPlan(plan.id);
@@ -110,6 +117,7 @@ export function SubscriptionAccessCard({ profile }: { profile: HostProfile }) {
         <h2>Subscription Access</h2>
       </div>
       <p className="admin-hint">Generate an access ID after confirming a user&apos;s payment.</p>
+      {historyError && <p className="admin-error-banner" role="alert">{historyError} <button className="admin-button admin-button-secondary" onClick={reload}>Retry access IDs</button></p>}
 
       {loading ? (
         <p className="admin-hint">Loading plans…</p>
@@ -142,7 +150,7 @@ export function SubscriptionAccessCard({ profile }: { profile: HostProfile }) {
                   <button
                     type="button"
                     className={`admin-button ${plan.isMostPopular ? "admin-button-primary" : "admin-button-secondary"}`}
-                    disabled={busyPlan !== null}
+                    disabled={busyPlan !== null || historyError !== null}
                     onClick={() => void generate(plan)}
                   >
                     {busyPlan === plan.id ? "Generating…" : "Generate Access ID"}

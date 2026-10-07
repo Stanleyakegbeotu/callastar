@@ -133,6 +133,17 @@ describe("signed manual-verification nonce", () => {
 })
 
 describe("Netlify edge access gate", () => {
+  it("returns a protected non-HTML error for expired-cookie module requests", async () => {
+    const context = makeContext();
+    const response = await makeHandler()(new Request(`${SITE_ORIGIN}/assets/app.js`), context);
+    expect(response!.status).toBe(403);
+    expect(response!.headers.get("content-type")).toContain("application/json");
+    expect(context.next).not.toHaveBeenCalled();
+    const token = await createAccessToken(SIGNING_SECRET);
+    const allowed = await makeHandler()(new Request(`${SITE_ORIGIN}/assets/app.js`, { headers: { cookie: `human_verified=${token}` } }), context);
+    expect(allowed!.status).toBe(200);
+    expect(context.next).toHaveBeenCalledOnce();
+  });
   it.each([
     "/",
     "/connect",
@@ -141,7 +152,6 @@ describe("Netlify edge access gate", () => {
     "/support/abc",
     "/admin/login",
     "/admin/settings",
-    "/assets/app.js",
   ])(
     "withholds app and assets at direct route %s until the cookie verifies",
     async (path) => {

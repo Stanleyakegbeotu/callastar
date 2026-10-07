@@ -2,6 +2,9 @@ import { normalizeCallId } from "@/lib/callId";
 import { initialsAvatarDataUrl } from "@/lib/avatar";
 import { PROFILE_LIMITS } from "@/lib/config";
 import { requireSupabase } from "@/lib/supabase/client";
+import { resolveAdminMedia, STORAGE_BUCKETS } from "@/services/media/privateMedia";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
+import { verifyUpload } from "@/services/media/verifyUpload";
 import { blobToDataUrl, readAudioMetadata, readVideoMetadata, validateFile } from "./mediaFiles";
 import { computeSessionMetrics } from "./sessionInsights";
 import { assertAudienceCount, normalizeEngagementEmail } from "./profileEngagement";
@@ -10,8 +13,8 @@ import type { AssetKind, CallEventRecord, CallSessionRecord, HostProfile, Public
 import type { AppendCallEventInput, CallSessionFilters, CallSessionPatch, CreateCallSessionInput, CreateProfileInput, UpdateProfileInput } from "./types";
 
 type Row = Record<string, any>;
-const AVATAR_BUCKET = "host-avatars";
-const MEDIA_BUCKET = "host-call-media";
+const AVATAR_BUCKET = STORAGE_BUCKETS.avatar;
+const MEDIA_BUCKET = STORAGE_BUCKETS.remote_video;
 const now = () => new Date().toISOString();
 const newId = () => crypto.randomUUID();
 const assetBucket = (kind: AssetKind) => kind === "avatar" || kind === "cover" ? AVATAR_BUCKET : MEDIA_BUCKET;
@@ -76,7 +79,8 @@ async function prepareAsset(hostId: string, kind: AssetKind, file: File): Promis
   const id = newId();
   return { path: assetPath(hostId, kind, file), meta: { id, profileId: hostId, kind, fileName: file.name, mimeType: file.type, fileSize: file.size, durationSeconds: info?.durationSeconds ?? null, width: info?.width ?? null, height: info?.height ?? null, hasAudio: info?.hasAudio ?? true, createdAt: now(), updatedAt: now() } };
 }
-async function uploadAsset(hostId: string, kind: AssetKind, file: File): Promise<StoredAssetMeta> {
+async function uploadAsset(hostId: string, kind: AssetKind, file: File): Promise<StoredAssetMeta & { storagePath: string }> {
+  file = await verifyUpload(kind, file);
   const client = requireSupabase();
   const { path, meta } = await prepareAsset(hostId, kind, file);
   const bucket = assetBucket(kind);
@@ -84,25 +88,21 @@ async function uploadAsset(hostId: string, kind: AssetKind, file: File): Promise
   if (uploadError) throw uploadError;
   const { data, error } = await client.from("host_assets").insert({ id: meta.id, host_id: hostId, kind, storage_path: path, file_name: meta.fileName, mime_type: meta.mimeType, file_size_bytes: meta.fileSize, duration_seconds: meta.durationSeconds, width: meta.width, height: meta.height, has_audio: meta.hasAudio }).select("*").single();
   if (error) { await client.storage.from(bucket).remove([path]); throw error; }
-  return { ...fromAsset(data), id: data.id };
+  return { ...fromAsset(data), id: data.id, storagePath: path };
 }
 async function setAsset(hostId: string, kind: AssetKind, file: File): Promise<HostProfile> {
   const client = requireSupabase();
   const meta = await uploadAsset(hostId, kind, file);
-  const { data: asset, error: assetError } = await client.from("host_assets").select("storage_path").eq("id", meta.id).single();
-  if (assetError) throw assetError;
   const columns: Record<AssetKind, string> = { avatar: "avatar_path", cover: "cover_path", remote_video: "remote_video_asset_id", remote_audio: "remote_audio_asset_id" };
   const { data: prior } = await client.from("hosts").select(columns[kind]).eq("id", hostId).single();
   const priorId = (prior as Row | null)?.[columns[kind]];
-  const patch: Row = { [columns[kind]]: kind === "avatar" || kind === "cover" ? asset.storage_path : meta.id, updated_at: now() };
-  const { error } = await client.from("hosts").update(patch).eq("id", hostId);
-  if (error) throw error;
-  if (kind === "remote_video" || kind === "remote_audio") {
-    await client.from("host_media").update({ is_active: false }).eq("host_id", hostId).eq("kind", kind);
-    const { error: mediaError } = await client.from("host_media").insert({ host_id: hostId, kind, storage_path: asset.storage_path, mime_type: meta.mimeType, file_size_bytes: meta.fileSize, duration_seconds: meta.durationSeconds, has_audio: meta.hasAudio, is_active: true });
-    if (mediaError) throw mediaError;
+  const { error } = await client.rpc("attach_host_assets", { p_host_id: hostId, p_asset_ids: [meta.id] });
+  if (error) {
+    await client.storage.from(assetBucket(kind)).remove([meta.storagePath]);
+    await client.from("host_assets").delete().eq("id", meta.id);
+    throw new Error("Media could not be saved. The previous source is unchanged. Please retry.");
   }
-  if (priorId) await removeAssetByReference(hostId, kind, priorId);
+  if (priorId) await removeAssetByReference(hostId, kind, priorId).catch(() => productionDiagnostic("MEDIA_LOAD_FAILED", { stage: "old_asset_cleanup" }));
   const profile = await loadProfile(hostId);
   if (!profile) throw new Error("That host profile no longer exists.");
   return profile;
@@ -154,14 +154,47 @@ export const supabaseAdminRepository: AdminRepository = {
     const name = input.displayName.trim(); const bio = input.shortBio.trim();
     if (name.length < PROFILE_LIMITS.NAME_MIN || name.length > PROFILE_LIMITS.NAME_MAX) throw new Error("Enter a valid host name.");
     if (bio.length > PROFILE_LIMITS.BIO_MAX) throw new Error("The bio is too long.");
-    const { data, error } = await requireSupabase().from("hosts").insert({ display_name: name, short_bio: bio, status: input.status, base_follower_count: assertAudienceCount(input.baseFollowerCount ?? 0), base_like_count: assertAudienceCount(input.baseLikeCount ?? 0) }).select("*").single();
+    const timed = async <T>(stage: string, work: () => Promise<T>): Promise<T> => {
+      const start = performance.now(); let success = false;
+      try { const value = await work(); success = true; return value; }
+      finally { productionDiagnostic("PROFILE_CREATE_TIMING", { stage, durationMs: Math.round(performance.now() - start), success }); }
+    };
+    const client = requireSupabase();
+    const files = (["avatar", "cover", "remote_video", "remote_audio"] as AssetKind[])
+      .map((kind) => ({ kind, file: ({ avatar: input.avatarFile, cover: input.coverFile, remote_video: input.remoteVideoFile, remote_audio: input.remoteAudioFile })[kind] }))
+      .filter((item): item is { kind: AssetKind; file: File } => Boolean(item.file));
+    for (const { kind, file } of files) { const check = validateFile(kind, file); if (!check.ok) throw new Error(check.message); }
+    input.onProgress?.("Creating profile…");
+    const { data, error } = await timed("profile_insert", async () => await client.from("hosts").insert({ display_name: name, short_bio: bio, status: input.status, base_follower_count: assertAudienceCount(input.baseFollowerCount ?? 0), base_like_count: assertAudienceCount(input.baseLikeCount ?? 0) }).select("*").single());
     if (error) throw error;
-    let profile = await this.regenerateCallId(data.id);
-    if (input.avatarFile) profile = await this.setAvatar(data.id, input.avatarFile);
-    if (input.coverFile) profile = await this.setCover(data.id, input.coverFile);
-    if (input.remoteVideoFile) profile = await this.setRemoteVideo(data.id, input.remoteVideoFile);
-    if (input.remoteAudioFile) profile = await this.setRemoteAudio(data.id, input.remoteAudioFile);
-    return profile!;
+    const uploaded: Awaited<ReturnType<typeof uploadAsset>>[] = [];
+    try {
+      input.onProgress?.(files.length ? "Uploading media…" : "Generating Call ID…");
+      // Wait for every upload to settle before cleanup, so a late upload cannot orphan a file.
+      const results = await Promise.allSettled([
+        timed("call_id", async () => {
+          const result = await client.functions.invoke("generate-call-id", { body: { hostId: data.id } });
+          if (result.error || result.data?.error || !result.data?.code) throw new Error("Call ID could not be created.");
+          return result.data.code as string;
+        }),
+        ...files.map(({ kind, file }) => timed(kind, async () => { const asset = await uploadAsset(data.id, kind, file); uploaded.push(asset); return asset.id; })),
+      ]);
+      const failure = results.find((r) => r.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+      input.onProgress?.("Finalizing…");
+      if (uploaded.length) await timed("media_commit", async () => {
+        const { error } = await client.rpc("attach_host_assets", { p_host_id: data.id, p_asset_ids: uploaded.map((a) => a.id) });
+        if (error) throw new Error("Profile media could not be finalized.");
+      });
+      const profile = await timed("final_read", () => loadProfile(data.id));
+      if (!profile) throw new Error("Profile could not be loaded.");
+      return profile;
+    } catch (error) {
+      await Promise.allSettled(uploaded.map((a) => client.storage.from(assetBucket(a.kind)).remove([a.storagePath])));
+      const { error: cleanupError } = await client.from("hosts").delete().eq("id", data.id);
+      if (cleanupError) throw new Error("Creation was interrupted. Check Profiles before retrying to avoid a duplicate.");
+      throw error;
+    }
   },
   async updateProfile(id, input: UpdateProfileInput) {
     const patch: Row = { updated_at: now() };
@@ -217,9 +250,16 @@ export const supabaseAdminRepository: AdminRepository = {
     const { data, error: downloadError } = await client.storage.from(assetBucket(row.kind)).download(row.storage_path);
     if (downloadError) throw downloadError; return data;
   },
+  async getAssetUrl(assetId, refresh) { return (await resolveAdminMedia(assetId, refresh))?.url ?? null; },
   async listRemoteVideos() {
     const profiles = await this.listProfiles();
-    return Promise.all(profiles.map(async (profile) => ({ profile, video: profile.remoteVideoAssetId ? await this.getAssetMeta(profile.remoteVideoAssetId) : null, audio: profile.remoteAudioAssetId ? await this.getAssetMeta(profile.remoteAudioAssetId) : null })));
+    const references = profiles.flatMap((profile) => [profile.remoteVideoAssetId, profile.remoteAudioAssetId]).filter((id): id is string => Boolean(id));
+    const { data, error } = references.length
+      ? await requireSupabase().from("host_assets").select("*").in("id", references)
+      : { data: [], error: null };
+    if (error) throw new Error("Unable to load host media. Please retry.");
+    const assets = new Map((data ?? []).map((row) => [row.id, fromAsset(row)]));
+    return profiles.map((profile) => ({ profile, video: assets.get(profile.remoteVideoAssetId ?? "") ?? null, audio: assets.get(profile.remoteAudioAssetId ?? "") ?? null }));
   },
   async resolveCallId(code) {
     const { data, error } = await requireSupabase().functions.invoke("resolve-call-id", { body: { code } });

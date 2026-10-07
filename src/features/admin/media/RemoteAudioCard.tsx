@@ -7,7 +7,7 @@ import type { HostProfile } from "@/services/admin/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { MediaBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { useAssetMeta, useAssetUrl, useFilePreview } from "../hooks/useAdminData";
+import { useAssetMeta, useAssetPlayback, useFilePreview } from "../hooks/useAdminData";
 import { AudioUpload } from "./AudioUpload";
 
 interface RemoteAudioCardProps {
@@ -33,7 +33,8 @@ function describeDuration(seconds: number | null): string | null {
  */
 export function RemoteAudioCard({ profile, onChanged }: RemoteAudioCardProps) {
   const toast = useToast();
-  const audioUrl = useAssetUrl(profile.remoteAudioAssetId);
+  const playback = useAssetPlayback(profile.remoteAudioAssetId);
+  const audioUrl = playback.url;
   const { data: meta } = useAssetMeta(profile.remoteAudioAssetId);
 
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -89,9 +90,9 @@ export function RemoteAudioCard({ profile, onChanged }: RemoteAudioCardProps) {
       {profile.remoteAudioAssetId ? (
         <>
           {audioUrl ? (
-            <audio className="admin-audio-preview" src={audioUrl} controls preload="metadata" />
+            <audio className="admin-audio-preview" src={audioUrl} onError={playback.fail} controls preload="metadata" />
           ) : (
-            <div className="admin-audio-placeholder">Loading audio…</div>
+            <div className="admin-audio-placeholder">{playback.error ?? "Loading audio…"}{playback.error && <button className="admin-button admin-button-secondary" onClick={playback.retry}>Retry</button>}</div>
           )}
 
           {meta && (

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { logDiagnostic } from "@/lib/utils";
+import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import { callEvidenceRepository } from "@/services/evidence/repository";
 import { captureCallVideoComposition } from "@/services/evidence/capture";
 import { claimEvidenceSession, evidencePlanType, shouldCaptureCallEvidence } from "@/services/evidence/capturePolicy";
@@ -30,6 +31,8 @@ export function useCallEvidenceScreenshot(options: {
   const latestSession = useRef(session);
   const lastGateDiagnostic = useRef("");
   latestSession.current = session;
+  const latestConnected = useRef(rtcConnected);
+  latestConnected.current = rtcConnected;
   const { id, status, type, callId, host, caller, startedAt, answeredAt, sessionCreatedAt, endedAt, failureReason, error } = session;
 
   useEffect(() => {
@@ -93,7 +96,7 @@ export function useCallEvidenceScreenshot(options: {
           for (let attempt = 0; attempt < 4 && !captured; attempt++) {
             if (!isOngoing(latestSession.current.status)) break;
             try {
-              captured = await captureCallVideoComposition(localStream!);
+              captured = await captureCallVideoComposition(localStream!, () => latestSession.current.id === id && latestSession.current.status === "active" && latestConnected.current);
             } catch (cause) {
               lastError = cause;
               logDiagnostic("CALL_EVIDENCE_VIDEO_NOT_READY", {
@@ -125,6 +128,7 @@ export function useCallEvidenceScreenshot(options: {
             mimeType: captured.blob.type,
             dimensions: `${captured.width}x${captured.height}`,
           });
+          productionDiagnostic("CALL_EVIDENCE_CAPTURED", { width: captured.width, height: captured.height, size: captured.blob.size });
 
           const latest = latestSession.current;
           const saved = await callEvidenceRepository.saveLocal({
@@ -164,7 +168,7 @@ export function useCallEvidenceScreenshot(options: {
         .then((record) => logDiagnostic("CALL_EVIDENCE_SAVED", { recordId: record.id, status: record.status }))
         .catch((cause) => logDiagnostic("CALL_EVIDENCE_LOCAL_SAVE_FAILED", { callSessionId: id, error: cause }));
     };
-  }, [answeredAt, callId, caller.email, caller.fullName, host, id, liveMode, localStream, rtcConnected, session, session.access, sessionCreatedAt, sessionMatches, startedAt, status, type]);
+  }, [answeredAt, callId, caller.email, caller.fullName, host, id, liveMode, localStream, rtcConnected, session.access, sessionCreatedAt, sessionMatches, startedAt, status, type]);
 
   useEffect(() => {
     if (!sessionMatches || !id || !["ended", "failed", "declined", "no_answer"].includes(status)) return;

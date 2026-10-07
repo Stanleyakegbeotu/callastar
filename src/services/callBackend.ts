@@ -50,7 +50,7 @@ export interface CallBackend {
    * Media for a host the caller has already resolved. The call type decides
    * what is served: an audio call plays the profile's audio when it has one.
    */
-  getRemoteMedia(host: HostPreview, callType: CallType): Promise<RemoteMedia>;
+  getRemoteMedia(host: HostPreview, callType: CallType, localSessionId?: string): Promise<RemoteMedia>;
 
   /**
    * Call history. The local engine records sessions and their events so the
@@ -130,10 +130,11 @@ const supabaseBackend: CallBackend = {
     if (error) throw new Error("Unable to load remote media.");
     return data?.available ? { available: true, url: data.media.url, hasAudio: data.media.hasAudio } : { available: false };
   },
-  async getRemoteMedia() {
-    // Signed media is session-scoped: this arrives once the call session
-    // handshake is wired to `startCallSession` / `getSessionMedia`.
-    return { available: false };
+  async getRemoteMedia(_host, _callType, localSessionId) {
+    const credentials = localSessionId ? await getCloudCallSessionCredentials(localSessionId) : null;
+    if (!credentials) return { available: false };
+    const media = await supabaseBackend.getSessionMedia(credentials);
+    return media.available && media.url ? { available: true, url: media.url, hasAudio: media.hasAudio ?? true } : { available: false };
   },
   sessions: {
     async create(input) {

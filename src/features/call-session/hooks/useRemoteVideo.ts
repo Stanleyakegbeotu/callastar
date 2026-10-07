@@ -23,7 +23,7 @@ const IDLE: RemoteVideoState = { status: "idle", url: null, hasAudio: false };
  * The object URL created here is revoked when the call ends, when the host
  * changes, or when this screen unmounts — there is exactly one per blob.
  */
-export function useRemoteVideo(host: HostPreview | null, enabled: boolean, callType: CallType): RemoteVideoState {
+export function useRemoteVideo(host: HostPreview | null, enabled: boolean, callType: CallType, sessionId?: string): RemoteVideoState {
   const [state, setState] = useState<RemoteVideoState>(IDLE);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function useRemoteVideo(host: HostPreview | null, enabled: boolean, callT
     setState({ status: "loading", url: null, hasAudio: false });
 
     void callBackend
-      .getRemoteMedia(host, callType)
+      .getRemoteMedia(host, callType, sessionId)
       .then((media) => {
         if (cancelled) return;
 
@@ -67,7 +67,7 @@ export function useRemoteVideo(host: HostPreview | null, enabled: boolean, callT
     };
     // `host` lives in reducer state, so its identity only changes when the
     // session actually points at a different profile.
-  }, [callType, enabled, host]);
+  }, [callType, enabled, host, sessionId]);
 
   return state;
 }
