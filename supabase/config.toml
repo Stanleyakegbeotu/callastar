@@ -397,6 +397,10 @@ verify_jwt = false
 [functions.support-customer]
 verify_jwt = false
 
+# Accountless customer eligibility lookup; the handler validates the declared email.
+[functions.check-call-eligibility]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

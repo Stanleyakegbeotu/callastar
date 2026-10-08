@@ -27,7 +27,7 @@ interface JoinCallFormProps {
   callType: CallType;
   onCancel: () => void;
   /** The host is whoever the Call ID resolved to, never a stand-in. */
-  onSubmit: (values: JoinCallValues, host: HostPreview) => void;
+  onSubmit: (values: JoinCallValues, host: HostPreview) => Promise<void> | void;
   /**
    * Everything the entered ID can mean other than "start a normal call":
    * an unavailable host, a caller whose preview is spent, or paid access.
@@ -76,6 +76,8 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
   const [touched, setTouched] = useState<Partial<Record<JoinCallField, boolean>>>({});
   const [step, setStep] = useState<JoinStep>("details");
   const [resolvedHost, setResolvedHost] = useState<HostPreview | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const lookupTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -149,7 +151,9 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
           // A plain first call is the only outcome this dialog can finish; the
           // rest are screens of their own, because each one ends the flow here
           // rather than leading to a camera prompt.
-          if (outcome.kind === "call") {
+          if (outcome.kind === "call" || outcome.kind === "returning") {
+            // The final Start Call action performs the email-scoped cloud gate.
+            // A per-host local preview result must not bypass chat restoration.
             setResolvedHost(outcome.host);
             setStep("confirmation");
             return;
@@ -376,6 +380,7 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
           )}
 
 
+          {startError && <p className="field-error" role="alert">{startError}</p>}
           <div className="join-actions">
           {/*
             On the live path this goes straight to the call, which checks that
@@ -388,13 +393,17 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
             original explainer step below still applies.
           */}
             <Button
-              onClick={() =>
-                isLiveCallingConfigured && resolvedHost
-                  ? onSubmit(normaliseJoinCall(values), resolvedHost)
-                  : setStep("permission")
-              }
+              disabled={startingCall}
+              onClick={() => {
+                if (!isLiveCallingConfigured || !resolvedHost) { setStep("permission"); return; }
+                setStartingCall(true);
+                setStartError(null);
+                void Promise.resolve(onSubmit(normaliseJoinCall(values), resolvedHost))
+                  .catch(() => setStartError("We could not check call access. Please try again."))
+                  .finally(() => setStartingCall(false));
+              }}
             >
-              Start Call
+              {startingCall ? "Checking call access…" : "Start Call"}
             </Button>
           </div>
           <p className="join-disclaimer ready-footnote">
@@ -422,8 +431,15 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
         </ul>
       )}
       <div className="join-actions">
-        <Button onClick={() => resolvedHost && onSubmit(normaliseJoinCall(values), resolvedHost)}>
-          Allow access
+        <Button disabled={startingCall} onClick={() => {
+          if (!resolvedHost) return;
+          setStartingCall(true);
+          setStartError(null);
+          void Promise.resolve(onSubmit(normaliseJoinCall(values), resolvedHost))
+            .catch(() => setStartError("We could not check call access. Please try again."))
+            .finally(() => setStartingCall(false));
+        }}>
+          {startingCall ? "Checking call access…" : "Allow access"}
         </Button>
         <button type="button" className="join-text-action" onClick={() => setStep("confirmation")}>
           Not now

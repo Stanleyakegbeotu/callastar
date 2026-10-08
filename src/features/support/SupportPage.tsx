@@ -15,6 +15,7 @@ import { useWhatsappSupportNumber } from "./hooks/useWhatsappSupportNumber";
 import { resolveConversation } from "./supportEntry";
 import { announcePackageChange } from "./supportAutomation";
 import { readSupportCustomerIdentity } from "@/services/support/customerIdentity";
+import { noteRecognizedCustomerAccess, updateCustomerState } from "@/services/support/customerState";
 
 /**
  * `/support` — customer care reached on its own, rather than from a payment.
@@ -31,8 +32,12 @@ export function SupportIdentifyPage() {
     let cancelled = false;
     const identity = readSupportCustomerIdentity();
     supportRepository.setCustomerIdentity?.(identity);
+    noteRecognizedCustomerAccess(identity.email, "customer_care");
     void resolveConversation({ email: identity.email, name: identity.name, subject: "CallaStar support" })
-      .then((conversation) => { if (!cancelled) navigate(`/support/${conversation.id}`, { replace: true }); })
+      .then((conversation) => {
+        updateCustomerState(identity.email, { supportConversationId: conversation.id, supportStarted: true });
+        if (!cancelled) navigate(`/support/${conversation.id}`, { replace: true });
+      })
       .catch((cause: unknown) => { logDiagnostic("support-identify", cause); if (!cancelled) setError("We could not open your conversation. Please retry."); });
     return () => {
       cancelled = true;
@@ -60,6 +65,7 @@ export function SupportThreadPage() {
   const navigate = useNavigate();
   const identity = readSupportCustomerIdentity();
   supportRepository.setCustomerIdentity?.(identity);
+  noteRecognizedCustomerAccess(identity.email, "customer_care");
   const state = useSupportConversation(conversationId ?? null, "customer");
   const { number: whatsappNumber } = useWhatsappSupportNumber();
   const [resumePlan, setResumePlan] = useState<SubscriptionPlan | null>(null);
@@ -67,6 +73,18 @@ export function SupportThreadPage() {
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>([]);
   const checkoutDraft = state.conversation?.checkoutDraft ?? null;
   const currentConversationId = state.conversation?.id;
+
+  useEffect(() => {
+    if (!state.conversation) return;
+    updateCustomerState(identity.email, {
+      supportConversationId: state.conversation.id,
+      supportStarted: true,
+      selectedPlanId: checkoutDraft?.planId ?? null,
+      selectedPlanName: checkoutDraft?.planName ?? null,
+      paymentStarted: Boolean(checkoutDraft?.selectedPaymentMethod || state.conversation.subscriptionRequestId),
+      selectedPaymentMethod: checkoutDraft?.selectedPaymentMethod ?? null,
+    });
+  }, [checkoutDraft?.planId, checkoutDraft?.planName, checkoutDraft?.selectedPaymentMethod, identity.email, state.conversation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +145,7 @@ export function SupportThreadPage() {
   }, [currentConversationId, state.reload]);
 
   const continueWhatsapp = useCallback(async () => {
+    noteRecognizedCustomerAccess(identity.email, "whatsapp_support");
     if (!whatsappNumber) return;
     const draft = state.conversation?.checkoutDraft;
     const method = draft?.selectedPaymentMethod ?? "payment method";

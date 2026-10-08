@@ -4,6 +4,8 @@ import { logDiagnostic } from "@/lib/utils";
 import { callBackend } from "@/services/callBackend";
 import type { CallEventMetadata, CallEventType } from "@/services/admin/types";
 import type { CallSessionState } from "@/state/callSessionReducer";
+import { markCustomerTrialConsumed } from "@/services/support/customerState";
+import { config } from "@/lib/config";
 
 /**
  * Persists the call lifecycle.
@@ -110,6 +112,9 @@ export function useSessionRecorder({
           sourceKind:
             type === "audio" ? "live-microphone" : remoteSourceKind === "uploaded-source" ? "uploaded-source" : "live-camera",
         });
+        if (config.callBackend === "supabase" && !session.access) {
+          markCustomerTrialConsumed(caller.email, toIso(startedAt) ?? new Date().toISOString());
+        }
         await recorder.event(id, "connected");
       });
       return;
@@ -178,7 +183,7 @@ export function useSessionRecorder({
         await recorder.event(id, "failed");
       });
     }
-  }, [active, caller, callId, endedAt, error, failureReason, host, id, once, recorder, remoteSourceKind, startedAt, status, type]);
+  }, [active, caller, callId, endedAt, error, failureReason, host, id, once, recorder, remoteSourceKind, session.access, startedAt, status, type]);
 
   /**
    * Control events. Skipped until the caller actually holds devices, so the

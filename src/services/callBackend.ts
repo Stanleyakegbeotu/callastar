@@ -25,6 +25,13 @@ export interface PreparedCallAccess {
   sessionDurationMinutes: number;
 }
 
+export interface CallEligibility {
+  trialState: "available" | "reserved" | "consumed";
+  consumedAt: string | null;
+  paidAccessAvailable: boolean;
+  supportConversationId: string | null;
+}
+
 export class FreeTrialExhaustedError extends Error {
   constructor() { super("Your Free Trial has already been used."); this.name = "FreeTrialExhaustedError"; }
 }
@@ -58,6 +65,8 @@ export interface CallBackend {
   ): Promise<CallSessionCredentials & { host: ResolvedHost }>;
   /** Production preflight: reserves trial or claims paid access before permissions/signalling. */
   prepareCallSession?(code: string, callType: CallType, caller: CallerDetails, localAttemptId: string): Promise<PreparedCallAccess | null>;
+  /** Read-only cloud gate, used before a call session or device request exists. */
+  checkCallEligibility?(email: string): Promise<CallEligibility>;
   updateCallSession(
     credentials: CallSessionCredentials,
     status: "ringing" | "active" | "ended" | "cancelled" | "failed",
@@ -146,6 +155,20 @@ const supabaseBackend: CallBackend = {
   },
   async prepareCallSession(code, callType, caller, localAttemptId) {
     return (await prepareCloudCallSession(localAttemptId, code, callType, caller)).access;
+  },
+  async checkCallEligibility(email) {
+    const { data, error } = await requireSupabase().functions.invoke("check-call-eligibility", {
+      body: { email: email.trim().toLowerCase() },
+    });
+    if (error || !data || !["available", "reserved", "consumed"].includes(data.trialState)) {
+      throw new Error("Call access could not be checked.");
+    }
+    return {
+      trialState: data.trialState,
+      consumedAt: typeof data.consumedAt === "string" ? data.consumedAt : null,
+      paidAccessAvailable: data.paidAccessAvailable === true,
+      supportConversationId: typeof data.supportConversationId === "string" ? data.supportConversationId : null,
+    };
   },
   async startCallSession(code, callType, caller, localAttemptId = `cs_${crypto.randomUUID()}`) {
     const { credentials, access } = await prepareCloudCallSession(localAttemptId, code, callType, caller);

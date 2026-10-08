@@ -16,6 +16,9 @@ import type { HostPreview } from "@/types/host";
 import { saveSupportCustomerIdentity } from "@/services/support/customerIdentity";
 import { supportRepository } from "@/services/support/repository";
 import { logDiagnostic } from "@/lib/utils";
+import { callBackend, FreeTrialInProgressError } from "@/services/callBackend";
+import { decideCustomerCallAccess } from "@/services/callBackendEligibility";
+import { customerStateDiagnostic, markCustomerTrialConsumed, noteRecognizedCustomerAccess, readCustomerState, updateCustomerState } from "@/services/support/customerState";
 
 import { JoinCallForm } from "./JoinCallForm";
 import { ProfileInactiveScreen, ReturningSubscriptionScreen, WelcomeBackScreen } from "./HostStateScreens";
@@ -72,7 +75,63 @@ export function JoinCallPage() {
     dispatch({ type: "SET_HOST", host });
   };
 
-  const handleSubmit = (values: JoinCallValues, host: HostPreview) => {
+  const routeReturningCustomer = async (values: JoinCallValues, host: HostPreview, supportConversationId?: string | null) => {
+    prepareSession(values, host);
+    updateCustomerState(values.email, {
+      displayName: values.fullName,
+      phone: values.phone,
+      supportStarted: Boolean(supportConversationId),
+      supportConversationId: supportConversationId ?? null,
+      lastAppAccessAt: new Date().toISOString(),
+      lastRouteIntent: "start_call",
+    });
+    customerStateDiagnostic(supportConversationId ? "RETURNING_PAYMENT_CHAT_FOUND" : "RETURNING_USER_ROUTED_TO_PLANS");
+    if (supportConversationId) {
+      const conversation = await supportRepository.getConversation(supportConversationId);
+      if (conversation && conversation.customerEmailNormalized === values.email.trim().toLowerCase()) {
+        customerStateDiagnostic("RETURNING_USER_ROUTED_TO_CHAT");
+        navigate(`/support/${conversation.id}`);
+        return;
+      }
+    }
+    navigate("/plans");
+  };
+
+  const handleSubmit = async (values: JoinCallValues, host: HostPreview) => {
+    const normalizedEmail = values.email.trim().toLowerCase();
+    const localCustomer = readCustomerState(normalizedEmail);
+    noteRecognizedCustomerAccess(normalizedEmail, "start_call");
+
+    if (callBackend.checkCallEligibility) {
+      customerStateDiagnostic("CLOUD_TRIAL_CHECK");
+      const eligibility = await callBackend.checkCallEligibility(normalizedEmail);
+      const accessDecision = decideCustomerCallAccess(Boolean(localCustomer?.freeTrialUsed), eligibility);
+      // A locally consumed trial is an immediate free-call deny. Cloud still
+      // identifies a newly granted paid access code and verifies the thread.
+      if (accessDecision === "route_returning") {
+        if (eligibility.trialState === "consumed" && !localCustomer?.freeTrialUsed) {
+          markCustomerTrialConsumed(normalizedEmail, eligibility.consumedAt);
+          customerStateDiagnostic("LOCAL_STATE_RECONCILED");
+        }
+        customerStateDiagnostic("REPEAT_FREE_CALL_BLOCKED");
+        const supportConversationId = eligibility.supportConversationId ?? localCustomer?.supportConversationId ?? null;
+        updateCustomerState(normalizedEmail, {
+          displayName: values.fullName,
+          phone: values.phone,
+          supportStarted: Boolean(supportConversationId),
+          supportConversationId,
+        });
+        await routeReturningCustomer(values, host, supportConversationId);
+        return;
+      }
+      if (accessDecision === "in_progress") throw new FreeTrialInProgressError();
+      updateCustomerState(normalizedEmail, { displayName: values.fullName, phone: values.phone });
+    } else if (localCustomer?.freeTrialUsed) {
+      customerStateDiagnostic("REPEAT_FREE_CALL_BLOCKED");
+      await routeReturningCustomer(values, host, localCustomer.supportStarted ? localCustomer.supportConversationId : null);
+      return;
+    }
+
     prepareSession(values, host);
     // An unpaid preview call: no authorisation attached, so the checkpoint runs.
     dispatch({ type: "SET_ACCESS", access: null });
@@ -205,6 +264,7 @@ export function JoinCallPage() {
           onCallerDetails={(values) => {
             const identity = saveSupportCustomerIdentity({ fullName: values.fullName, phone: values.phone, email: values.email });
             supportRepository.setCustomerIdentity?.(identity);
+            updateCustomerState(values.email, { displayName: values.fullName, phone: values.phone });
             void supportRepository.linkGuestConversation?.().catch((cause: unknown) => logDiagnostic("support-guest-link", cause));
           }}
         />

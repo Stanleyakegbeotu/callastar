@@ -13,6 +13,7 @@ import { useSupportConversation } from "./hooks/useSupportConversation";
 import { resolveConversation } from "./supportEntry";
 import { announcePackageChange } from "./supportAutomation";
 import { buildWhatsappLink } from "@/lib/phone";
+import { updateCustomerState } from "@/services/support/customerState";
 
 interface SupportOverlayProps {
   caller: CallerDetails;
@@ -69,6 +70,19 @@ export function SupportOverlay({
   const confirming = useRef(false);
   const state = useSupportConversation(conversationId, "customer");
 
+  useEffect(() => {
+    const conversation = state.conversation;
+    if (!conversation) return;
+    updateCustomerState(supportCustomer.email, {
+      supportConversationId: conversation.id,
+      supportStarted: true,
+      selectedPlanId: conversation.checkoutDraft?.planId ?? plan?.id ?? null,
+      selectedPlanName: conversation.checkoutDraft?.planName ?? plan?.displayName ?? null,
+      paymentStarted: Boolean(conversation.subscriptionRequestId || conversation.checkoutDraft?.selectedPaymentMethod),
+      selectedPaymentMethod: conversation.checkoutDraft?.selectedPaymentMethod ?? null,
+    });
+  }, [plan?.displayName, plan?.id, state.conversation, supportCustomer.email]);
+
   /**
    * Set synchronously, unlike `busy`. React batches state, so two effects in
    * the same tick would both see `busy === false` and both open a conversation.
@@ -124,6 +138,14 @@ export function SupportOverlay({
               ...conversationPatch,
             });
           }
+          updateCustomerState(supportCustomer.email, {
+            supportConversationId: conversation.id,
+            supportStarted: true,
+            selectedPlanId: plan?.id ?? conversation.checkoutDraft?.planId ?? null,
+            selectedPlanName: plan?.displayName ?? conversation.checkoutDraft?.planName ?? null,
+            paymentStarted: Boolean(request || conversation.subscriptionRequestId || conversation.checkoutDraft?.selectedPaymentMethod),
+            selectedPaymentMethod: conversation.checkoutDraft?.selectedPaymentMethod ?? null,
+          });
           setConversationId(conversation.id);
         })
         .catch((error: unknown) => {
@@ -145,6 +167,7 @@ export function SupportOverlay({
       const created = request ?? await onConfirmSubscription(channel, supportCustomer.email);
       if (!created) return;
       if (conversationId) await supportRepository.updateConversation(conversationId, { subscriptionRequestId: created.id });
+      updateCustomerState(supportCustomer.email, { supportConversationId: conversationId, supportStarted: true, paymentStarted: true });
       state.reload();
     } catch (error) {
       logDiagnostic("support-subscription-confirm", error);
@@ -223,9 +246,17 @@ export function SupportOverlay({
       },
     });
     if (!updated) throw new Error("The selected package could not be saved.");
+    updateCustomerState(supportCustomer.email, {
+      supportConversationId: conversation.id,
+      supportStarted: true,
+      selectedPlanId: selected.id,
+      selectedPlanName: selected.displayName,
+      paymentStarted: false,
+      selectedPaymentMethod: null,
+    });
     await announcePackageChange(conversation.id, selected);
     state.reload();
-  }, [availablePlans, channel, onSelectPackage, profileId, profileName, sessionId, state.conversation, state.reload]);
+  }, [availablePlans, channel, onSelectPackage, profileId, profileName, sessionId, state.conversation, state.reload, supportCustomer.email]);
 
   useEffect(() => {
     if (conversationId || busy || failed) return;

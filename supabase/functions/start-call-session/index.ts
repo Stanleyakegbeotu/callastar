@@ -13,6 +13,18 @@ Deno.serve(async (request) => {
   const { data: callId } = await client.from("call_ids").select("id,code_last4, host:hosts!inner(id, display_name, avatar_path, status), expires_at").eq("code_hash", await hash(normalizeCode(code))).eq("status", "active").maybeSingle();
   const host = callId?.host as { id: string; display_name: string; avatar_path: string | null; status: string } | null;
   if (!callId || !host || host.status !== "active" || (callId.expires_at && callId.expires_at <= new Date().toISOString())) return json({ error: "not_found" }, 404);
+  const normalizedEmail = caller.email.trim().toLowerCase();
+  const [{ data: trial, error: trialError }, { data: priorCalls, error: priorCallsError }, { data: paidGrants, error: paidGrantsError }] = await Promise.all([
+    client.from("call_trial_eligibility").select("state").eq("customer_email_normalized", normalizedEmail).maybeSingle(),
+    client.from("call_sessions").select("id").ilike("visitor_email", normalizedEmail).not("connected_at", "is", null).is("access_grant_id", null).limit(1),
+    client.from("call_access_grants").select("id").eq("customer_email_normalized", normalizedEmail).eq("status", "active").is("consumed_by_session_id", null).limit(1),
+  ]);
+  if (trialError || priorCallsError || paidGrantsError) return json({ error: "access_check_failed" }, 500);
+  // Fast authoritative rejection before creating a call_sessions row. The RPC
+  // below repeats this check under its per-email row lock for race safety.
+  if ((trial?.state === "consumed" || (priorCalls ?? []).length > 0) && (paidGrants ?? []).length === 0) {
+    return json({ code: "FREE_TRIAL_EXHAUSTED" }, 200);
+  }
   // The caller's attempt id makes retries idempotent. Only the token hash is
   // stored; each successful retry rotates the opaque token returned to caller.
   let { data: session } = await client.from("call_sessions").select("id,status,access_grant_id")
