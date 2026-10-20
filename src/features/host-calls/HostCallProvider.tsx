@@ -1,4 +1,5 @@
 import { adminRepository } from "@/services/admin/repository";
+import { supabase } from "@/lib/supabase/client";
 import { normalizeCallId } from "@/lib/callId";
 import {
   createContext,
@@ -150,6 +151,25 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
                 ringExpiresAt: message.ringExpiresAt,
               },
             });
+            if (supabase) {
+              void supabase.functions.invoke("get-incoming-call-context", {
+                body: { callAttemptId: message.callAttemptId, profileId: message.profileId },
+              }).then(({ data, error }) => {
+                if (error || !data || typeof data.callerName !== "string") return;
+                dispatch({
+                  type: "INCOMING_CALL_CONTEXT",
+                  callAttemptId: message.callAttemptId,
+                  context: {
+                    callerName: data.callerName,
+                    callerPhone: typeof data.callerPhone === "string" ? data.callerPhone : "",
+                    callerEmail: typeof data.callerEmail === "string" ? data.callerEmail : "",
+                    callId: typeof data.callId === "string" ? data.callId : "",
+                    profileName: typeof data.profileName === "string" ? data.profileName : "",
+                    mode: data.mode === "free" || data.mode === "premium" ? data.mode : null,
+                  },
+                });
+              }).catch((error) => callError("host-incoming-context", error));
+            }
             return;
 
           case "call.cancel":
@@ -239,6 +259,12 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
         token: issued.credential.token,
         profileId: next.id,
         callIdKey: next.callIdKey,
+        expiresAt: issued.credential.expiresAt,
+        refreshCredential: import.meta.env.DEV ? undefined : async () => {
+          const renewed = await hostCredentialProvider.getCredential(next.id);
+          if (!renewed.ok) throw new Error(renewed.message);
+          return renewed.credential;
+        },
       });
       await signalingProvider.setPresence(next.id, "available");
       callDiagnostic("host-available", { deviceClass });

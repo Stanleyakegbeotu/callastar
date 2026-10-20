@@ -190,9 +190,20 @@ export class WebSocketSignalingProvider implements SignalingProvider {
     );
   }
 
-  private open(): Promise<void> {
-    const credentials = this.credentials;
+  private async open(): Promise<void> {
+    let credentials = this.credentials;
     if (!credentials) return Promise.reject(new SignalingUnavailableError());
+
+    if (credentials.role === "host" && credentials.refreshCredential && credentials.expiresAt && credentials.expiresAt < Date.now() + 30_000) {
+      try {
+        const refreshed = await credentials.refreshCredential();
+        credentials = { ...credentials, ...refreshed };
+        this.credentials = credentials;
+      } catch (error) {
+        this.setStatus("failed", "Your Admin session could not renew the Receive Calls connection.");
+        throw error instanceof Error ? error : new Error("Host credential refresh failed.");
+      }
+    }
 
     this.setStatus(this.attempts === 0 ? "connecting" : "reconnecting");
 

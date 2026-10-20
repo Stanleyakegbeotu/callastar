@@ -22,7 +22,7 @@ function readList(value: string | undefined): string[] {
 export const config = {
   callAccessUrl: process.env.SIGNALING_CALL_ACCESS_URL ?? "",
   supabaseAnonKey: process.env.SIGNALING_SUPABASE_ANON_KEY ?? "",
-  port: readInt(process.env.SIGNALING_PORT, 8787),
+  port: readInt(process.env.PORT ?? process.env.SIGNALING_PORT, 8787),
   host: process.env.SIGNALING_HOST ?? "0.0.0.0",
 
   /**
@@ -34,11 +34,13 @@ export const config = {
   /**
    * What a host presents to operate a profile.
    *
-   * A shared secret is a DEVELOPMENT stand-in, and the README says so. Real
-   * operator authorisation belongs with the admin session: see the
-   * `ProfileOperator` note in the README for what replacing this involves.
+   * A shared secret is a DEVELOPMENT stand-in and is rejected in production.
+   * Production validates short-lived profile-scoped tokens signed by the
+   * Supabase issue-host-credential function.
    */
   hostSecret: process.env.SIGNALING_HOST_SECRET ?? "",
+  hostTokenSecret: process.env.SIGNALING_HOST_TOKEN_SECRET ?? "",
+  production: process.env.NODE_ENV === "production",
 
   /**
    * Browser origins allowed to call the HTTP endpoints. Empty means same-origin
@@ -75,14 +77,17 @@ export const config = {
 export function assertConfigured(): void {
   const problems: string[] = [];
   if (process.env.NODE_ENV === "production" && !config.callAccessUrl) problems.push("SIGNALING_CALL_ACCESS_URL is required in production.");
+  if (config.production && config.allowedOrigins.length === 0) problems.push("SIGNALING_ALLOWED_ORIGINS is required in production.");
+  if (config.production && config.allowedOrigins.some(origin => !origin.startsWith("https://"))) problems.push("Production SIGNALING_ALLOWED_ORIGINS entries must use HTTPS origins.");
   if (config.callAccessUrl && !config.supabaseAnonKey) problems.push("SIGNALING_SUPABASE_ANON_KEY is required with ticket enforcement.");
 
   if (config.tokenSecret.length < 32) {
     problems.push("SIGNALING_TOKEN_SECRET must be set to at least 32 random characters.");
   }
-  if (config.hostSecret.length < 32) {
+  if (!config.production && config.hostSecret.length < 32) {
     problems.push("SIGNALING_HOST_SECRET must be set to at least 32 random characters.");
   }
+  if (config.production && config.hostTokenSecret.length < 32) problems.push("SIGNALING_HOST_TOKEN_SECRET must be set to at least 32 random characters in production.");
 
   if (problems.length > 0) {
     throw new Error(

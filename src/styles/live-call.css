@@ -475,6 +475,18 @@
   font-size: 0.95rem;
 }
 
+.incoming-call-context {
+  display: grid;
+  gap: 0.35rem 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1rem auto 0;
+  max-width: 32rem;
+  text-align: left;
+}
+.incoming-call-context div { min-width: 0; }
+.incoming-call-context dt { color: var(--text-muted, #a7a7b3); font-size: 0.7rem; }
+.incoming-call-context dd { overflow-wrap: anywhere; font-size: 0.85rem; }
+
 .incoming-call-notice {
   display: flex;
   align-items: flex-start;

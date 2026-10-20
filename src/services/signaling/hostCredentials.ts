@@ -1,4 +1,5 @@
 import { hostSignalingToken, isLiveCallingConfigured } from "@/lib/config";
+import { supabase } from "@/lib/supabase/client";
 
 /**
  * What an operator's browser presents to register as a host.
@@ -72,46 +73,40 @@ export const developmentHostCredentialProvider: HostSessionCredentialProvider = 
 };
 
 /**
- * Production — deliberately unimplemented.
+ * Production — short-lived credentials signed by the authenticated Supabase
+ * Edge Function and validated by the signaling service.
  *
- * What the backend must do before this can exist, and what it must verify on
- * every request:
- *
- *   1. the caller is an AUTHENTICATED operator, from the admin session and not
- *      from anything the browser supplied about itself
- *   2. that operator is permitted to control the requested `profileId` — the
- *      `ProfileOperator` relationship, so "admin" is not hard-wired as "host"
- *   3. the credential EXPIRES, in minutes rather than days, and the browser
- *      renews it rather than holding one indefinitely
- *   4. the credential is SCOPED to the permitted profile ids, and the signalling
- *      service enforces that scope on `hello` — a credential for one profile
- *      must not be able to register as another
- *   5. it can be REVOKED, so removing an operator takes effect without rotating
- *      a secret that every other operator shares
- *
- * The service side of this is `verifyHostToken` in `server/signaling/src/tokens.ts`,
- * which today compares one shared secret in constant time. Replacing it means
- * verifying a signed, scoped, expiring token and checking the claimed profile
- * against its scope.
+ * The Edge Function verifies the Admin session and active profile, then signs a
+ * five-minute credential scoped to both that profile and its current Call ID.
+ * The signaling service verifies the signature, expiry and scope at hello.
+ * Current Admin permissions cover every active profile; per-operator profile
+ * assignment can replace that policy if the product needs it later.
  */
 export const serverIssuedHostCredentialProvider: HostSessionCredentialProvider = {
-  available: false,
-  unavailableReason:
-    "Server-issued operator credentials are not implemented yet. See server/signaling/README.md, outstanding item 3.",
+  get available() { return isLiveCallingConfigured && supabase !== null; },
+  get unavailableReason() {
+    if (!isLiveCallingConfigured) return "Live calling is not configured for this deployment.";
+    if (!supabase) return "Live calling requires the authenticated CallaStar Admin service.";
+    return null;
+  },
 
-  async getCredential() {
-    return {
-      ok: false,
-      reason: "unavailable",
-      message: "Server-issued operator credentials are not implemented yet.",
-    };
+  async getCredential(profileId) {
+    if (!supabase) return { ok: false, reason: "unavailable", message: this.unavailableReason ?? "Live calling is unavailable." };
+    const { data, error } = await supabase.functions.invoke("issue-host-credential", { body: { profileId } });
+    if (error || typeof data?.token !== "string" || typeof data?.expiresAt !== "number") {
+      const status = error && "context" in error ? String((error as { context?: { status?: number } }).context?.status ?? "") : "";
+      return status === "401" || status === "403"
+        ? { ok: false, reason: "unauthorized", message: "Your Admin session cannot receive calls for this profile." }
+        : { ok: false, reason: "unavailable", message: "Could not obtain a secure Receive Calls credential." };
+    }
+    return { ok: true, credential: { token: data.token, expiresAt: data.expiresAt } };
   },
 };
 
 /**
- * The development provider, because it is the only one implemented.
- *
- * It reports `available: false` in a production build of its own accord, so this
- * choice cannot become a production credential by accident.
+ * Select the development shared secret only in Vite development builds. A
+ * production build always uses the server-issued credential path.
  */
-export const hostCredentialProvider: HostSessionCredentialProvider = developmentHostCredentialProvider;
+export const hostCredentialProvider: HostSessionCredentialProvider = import.meta.env.DEV
+  ? developmentHostCredentialProvider
+  : serverIssuedHostCredentialProvider;

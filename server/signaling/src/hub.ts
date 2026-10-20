@@ -16,7 +16,7 @@ import {
   type SignalCaller,
   type SignalErrorCode,
 } from "./protocol.ts";
-import { verifyGuestToken, verifyHostToken, type GuestClaims } from "./tokens.ts";
+import { verifyGuestToken, verifyHostToken, verifyProductionHostToken, type GuestClaims } from "./tokens.ts";
 
 /**
  * The rendezvous.
@@ -216,7 +216,7 @@ export class SignalingHub {
       return;
     }
 
-    if (!verifyHostToken(message.token)) {
+    if (config.production ? !verifyProductionHostToken(message.token, message.profileId ?? "", message.callIdKey ?? "") : !verifyHostToken(message.token)) {
       this.sendRaw(ws, { type: "error", code: "unauthorized", message: "Not authorised to operate a profile." });
       this.closeSocket(ws, 4401, "bad host token");
       return;

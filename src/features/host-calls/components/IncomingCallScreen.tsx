@@ -19,9 +19,8 @@ interface IncomingCallScreenProps {
  * a sidebar and a breadcrumb trail over an incoming call would not read it as a
  * phone ringing. It is `role="alertdialog"` for the same reason: this interrupts.
  *
- * The caller's name is all that is shown of them. Their email and phone are in
- * the session record where they belong; putting contact details on a screen that
- * appears unprompted is not something this moment needs.
+ * The displayed contact and entitlement details come from the Admin-authenticated
+ * session lookup, not from caller-controlled signaling fields.
  */
 export function IncomingCallScreen({
   call,
@@ -52,10 +51,17 @@ export function IncomingCallScreen({
         </p>
 
         <h1 id="incoming-name" className="incoming-call-name">
-          {call.caller.displayName}
+          {call.adminContext?.callerName ?? call.caller.displayName}
         </h1>
 
         <p className="incoming-call-profile">{t("hostCall.callingProfile", { name: profileName })}</p>
+        {call.adminContext && <dl className="incoming-call-context">
+          <div><dt>Phone</dt><dd>{call.adminContext.callerPhone || "Not provided"}</dd></div>
+          <div><dt>Email</dt><dd>{call.adminContext.callerEmail || "Not provided"}</dd></div>
+          <div><dt>Call ID</dt><dd>{call.adminContext.callId || "Unavailable"}</dd></div>
+          <div><dt>Profile</dt><dd>{call.adminContext.profileName || profileName}</dd></div>
+          <div><dt>Mode</dt><dd>{call.adminContext.mode ? call.adminContext.mode === "free" ? "Free" : "Premium" : "Unavailable"}</dd></div>
+        </dl>}
       </div>
 
       <div className="incoming-call-actions">

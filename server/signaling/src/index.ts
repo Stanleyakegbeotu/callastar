@@ -67,6 +67,12 @@ function applyCors(request: IncomingMessage, response: ServerResponse): void {
   }
 }
 
+function originAllowed(request: IncomingMessage): boolean {
+  const origin = request.headers.origin;
+  if (!origin) return !config.production;
+  return config.allowedOrigins.includes(origin);
+}
+
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
@@ -111,6 +117,12 @@ function normalizeCallIdKey(value: string): string {
 /* ------------------------------------------------------------------- routing */
 
 const httpServer = createServer((request, response) => {
+  const path = (request.url ?? "/").split("?")[0];
+  const healthProbe = request.method === "GET" && path === "/health" && !request.headers.origin;
+  if (!healthProbe && !originAllowed(request)) {
+    sendJson(response, 403, { error: "origin_not_allowed" });
+    return;
+  }
   applyCors(request, response);
 
   if (request.method === "OPTIONS") {
@@ -118,8 +130,6 @@ const httpServer = createServer((request, response) => {
     response.end();
     return;
   }
-
-  const path = (request.url ?? "/").split("?")[0];
 
   if (request.method === "GET" && path === "/health") {
     sendJson(response, 200, { ok: true, ...hub.stats() });
@@ -211,6 +221,11 @@ async function handleAuthorize(request: IncomingMessage, response: ServerRespons
 const wss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
 
 httpServer.on("upgrade", (request, socket, head) => {
+  if (!originAllowed(request)) {
+    socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return;
+  }
   if (!connectionLimiter.take(clientKey(request))) {
     socket.write("HTTP/1.1 429 Too Many Requests\r\n\r\n");
     socket.destroy();

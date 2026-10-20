@@ -86,9 +86,11 @@ isolated Playwright contexts, which is the same isolation by another route.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SIGNALING_PORT` | `8787` | Listen port |
+| `PORT` | — | Host-provided port; takes precedence over `SIGNALING_PORT` |
 | `SIGNALING_HOST` | `0.0.0.0` | Listen address |
 | `SIGNALING_TOKEN_SECRET` | *(required)* | Signs ephemeral guest call tokens |
-| `SIGNALING_HOST_SECRET` | *(required)* | What a host presents to operate a profile |
+| `SIGNALING_HOST_SECRET` | *(required locally)* | Development shared host credential; rejected in production |
+| `SIGNALING_HOST_TOKEN_SECRET` | *(required in production)* | HMAC key shared only with the `issue-host-credential` Edge Function |
 | `SIGNALING_ALLOWED_ORIGINS` | *(empty)* | Comma-separated CORS allowlist. Never `*` |
 | `SIGNALING_GUEST_TOKEN_TTL_MS` | `120000` | How long a call token stays valid |
 | `SIGNALING_RING_TIMEOUT_MS` | `35000` | When an unanswered ring becomes `no_answer` |
@@ -165,12 +167,14 @@ Stated plainly rather than left to be discovered:
    `getUserMedia` needs a secure context. Terminate TLS in front of this service
    and serve `wss://`.
 
-3. **Per-operator host credentials.** `SIGNALING_HOST_SECRET` is a shared secret
-   and therefore a development stand-in: revoking one operator currently means
-   rotating a secret every host shares. Production should mint a short-lived
-   per-operator token from the admin session, carrying the profiles that operator
-   may act for — which is the `ProfileOperator` seam, so that "admin" is not
-   hard-wired as "host" forever.
+3. **Admin credentials.** Production uses the `issue-host-credential` Supabase
+   Edge Function. It verifies an active Admin session and active profile, then
+   issues a five-minute HMAC credential scoped to that Admin and profile. Set the
+   same random `SIGNALING_HOST_TOKEN_SECRET` in Supabase Edge Function secrets
+   and the signaling host. The service rejects shared development credentials
+   in production. Current authorization lets any active Admin operate any
+   active profile; finer per-operator profile assignment requires a permission
+   table and policy.
 
 4. **Remote media storage, for the Uploaded Source call path.** This is the one
    piece that is *architecturally* incomplete rather than merely unconfigured. A
@@ -197,3 +201,14 @@ retains the explicitly local signaling path used by the two-context tests.
 Deploy the ticket migration and updated Edge Functions together with the frontend
 and this service. Keep the existing Call ID encryption key. Never put a service
 role key or that encryption key in the frontend or signaling client credentials.
+
+For production, deploy this existing service as a persistent Node 22 process
+behind a TLS reverse proxy. The proxy terminates HTTPS and forwards HTTP and
+WebSocket upgrades to the service. Set `PORT` (or `SIGNALING_PORT`),
+`NODE_ENV=production`, `SIGNALING_ALLOWED_ORIGINS=https://callastarpro.netlify.app`,
+the guest token and ticket access settings, and `SIGNALING_HOST_TOKEN_SECRET`.
+The `/health` endpoint reports process and in-memory socket counts. Rate limits
+and active calls are in-memory, so use one service instance unless a shared
+state layer is added. Configure `VITE_SIGNALING_URL=wss://<your-permanent-host>`
+in the Netlify build environment after this service has a permanent hostname.
+Do not use a temporary Cloudflare tunnel as the production hostname.

@@ -227,11 +227,15 @@ function readSignalingTransport(value: string | undefined): SignalingTransport {
 export const SIGNALING = {
   /** Which implementation backs `SignalingProvider`. Mirrors `callBackend`. */
   transport: readSignalingTransport(import.meta.env.VITE_SIGNALING_TRANSPORT),
-  url: developmentSignalingUrl(
+  url: (() => {
+    const resolved = developmentSignalingUrl(
     import.meta.env.VITE_SIGNALING_URL ?? "",
     typeof window !== "undefined" ? window.location.origin : undefined,
     import.meta.env.DEV && import.meta.env.VITE_DEV_SIGNALING_PROXY === "true",
-  ),
+    );
+    // An HTTPS production app must never attempt insecure mixed-content WS.
+    return import.meta.env.PROD && resolved !== "" && !resolved.startsWith("wss://") ? "" : resolved;
+  })(),
   /** Attempts before a socket gives up, with backoff between them. */
   maxReconnectAttempts: 6,
   reconnectBaseMs: 500,

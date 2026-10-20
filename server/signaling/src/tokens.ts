@@ -82,8 +82,27 @@ export function verifyGuestToken(token: string): TokenVerification {
  * secret every host shares.
  */
 export function verifyHostToken(token: string): boolean {
+  if (config.production) return false;
   const provided = Buffer.from(token);
   const expected = Buffer.from(config.hostSecret);
   if (provided.length !== expected.length) return false;
   return timingSafeEqual(provided, expected);
+}
+
+export interface HostClaims { sub: string; role: "admin"; profileId: string; callIdKey: string; iss: "callastar-admin"; aud: "callastar-signaling"; iat: number; exp: number; }
+export function verifyProductionHostToken(token: string, profileId: string, callIdKey: string): boolean {
+  if (!config.production) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const payload = Buffer.from(parts[1]!, "base64url").toString("utf8");
+    const claims = JSON.parse(payload) as Partial<HostClaims>;
+    if (claims.iss !== "callastar-admin" || claims.aud !== "callastar-signaling" || claims.role !== "admin" ||
+      typeof claims.sub !== "string" || !claims.sub || claims.profileId !== profileId || claims.callIdKey !== callIdKey ||
+      typeof claims.iat !== "number" || typeof claims.exp !== "number" || claims.exp <= Math.floor(Date.now() / 1000) ||
+      claims.exp - claims.iat > 600 || claims.iat > Math.floor(Date.now() / 1000) + 30) return false;
+    const expected = createHmac("sha256", config.hostTokenSecret).update(`${parts[0]}.${parts[1]}`).digest();
+    const provided = Buffer.from(parts[2]!, "base64url");
+    return provided.length === expected.length && timingSafeEqual(provided, expected);
+  } catch { return false; }
 }

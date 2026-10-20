@@ -44,6 +44,7 @@ export interface HostIncomingCall {
   caller: SignalCaller;
   ringingSince: number;
   ringExpiresAt: number;
+  adminContext?: { callerName: string; callerPhone: string; callerEmail: string; callId: string; profileName: string; mode: "free" | "premium" | null };
 }
 
 /** Why the last call on this screen finished, so the operator can be told. */
@@ -96,6 +97,7 @@ export type HostCallAction =
   /** The signalling socket went away; presence cannot be trusted any more. */
   | { type: "SIGNALING_LOST"; error: string | null }
   | { type: "INCOMING_CALL"; call: HostIncomingCall }
+  | { type: "INCOMING_CALL_CONTEXT"; callAttemptId: string; context: NonNullable<HostIncomingCall["adminContext"]> }
   | { type: "ANSWER" }
   | { type: "OPEN_SOURCE_SELECTION"; deadline: number }
   | { type: "SELECT_SOURCE"; source: VideoSourceKind }
@@ -198,6 +200,11 @@ export function hostCallReducer(state: HostCallState, action: HostCallAction): H
 
     case "INCOMING_CALL":
       return { ...state, phase: "incoming", call: action.call, outcome: null, error: null };
+
+    case "INCOMING_CALL_CONTEXT":
+      return state.call?.callAttemptId === action.callAttemptId
+        ? { ...state, call: { ...state.call, caller: { displayName: action.context.callerName }, adminContext: action.context } }
+        : state;
 
     case "ANSWER":
       // Answering does NOT start publishing video. It opens the choice of how to

@@ -50,6 +50,9 @@ export interface SignalingCredentials {
   profileId?: string;
   /** Host only: the normalised Call ID this socket answers for. */
   callIdKey?: string;
+  /** Refreshed before a reconnect when a server-issued host token is near expiry. */
+  refreshCredential?: () => Promise<{ token: string; expiresAt: number | null }>;
+  expiresAt?: number | null;
 }
 
 export interface InviteCallInput {
