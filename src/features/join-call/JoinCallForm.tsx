@@ -389,13 +389,13 @@ export function JoinCallForm({ callType, onCancel, onSubmit, onOutcome, onCaller
             that explanation before the availability check — and would mean
             explaining a camera for a call that may not be possible.
 
-            Without a signalling service there is no presence to check, so the
-            original explainer step below still applies.
+            Selected source delivery needs no live operator. It and local
+            playback use the permission explainer below before starting.
           */}
             <Button
               disabled={startingCall}
               onClick={() => {
-                if (!isLiveCallingConfigured || !resolvedHost) { setStep("permission"); return; }
+                if (!isLiveCallingConfigured || !resolvedHost || (callType === "video" && resolvedHost.callDelivery === "source_video")) { setStep("permission"); return; }
                 setStartingCall(true);
                 setStartError(null);
                 void Promise.resolve(onSubmit(normaliseJoinCall(values), resolvedHost))

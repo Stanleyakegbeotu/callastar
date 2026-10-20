@@ -11,24 +11,23 @@ import { useHostCall } from "../HostCallProvider";
  * pair is exactly how somebody ends up ringing a profile nobody is sitting
  * behind.
  *
- * Only ever reports for the profile THIS browser tab is operating. A dashboard
- * cannot know whether a colleague's phone is online — that would need the
- * service to publish presence per profile, which it deliberately does not do for
- * anyone but the operator themselves.
+ * Only reports for the profile THIS browser tab is operating. Unobserved
+ * profiles do not get an Offline badge: this tab cannot know their presence.
  */
 export function PresenceBadge({ profileId }: { profileId: string }) {
   const { t } = useTranslation();
   const { profile, state } = useHostCall();
 
   const operatingThis = profile?.id === profileId;
-  const presence = operatingThis ? state.presence : "offline";
+  if (!operatingThis) return null;
+  const presence = state.presence;
 
   const label =
     presence === "available"
       ? t("hostCall.statusAvailable")
       : presence === "busy" || presence === "ringing"
         ? t("hostCall.statusBusy")
-        : t("hostCall.statusOffline");
+        : t("hostCall.statusDisconnected");
 
   const tone = presence === "available" ? "live" : presence === "offline" ? "muted" : "busy";
 

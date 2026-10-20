@@ -1,4 +1,4 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from "vite"
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin, type ProxyOptions } from "vite"
 
 import react from "@vitejs/plugin-react"
 
@@ -7,6 +7,7 @@ import tailwindcss from "@tailwindcss/vite"
 import path from "node:path"
 
 import siteConfiguration from "./.figma/make/site.json"
+import { DEVELOPMENT_SIGNALING_PATH } from "./src/lib/developmentSignaling"
 
 // Vite config — https://vitejs.dev/config/
 
@@ -14,6 +15,28 @@ export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
 
   const emitSourcemaps = mode === "development"
+  const env = loadEnv(mode, process.cwd(), "VITE_")
+  const signalingProxy = env.VITE_DEV_SIGNALING_PROXY === "true" && env.VITE_SIGNALING_URL
+    ? new URL(env.VITE_SIGNALING_URL) : null
+  if (signalingProxy) signalingProxy.protocol = signalingProxy.protocol === "wss:" ? "https:" : "http:"
+  const developmentProxies: Record<string, ProxyOptions> = {}
+  if (signalingProxy) developmentProxies[DEVELOPMENT_SIGNALING_PATH] = {
+    target: signalingProxy.origin,
+    ws: true,
+    changeOrigin: true,
+    rewrite: (requestPath) => requestPath.replace(/^\/__callastar_signaling/, "") || "/",
+    configure(proxy) {
+      proxy.on("proxyReq", (request) => request.removeHeader("origin"))
+    },
+  }
+  if (env.VITE_SUPABASE_URL) developmentProxies["/__supabase/functions/v1/"] = {
+    target: env.VITE_SUPABASE_URL,
+    changeOrigin: true,
+    rewrite: (requestPath) => requestPath.replace(/^\/__supabase/, ""),
+    configure(proxy) {
+      proxy.on("proxyReq", (request) => request.removeHeader("origin"))
+    },
+  }
 
   return {
     base: process.env.FIGMA_PUBLIC_URL
@@ -52,6 +75,10 @@ export default defineConfig(({ mode }) => {
       port: parseInt(process.env.PORT || "8443"),
 
       strictPort: true,
+
+      // Local Edge requests retain their JWT/API key and go to the configured
+      // project. The browser sees a same-origin request; hosted CORS stays intact.
+      proxy: developmentProxies,
 
       watch: {
         ignored: ["**/.figma/**"],

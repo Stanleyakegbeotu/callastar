@@ -19,6 +19,9 @@ export interface HostProfile {
   displayName: string;
   shortBio: string;
   status: ProfileStatus;
+  profileMode?: "free" | "premium";
+  callIdMaxUses?: 1 | 2 | 3 | 5;
+  ticket?: { id: string; mode: "free" | "premium"; maxUses: number; useCount: number; status: string; generatedAt: string; generationReason: string };
   /** Counts entered by an administrator, before activity collected in CallaStar. */
   baseFollowerCount?: number;
   baseLikeCount?: number;
@@ -28,6 +31,8 @@ export interface HostProfile {
   callId: string;
   /** Normalised lookup key for the same code; this is what the index holds. */
   callIdKey: string;
+  /** Profile data loaded, but the separate authorized Call ID lookup failed. */
+  callIdLoadError?: string;
   avatarAssetId: string | null;
   coverAssetId?: string | null;
   remoteVideoAssetId: string | null;
@@ -54,6 +59,8 @@ export interface StoredAssetMeta {
   width: number | null;
   height: number | null;
   hasAudio: boolean;
+  /** Call presentation interruptions saved with this exact source asset. */
+  interruptions?: import("@/services/media/interruptionTimeline").SourceInterruption[];
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +98,7 @@ export interface RemoteVideoRow {
  * resolver packages private images as short lived data URLs.
  */
 export interface PublicHostProfile {
+  profileMode?: "free" | "premium";
   id: string;
   displayName: string;
   shortBio: string;

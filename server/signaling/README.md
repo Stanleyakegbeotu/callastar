@@ -17,6 +17,27 @@ with its own secrets and its own scaling characteristics.
 
 ## Running it
 
+For local app development, configure `VITE_SIGNALING_URL=ws://127.0.0.1:8787`
+and `VITE_DEV_SIGNALING_PROXY=true` in the frontend's ignored `.env`. Keep the
+existing `SIGNALING_HOST_SECRET` and `SIGNALING_TOKEN_SECRET` in
+`server/signaling/.env`; the frontend development operator token must match the
+host secret. Run `pnpm dev` from the repository root: the launcher starts the
+separate signaling process before Vite, or reuses a healthy listener.
+
+The browser then uses `/__callastar_signaling` on its current app origin for
+both HTTP authorization and WebSockets. One HTTPS mobile app tunnel carries
+both, so there is no separate temporary signaling hostname to expire. The
+launcher supplies the existing Supabase session-binding endpoint and public
+anon key to the server when the cloud backend is selected. Production continues
+to use its explicit WSS endpoint and independently deployed signaling service.
+
+For a live call, the operator must open the profile and enable **Receive Calls**.
+Active availability is saved profile configuration; it does not register an
+operator's browser with the signaling service. Refreshing the host page or
+restarting the service requires enabling Receive Calls again.
+
+To run the signaling service separately:
+
 ```bash
 cd server/signaling
 pnpm install
@@ -163,3 +184,16 @@ Stated plainly rather than left to be discovered:
    **Live Camera calling does not depend on this** and works end to end.
 
 5. **A shared rate-limit store**, if this runs as more than one instance.
+
+
+Controlled-use tickets require SIGNALING_CALL_ACCESS_URL to point to the existing
+Supabase project's update-call-session function and SIGNALING_SUPABASE_ANON_KEY
+to contain its public anon key. NODE_ENV=production refuses to start without this
+configuration. The caller supplies only its ephemeral reserved-session proof;
+the service binds it to one database-backed attempt before issuing a guest token.
+Completed attempts cannot be invited again. Development without this endpoint
+retains the explicitly local signaling path used by the two-context tests.
+
+Deploy the ticket migration and updated Edge Functions together with the frontend
+and this service. Keep the existing Call ID encryption key. Never put a service
+role key or that encryption key in the frontend or signaling client credentials.

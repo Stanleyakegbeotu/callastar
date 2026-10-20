@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { logDiagnostic } from "@/lib/utils";
 import { productionDiagnostic } from "@/lib/productionDiagnostics";
@@ -39,10 +39,13 @@ export function useAsync<T>(load: () => Promise<T>, initial: T): AsyncState<T> {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const hydrated = useRef(false);
+  const loadIdentity = useRef(load);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    if (loadIdentity.current !== load) { hydrated.current = false; loadIdentity.current = load; }
+    if (!hydrated.current) setLoading(true);
     setError(null);
 
     withDeadline(Promise.resolve().then(load))
@@ -55,7 +58,7 @@ export function useAsync<T>(load: () => Promise<T>, initial: T): AsyncState<T> {
         if (!cancelled) setError(messageOf(cause));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { hydrated.current = true; setLoading(false); }
       });
 
     return () => {
@@ -69,14 +72,28 @@ export function useAsync<T>(load: () => Promise<T>, initial: T): AsyncState<T> {
 }
 
 export function useProfiles(): AsyncState<HostProfile[]> {
-  return useAsync(useCallback(() => adminRepository.listProfiles(), []), []);
+  const state = useAsync(useCallback(() => adminRepository.listProfiles(), []), []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") state.reload(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const poll = window.setInterval(refresh, 30000);
+    return () => { window.clearInterval(poll); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [state.reload]);
+  return state;
 }
 
 export function useProfile(id: string | undefined): AsyncState<HostProfile | null> {
-  return useAsync(
+  const state = useAsync(
     useCallback(() => (id ? adminRepository.getProfile(id) : Promise.resolve(null)), [id]),
     null,
   );
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") state.reload(); };
+    const timer = setInterval(refresh, 30000); window.addEventListener("focus", refresh);
+    return () => { clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [state.reload]);
+  return state;
 }
 
 export function useRemoteVideos(): AsyncState<RemoteVideoRow[]> {

@@ -6,7 +6,7 @@ Deno.serve(async (request) => {
   const { profileId } = await request.json().catch(() => ({}));
   if (typeof profileId !== "string" || !/^[0-9a-f-]{36}$/i.test(profileId)) return json({ profile: null }, 400);
   const client = serviceClient();
-  const { data: host, error } = await client.from("hosts").select("id,display_name,short_bio,status,avatar_path,cover_path,remote_video_asset_id,remote_audio_asset_id,base_follower_count,base_like_count,tracked_follower_count,tracked_like_count").eq("id", profileId).maybeSingle();
+  const { data: host, error } = await client.from("hosts").select("id,display_name,short_bio,status,profile_mode,avatar_path,cover_path,remote_video_asset_id,remote_audio_asset_id,base_follower_count,base_like_count,tracked_follower_count,tracked_like_count").eq("id", profileId).maybeSingle();
   if (error || !host) return json({ profile: null });
   const mediaStarted = performance.now();
   const [avatar, cover] = await Promise.all([
@@ -26,7 +26,7 @@ Deno.serve(async (request) => {
   ]);
   console.info("[callastar:media_pipeline]", { stage: "profile_media_response", durationMs: Math.round(performance.now() - mediaStarted), success: !(avatar.error || cover.error) });
   const profile = {
-    id: host.id, displayName: host.display_name, shortBio: host.short_bio ?? "", status: host.status,
+    profileMode: host.profile_mode, callDelivery: host.remote_video_asset_id ? 'source_video' : 'live', id: host.id, displayName: host.display_name, shortBio: host.short_bio ?? "", status: host.status,
     avatarDataUrl, coverDataUrl: coverUrl ? coverDataUrl : null,
     remoteVideoAssetId: host.remote_video_asset_id, remoteAudioAssetId: host.remote_audio_asset_id,
     followerCount: Number(host.base_follower_count ?? 0) + Number(host.tracked_follower_count ?? 0),

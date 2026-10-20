@@ -75,6 +75,9 @@ interface Attempt {
 }
 
 export class SignalingHub {
+  private readonly ticketAuthorized: (id: string) => boolean;
+  constructor(ticketAuthorized: (id: string) => boolean = () => true) { this.ticketAuthorized = ticketAuthorized; }
+  private readonly finishedAttempts = new Map<string, number>();
   /** Every authenticated socket, by its own id. */
   private readonly sockets = new Map<string, Socket>();
   /** Hosts by the Call ID they answer for. One host per code. */
@@ -373,6 +376,10 @@ export class SignalingHub {
       return;
     }
 
+    for (const [id, until] of this.finishedAttempts) if (until <= Date.now()) this.finishedAttempts.delete(id);
+    if (!this.ticketAuthorized(callAttemptId) || this.finishedAttempts.has(callAttemptId)) {
+      this.fail(socket,"unauthorized","This call authorization is no longer available.",callAttemptId); return;
+    }
     const host = this.hostsByCallId.get(callIdKey);
 
     // An unregistered code and an unknown one answer identically. Anything else
@@ -549,6 +556,7 @@ export class SignalingHub {
   private finish(attempt: Attempt, hostPresence: PresenceState): void {
     this.clearRingTimer(attempt);
     this.attempts.delete(attempt.id);
+    this.finishedAttempts.set(attempt.id,Date.now()+5*60_000);
 
     const host = attempt.host;
     if (this.sockets.has(host.id)) {

@@ -12,7 +12,7 @@
     "assets:jeeliz": "node scripts/prepare-jeeliz-assets.mjs",
     "predev": "pnpm assets:transformation && pnpm assets:jeeliz",
     "prebuild": "pnpm assets:transformation && pnpm assets:jeeliz",
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
@@ -41,6 +41,7 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",

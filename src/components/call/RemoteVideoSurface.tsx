@@ -1,6 +1,8 @@
+import { isUsableSourceVideo } from "@/services/media/sourcePlayback";
 import { useEffect, useRef, type MutableRefObject } from "react";
 
 import { logDiagnostic } from "@/lib/utils";
+import { isInsideInterruption, type SourceInterruption } from "@/services/media/interruptionTimeline";
 
 interface RemoteVideoSurfaceProps {
   url: string;
@@ -28,8 +30,11 @@ interface RemoteVideoSurfaceProps {
   ended?: boolean;
   /** Fired when the media reaches its natural end. */
   onEnded?: () => void;
+  onPlaying?: () => void;
+  onError?: () => void;
   /** Playback time and duration, used for source-preview interruptions. */
   onPlaybackProgress?: (currentTime: number, duration: number) => void;
+  interruptions?: SourceInterruption[];
 }
 
 /**
@@ -37,14 +42,7 @@ interface RemoteVideoSurfaceProps {
  *
  * No controls: this is a person on a call, not a media player.
  *
- * It does NOT loop. The clip stands in for a person, and restarting them from
- * the top when the file runs out would be a visible lie about who is there —
- * what happens instead is the reconnecting state over the last frame they were
- * seen in. During a free uploaded-source preview, this element pauses briefly
- * at playback intervals while the rest of the call keeps running.
- *
- * Pausing is limited to the source itself; camera, call controls and the call
- * timer keep running through the reconnecting interlude.
+ * Plays once. Its natural ended event belongs to the call lifecycle owner.
  */
 export function RemoteVideoSurface({
   url,
@@ -57,9 +55,47 @@ export function RemoteVideoSurface({
   onReady,
   ended = false,
   onEnded,
+  onPlaying,
+  onError,
   onPlaybackProgress,
+  interruptions = [],
 }: RemoteVideoSurfaceProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioIntent = useRef(wantsAudio);
+  const autoplayMuted = useRef(false);
+  const rangesRef = useRef(interruptions);
+  const progressRef = useRef(onPlaybackProgress);
+  audioIntent.current = wantsAudio;
+  rangesRef.current = interruptions;
+  progressRef.current = onPlaybackProgress;
+
+  // Track decoded frames directly, keeping audio hidden with the visual interval.
+  // This loop only observes currentTime: it never pauses, seeks, or restarts.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let cancelled = false;
+    let videoFrame: number | null = null;
+    let animationFrame = 0;
+    const requestFrame = video.requestVideoFrameCallback?.bind(video);
+    const report = (time: number) => {
+      if (cancelled) return;
+      const hidden = isInsideInterruption(time * 1000, rangesRef.current);
+      video.muted = !audioIntent.current || autoplayMuted.current || hidden;
+      progressRef.current?.(time, video.duration);
+      if (requestFrame) videoFrame = requestFrame((_now, metadata) => report(metadata.mediaTime));
+    };
+    if (requestFrame) videoFrame = requestFrame((_now, metadata) => report(metadata.mediaTime));
+    else {
+      const tick = () => { report(video.currentTime); animationFrame = requestAnimationFrame(tick); };
+      animationFrame = requestAnimationFrame(tick);
+    }
+    return () => {
+      cancelled = true;
+      if (videoFrame !== null) video.cancelVideoFrameCallback?.(videoFrame);
+      cancelAnimationFrame(animationFrame);
+    };
+  }, [url]);
 
   useEffect(() => {
     const element = videoRef.current;
@@ -82,13 +118,14 @@ export function RemoteVideoSurface({
     if (ended || paused) return;
 
     const attempt = async () => {
-      element.muted = !wantsAudio;
+      element.muted = !wantsAudio || isInsideInterruption(element.currentTime * 1000, rangesRef.current);
       // Belt and braces: a element left at volume 0 by anything else would be
       // silent even unmuted, and that failure is invisible.
       element.volume = 1;
 
       try {
         await element.play();
+        autoplayMuted.current = false;
         if (!cancelled) onAudioBlocked(false);
       } catch (error) {
         if (cancelled) return;
@@ -96,6 +133,7 @@ export function RemoteVideoSurface({
         // and let the caller offer a tap, rather than showing a frozen frame.
         logDiagnostic("remote-video-play", error);
         element.muted = true;
+        autoplayMuted.current = wantsAudio;
         try {
           await element.play();
           // Only "blocked" when sound was actually wanted: a source with no
@@ -134,13 +172,17 @@ export function RemoteVideoSurface({
        * to handle. Starting playback ourselves, after setting `muted`, means one
        * attempt whose outcome we actually see.
        */
+      loop={false}
+      crossOrigin="anonymous"
       playsInline
       preload="auto"
       onTimeUpdate={(event) => {
         positionRef.current = event.currentTarget.currentTime;
         onPlaybackProgress?.(event.currentTarget.currentTime, event.currentTarget.duration);
       }}
-      onCanPlay={onReady}
+      onCanPlay={(event) => { const v = event.currentTarget; if (isUsableSourceVideo(v)) onReady?.(); }}
+      onPlaying={(event) => { const v = event.currentTarget; if (isUsableSourceVideo(v)) onPlaying?.(); else onError?.(); }}
+      onError={onError}
       onEnded={onEnded}
     />
   );

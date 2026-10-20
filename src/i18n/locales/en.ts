@@ -135,6 +135,8 @@ export const en = {
     realtimeStatus: "Live calling",
     statusAvailable: "Available",
     statusOffline: "Offline",
+    statusDisconnected: "Live calls disconnected",
+    statusUnobserved: "Not connected on this device",
     statusBusy: "Busy",
     videoSource: "Video source",
     videoCalling: "Video calling",
@@ -283,6 +285,10 @@ export const en = {
     notRecognisedCopy: "Check the ID and try again, or use the Call ID shared with you.",
     planUnavailableCopy: "That plan is no longer available. Please contact CallaStar support.",
     tryAgain: "Try Again",
+  },
+  trialCompletion: {
+    title: "Your free trial has ended.",
+    copy: "To keep talking, contact your host and ask for a subscription link. Subscribe through their link to continue your conversation.",
   },
   sessionLimit: {
     remaining: "1 minute remaining on your {{plan}} session.",

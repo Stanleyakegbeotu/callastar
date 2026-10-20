@@ -1,3 +1,4 @@
+import CallTicketUnavailable from "./CallTicketUnavailable";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
@@ -16,7 +17,7 @@ import type { HostPreview } from "@/types/host";
 import { saveSupportCustomerIdentity } from "@/services/support/customerIdentity";
 import { supportRepository } from "@/services/support/repository";
 import { logDiagnostic } from "@/lib/utils";
-import { callBackend, FreeTrialInProgressError } from "@/services/callBackend";
+import { callBackend, CallTicketError, FreeTrialExhaustedError, FreeTrialInProgressError } from "@/services/callBackend";
 import { decideCustomerCallAccess } from "@/services/callBackendEligibility";
 import { customerStateDiagnostic, markCustomerTrialConsumed, noteRecognizedCustomerAccess, readCustomerState, updateCustomerState } from "@/services/support/customerState";
 
@@ -102,7 +103,24 @@ export function JoinCallPage() {
     const localCustomer = readCustomerState(normalizedEmail);
     noteRecognizedCustomerAccess(normalizedEmail, "start_call");
 
-    if (callBackend.checkCallEligibility) {
+    // The atomic server preflight owns entitlement and ticket reservations.
+    if (callBackend.prepareCallSession) {
+      const sessionId = createSessionId();
+      try {
+        const access = await callBackend.prepareCallSession(values.callId, callType, values, sessionId);
+        prepareSession(values, host);
+        dispatch({ type: "SET_ACCESS", access: access ? { accessIdRecordId: access.grantId, planId: access.planId, planName: access.planName, sessionDurationMinutes: access.sessionDurationMinutes, validatedAt: Date.now() } : null });
+        dispatch({ type: "START_SESSION", id: sessionId });
+        navigate(`/call/${sessionId}`);
+      } catch (error) {
+        if (error instanceof FreeTrialExhaustedError) { prepareSession(values, host); navigate("/plans"); return; }
+        if (error instanceof FreeTrialInProgressError) { setOutcome({ values, result: { kind: "ticket-unavailable", code: "CALL_ID_RESERVATION_CONFLICT", mode: "premium" } }); return; }
+        if (error instanceof CallTicketError) { setOutcome({ values, result: { kind: "ticket-unavailable", code: error.code, mode: error.mode } }); return; }
+        throw error;
+      }
+      return;
+    }
+    if (host.mode !== "free" && callBackend.checkCallEligibility) {
       customerStateDiagnostic("CLOUD_TRIAL_CHECK");
       const eligibility = await callBackend.checkCallEligibility(normalizedEmail);
       const accessDecision = decideCustomerCallAccess(Boolean(localCustomer?.freeTrialUsed), eligibility);
@@ -126,7 +144,7 @@ export function JoinCallPage() {
       }
       if (accessDecision === "in_progress") throw new FreeTrialInProgressError();
       updateCustomerState(normalizedEmail, { displayName: values.fullName, phone: values.phone });
-    } else if (localCustomer?.freeTrialUsed) {
+    } else if (host.mode !== "free" && localCustomer?.freeTrialUsed) {
       customerStateDiagnostic("REPEAT_FREE_CALL_BLOCKED");
       await routeReturningCustomer(values, host, localCustomer.supportStarted ? localCustomer.supportConversationId : null);
       return;
@@ -171,6 +189,7 @@ export function JoinCallPage() {
   if (outcome) {
     const { result } = outcome;
 
+    if (result.kind === "ticket-unavailable") return <CallTicketUnavailable code={result.code} mode={result.mode} onAnother={backToId} onSupport={() => navigate("/support")} onHome={() => navigate("/")} />;
     if (result.kind === "inactive") {
       return (
         <div className="page-shell join-page">

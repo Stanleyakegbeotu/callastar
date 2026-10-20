@@ -29,6 +29,7 @@ interface AccessScreenProps {
   onGoHome: () => void
   onChooseChannel: (channel: SupportChannel) => void
   welcomeBackName?: string
+  completionNotice?: string
 }
 
 /**
@@ -107,6 +108,7 @@ export function SubscriptionAccessScreen({
 
   onChooseChannel,
   welcomeBackName,
+  completionNotice,
 }: AccessScreenProps) {
   const { t } = useTranslation()
 
@@ -159,6 +161,7 @@ export function SubscriptionAccessScreen({
         gate={gate}
         host={host}
         welcomeBackName={welcomeBackName}
+        completionNotice={completionNotice}
         onGoHome={onGoHome}
         t={t}
       />
@@ -334,12 +337,14 @@ export function PlanSelector({
   gate,
   host,
   welcomeBackName,
+  completionNotice,
   onGoHome,
   t,
 }: {
   gate: CallAccessGate
   host: HostPreview
   welcomeBackName?: string
+  completionNotice?: string
   onGoHome: () => void
   t: (key: string, options?: Record<string, string>) => string
 }) {
@@ -424,7 +429,7 @@ export function PlanSelector({
           <h1 id="access-plans-title">
             {t("access.selectorTitle", { host: host.displayName })}
           </h1>
-          <p>{t("access.selectorCopy")}</p>
+          <p>{completionNotice ?? t("access.selectorCopy")}</p>
           {welcomeBackName?.trim() && (
             <p className="plan-selector-welcome">
               {t("access.welcomeBack", { name: welcomeBackName.trim() })}

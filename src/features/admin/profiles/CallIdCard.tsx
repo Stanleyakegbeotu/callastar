@@ -27,9 +27,9 @@ export function CallIdCard({ callId, footer, highlight = false }: CallIdCardProp
   return (
     <section className={`admin-card admin-callid ${highlight ? "is-highlight" : ""}`}>
       <h2 className="admin-card-label">Call ID</h2>
-      <p className="admin-callid-code">{callId}</p>
+      <p className="admin-callid-code">{callId || "Unavailable"}</p>
       <div className="admin-callid-actions">
-        <button type="button" className="admin-button admin-button-secondary" onClick={() => void copy()}>
+        <button type="button" disabled={!callId || callId.startsWith("••••")} className="admin-button admin-button-secondary" onClick={() => void copy()}>
           Copy
         </button>
         {footer}

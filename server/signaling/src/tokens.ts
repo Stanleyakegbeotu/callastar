@@ -33,9 +33,9 @@ function encodeClaims(claims: GuestClaims): string {
   return [claims.callAttemptId, claims.callIdKey, String(claims.expiresAt)].join(".");
 }
 
-export function mintGuestToken(callIdKey: string): { token: string; claims: GuestClaims } {
+export function mintGuestToken(callIdKey: string, attemptId?: string): { token: string; claims: GuestClaims } {
   const claims: GuestClaims = {
-    callAttemptId: `att_${randomUUID()}`,
+    callAttemptId: attemptId ?? `att_${randomUUID()}`,
     callIdKey,
     expiresAt: Date.now() + config.guestTokenTtlMs,
   };

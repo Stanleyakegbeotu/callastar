@@ -7,6 +7,7 @@ import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import { verifyUpload } from "@/services/media/verifyUpload";
 import { blobToDataUrl, readAudioMetadata, readVideoMetadata, validateFile } from "./mediaFiles";
 import { computeSessionMetrics } from "./sessionInsights";
+import { normalizeInterruptions, type SourceInterruption } from "@/services/media/interruptionTimeline";
 import { assertAudienceCount, normalizeEngagementEmail } from "./profileEngagement";
 import type { AdminRepository } from "./repository";
 import type { AssetKind, CallEventRecord, CallSessionRecord, HostProfile, PublicHostProfile, RemoteVideoRow, StoredAssetMeta } from "./types";
@@ -23,6 +24,8 @@ const assetPath = (hostId: string, kind: AssetKind, file: File) => `${hostId}/${
 function fromProfile(row: Row, activeCallId?: Row | null): HostProfile {
   return {
     id: row.id, displayName: row.display_name, shortBio: row.short_bio ?? "", status: row.status,
+    profileMode: row.profile_mode, callIdMaxUses: row.call_id_max_uses,
+    ticket: activeCallId ? { id: activeCallId.id, mode: activeCallId.mode, maxUses: activeCallId.maxUses, useCount: activeCallId.useCount, status: activeCallId.status, generatedAt: activeCallId.createdAt, generationReason: activeCallId.generationReason } : undefined,
     baseFollowerCount: Number(row.base_follower_count ?? 0), baseLikeCount: Number(row.base_like_count ?? 0),
     trackedFollowerCount: Number(row.tracked_follower_count ?? 0), trackedLikeCount: Number(row.tracked_like_count ?? 0),
     callId: activeCallId?.code_last4 ? `••••-${activeCallId.code_last4}` : "",
@@ -37,7 +40,7 @@ function withDecryptedCallId(profile: HostProfile, activeCallId?: Row | null): H
   return code ? { ...profile, callId: code, callIdKey: normalizeCallId(code) } : profile;
 }
 function fromAsset(row: Row): StoredAssetMeta {
-  return { id: row.id, profileId: row.host_id, kind: row.kind, fileName: row.file_name, mimeType: row.mime_type, fileSize: Number(row.file_size_bytes), durationSeconds: row.duration_seconds == null ? null : Number(row.duration_seconds), width: row.width ?? null, height: row.height ?? null, hasAudio: row.has_audio ?? true, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, profileId: row.host_id, kind: row.kind, fileName: row.file_name, mimeType: row.mime_type, fileSize: Number(row.file_size_bytes), durationSeconds: row.duration_seconds == null ? null : Number(row.duration_seconds), width: row.width ?? null, height: row.height ?? null, hasAudio: row.has_audio ?? true, interruptions: row.interruptions ?? [], createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function fromSession(row: Row): CallSessionRecord {
   return {
@@ -62,15 +65,25 @@ async function activeIds(hostIds: string[]) {
   const { data, error } = await requireSupabase().functions.invoke("admin-call-ids", { body: { hostIds } });
   if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Call IDs could not be loaded.");
   const result = new Map<string, Row>();
-  for (const row of data?.callIds ?? []) if (!result.has(row.hostId) && (!row.expiresAt || row.expiresAt > now())) result.set(row.hostId, { id: row.id, host_id: row.hostId, code_last4: row.codeLast4, code_display: row.code });
+  for (const row of data?.callIds ?? []) if (!result.has(row.hostId) && (!row.expiresAt || row.expiresAt > now())) result.set(row.hostId, { ...row, id: row.id, host_id: row.hostId, code_last4: row.codeLast4, code_display: row.code });
   return result;
 }
 async function loadProfile(id: string) {
   const { data, error } = await requireSupabase().from("hosts").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const ids = await activeIds([id]);
-  return withDecryptedCallId(fromProfile(data, ids.get(id)), ids.get(id));
+  const { ids, callIdLoadError } = await displayIds([id]);
+  return { ...withDecryptedCallId(fromProfile(data, ids.get(id)), ids.get(id)), callIdLoadError };
+}
+
+// Ticket decryption is a separate service. Its failure must not hide profiles
+// that were successfully read under the administrator's existing RLS access.
+async function displayIds(hostIds: string[]) {
+  try { return { ids: await activeIds(hostIds), callIdLoadError: undefined }; }
+  catch {
+    productionDiagnostic("ADMIN_ROUTE_LOAD_FAILED", { stage: "call_id_lookup" });
+    return { ids: new Map<string, Row>(), callIdLoadError: "Call ID unavailable. Profile settings and media are still available." };
+  }
 }
 async function prepareAsset(hostId: string, kind: AssetKind, file: File): Promise<{ meta: StoredAssetMeta; path: string }> {
   const check = validateFile(kind, file);
@@ -123,7 +136,7 @@ async function removeAsset(hostId: string, kind: AssetKind): Promise<HostProfile
   const { data: row, error: readError } = await client.from("hosts").select(col[kind]).eq("id", hostId).single();
   if (readError) throw readError;
   const ref = (row as Row | null)?.[col[kind]];
-  const { error } = await client.from("hosts").update({ [col[kind]]: null, updated_at: now() }).eq("id", hostId);
+  const { error } = await client.from("hosts").update({ [col[kind]]: null }).eq("id", hostId);
   if (error) throw error;
   if (ref) await removeAssetByReference(hostId, kind, ref);
   const profile = await loadProfile(hostId);
@@ -146,8 +159,8 @@ export const supabaseAdminRepository: AdminRepository = {
   async listProfiles() {
     const { data, error } = await requireSupabase().from("hosts").select("*").order("created_at", { ascending: false });
     if (error) throw error;
-    const ids = await activeIds((data ?? []).map((row) => row.id));
-    return (data ?? []).map((row) => withDecryptedCallId(fromProfile(row, ids.get(row.id)), ids.get(row.id)));
+    const { ids, callIdLoadError } = await displayIds((data ?? []).map((row) => row.id));
+    return (data ?? []).map((row) => ({ ...withDecryptedCallId(fromProfile(row, ids.get(row.id)), ids.get(row.id)), callIdLoadError }));
   },
   async getProfile(id) { return loadProfile(id); },
   async createProfile(input: CreateProfileInput) {
@@ -197,7 +210,7 @@ export const supabaseAdminRepository: AdminRepository = {
     }
   },
   async updateProfile(id, input: UpdateProfileInput) {
-    const patch: Row = { updated_at: now() };
+    const patch: Row = {};
     if (input.displayName !== undefined) patch.display_name = input.displayName.trim();
     if (input.shortBio !== undefined) patch.short_bio = input.shortBio.trim();
     if (input.status !== undefined) patch.status = input.status;
@@ -220,16 +233,36 @@ export const supabaseAdminRepository: AdminRepository = {
     if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Host activity could not be updated.");
     return data;
   },
+  async configureCallTicket(id, input) {
+    const current = await loadProfile(id);
+    if (!current) throw new Error("Profile no longer exists.");
+    if (!current.profileMode || !current.callIdMaxUses || !current.ticket?.mode || !current.ticket.maxUses) {
+      throw new Error("Free/Premium settings require the Call ID database migration and updated Supabase functions.");
+    }
+    const { data, error } = await requireSupabase().functions.invoke("generate-call-id", { body: { hostId: id, ...input, regenerate: false } });
+    if (error || data?.error) throw new Error("Could not update Call ID settings.");
+    const profile = await loadProfile(id); if (!profile) throw new Error("Profile no longer exists.");
+    if (input.mode !== undefined && profile.profileMode !== input.mode || input.maxUses !== undefined && profile.callIdMaxUses !== input.maxUses) {
+      throw new Error("The server did not save the Call ID settings. The updated Supabase functions must be deployed.");
+    }
+    return profile;
+  },
   async regenerateCallId(id) {
     const { data, error } = await requireSupabase().functions.invoke("generate-call-id", { body: { hostId: id } });
     if (error || data?.error) throw new Error(data?.error ?? error?.message ?? "Could not generate Call ID.");
-    const { error: revokeError } = await requireSupabase().from("call_ids").update({ status: "revoked" }).eq("host_id", id).eq("status", "active").neq("id", data.id);
-    if (revokeError) throw revokeError;
     const profile = await loadProfile(id); if (!profile) throw new Error("That host profile no longer exists."); return { ...profile, callId: data.code, callIdKey: normalizeCallId(data.code) };
   },
   async setAvatar(id, file) { return setAsset(id, "avatar", file); }, async removeAvatar(id) { return removeAsset(id, "avatar"); },
   async setCover(id, file) { return setAsset(id, "cover", file); }, async removeCover(id) { return removeAsset(id, "cover"); },
   async setRemoteVideo(id, file) { return setAsset(id, "remote_video", file); }, async removeRemoteVideo(id) { return removeAsset(id, "remote_video"); },
+  async saveSourceInterruptions(assetId: string, ranges: SourceInterruption[]) {
+    const client = requireSupabase();
+    const { data: asset, error: readError } = await client.from("host_assets").select("duration_seconds,kind").eq("id", assetId).maybeSingle();
+    if (readError || !asset || asset.kind !== "remote_video" || asset.duration_seconds == null) throw new Error("That source video is no longer available.");
+    const interruptions = normalizeInterruptions(ranges, Number(asset.duration_seconds) * 1000);
+    const { error } = await client.from("host_assets").update({ interruptions }).eq("id", assetId).eq("kind", "remote_video");
+    if (error) throw new Error("Call timeline could not be saved. Please retry.");
+  },
   async setRemoteAudio(id, file) { return setAsset(id, "remote_audio", file); }, async removeRemoteAudio(id) { return removeAsset(id, "remote_audio"); },
   async getAssetMeta(assetId) {
     const client = requireSupabase();
@@ -266,7 +299,7 @@ export const supabaseAdminRepository: AdminRepository = {
     if (error) throw error; if (!data?.found) return null;
     const extra = data.host;
     const toDataUrl = async (url: string | null | undefined) => { if (!url) return ""; const response = await fetch(url); return response.ok ? blobToDataUrl(await response.blob()) : ""; };
-    return { id: extra.id, displayName: extra.displayName, shortBio: extra.shortBio ?? "", avatarDataUrl: await toDataUrl(extra.avatarUrl) || initialsAvatarDataUrl(extra.displayName), coverDataUrl: await toDataUrl(extra.coverUrl) || null, followerCount: extra.followerCount ?? 0, likeCount: extra.likeCount ?? 0, remoteVideoAssetId: extra.remoteVideoAssetId ?? null, remoteAudioAssetId: extra.remoteAudioAssetId ?? null, status: extra.status ?? "active" };
+    return { profileMode: extra.mode, id: extra.id, displayName: extra.displayName, shortBio: extra.shortBio ?? "", avatarDataUrl: await toDataUrl(extra.avatarUrl) || initialsAvatarDataUrl(extra.displayName), coverDataUrl: await toDataUrl(extra.coverUrl) || null, followerCount: extra.followerCount ?? 0, likeCount: extra.likeCount ?? 0, remoteVideoAssetId: extra.remoteVideoAssetId ?? null, remoteAudioAssetId: extra.remoteAudioAssetId ?? null, status: extra.status ?? "active" };
   },
   async getPublicProfile(profileId) {
     const { data, error } = await requireSupabase().functions.invoke("get-public-profile", { body: { profileId } });

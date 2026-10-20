@@ -14,8 +14,9 @@ import { config } from "@/lib/config";
  *
  *  - Every write is keyed and remembered, so a StrictMode double effect, a
  *    re-render or a repeated status cannot append the same event twice.
- *  - Every write is fire-and-forget. Recording history must never be able to
- *    interrupt, delay or fail a call, so failures only reach the console.
+ *  - Lifecycle transitions are ordered. Activation is an authorization write:
+ *    failure stops an unconfirmed call. Diagnostic events are independent and
+ *    cannot delay activation or finalization.
  *
  * The record is created when the call starts connecting, which is after the
  * caller granted devices — someone who opened the Call ID dialog and walked
@@ -28,9 +29,13 @@ interface SessionRecorderOptions {
   cameraEnabled: boolean;
   /** False until the caller actually holds a camera or microphone. */
   mediaReady: boolean;
+  sourceReady?: boolean;
+  sourceCompletionRequired?: boolean;
+  onAuthorizationFailure?: () => void;
 }
 
 export interface SessionRecorder {
+  completeSource: () => Promise<void>;
   /**
    * Append one event to this call's timeline, at most once for a given key.
    *
@@ -51,15 +56,27 @@ export function useSessionRecorder({
   micEnabled,
   cameraEnabled,
   mediaReady,
+  sourceReady = true,
+  sourceCompletionRequired = false,
+  onAuthorizationFailure,
 }: SessionRecorderOptions): SessionRecorder {
   const applied = useRef(new Set<string>());
   const recorder = callBackend.sessions;
+  const queue = useRef(Promise.resolve());
+  const completing = useRef(false);
+  const latestId = useRef(session.id); latestId.current = session.id;
+  const failure = useRef(onAuthorizationFailure); failure.current = onAuthorizationFailure;
 
   /** Runs `work` at most once for this key, and never lets it throw. */
   const once = useCallback((key: string, work: () => Promise<void>) => {
     if (applied.current.has(key)) return;
     applied.current.add(key);
-    void work().catch((error: unknown) => logDiagnostic("session-record", error));
+    const sequential = /:(create|ringing|active|ended|cancelled|declined|no_answer|failed)$/.test(key);
+    const pending = (sequential ? queue.current.then(work) : work()).catch((error: unknown) => {
+      logDiagnostic("session-record", error);
+      if (key === `${latestId.current}:active` && config.callBackend === "supabase") failure.current?.();
+    });
+    if (sequential) queue.current = pending;
   }, []);
 
   const { id, status, host, callId, caller, type, startedAt, endedAt, error, failureReason } = session;
@@ -70,6 +87,8 @@ export function useSessionRecorder({
   // is per session rather than per component.
   useEffect(() => {
     applied.current = new Set<string>();
+    queue.current = Promise.resolve();
+    completing.current = false;
   }, [id]);
 
   useEffect(() => {
@@ -86,9 +105,9 @@ export function useSessionRecorder({
           callType: type,
           caller: { fullName: caller.fullName, email: caller.email, phone: caller.phone },
         });
-        await recorder.event(id, "session_created");
-        await recorder.event(id, "permissions_granted", { callType: type });
-        await recorder.event(id, "connecting");
+        void recorder.event(id, "session_created").catch((cause: unknown) => logDiagnostic("session-event", cause));
+        void recorder.event(id, "permissions_granted", { callType: type }).catch((cause: unknown) => logDiagnostic("session-event", cause));
+        void recorder.event(id, "connecting").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
@@ -96,12 +115,12 @@ export function useSessionRecorder({
     if (status === "ringing") {
       once(`${id}:ringing`, async () => {
         await recorder.transition(id, { status: "ringing", ringingAt: new Date().toISOString() });
-        await recorder.event(id, "ringing");
+        void recorder.event(id, "ringing").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
 
-    if (status === "active") {
+    if (status === "active" && sourceReady) {
       once(`${id}:active`, async () => {
         await recorder.transition(id, {
           status: "active",
@@ -110,12 +129,12 @@ export function useSessionRecorder({
           // the call actually connected with it. An audio call has exactly one
           // way to be heard, so it needs nothing signalled to know this.
           sourceKind:
-            type === "audio" ? "live-microphone" : remoteSourceKind === "uploaded-source" ? "uploaded-source" : "live-camera",
+            type === "audio" ? "live-microphone" : sourceCompletionRequired || remoteSourceKind === "uploaded-source" ? "uploaded-source" : "live-camera",
         });
-        if (config.callBackend === "supabase" && !session.access) {
+        if (!sourceCompletionRequired && config.callBackend === "supabase" && host.mode !== "free" && !session.access) {
           markCustomerTrialConsumed(caller.email, toIso(startedAt) ?? new Date().toISOString());
         }
-        await recorder.event(id, "connected");
+        void recorder.event(id, "connected").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
@@ -134,8 +153,9 @@ export function useSessionRecorder({
           status: finalStatus,
           endedAt: toIso(endedAt) ?? new Date().toISOString(),
           durationSeconds,
+          failureCode: session.endReason ?? "USER_ENDED",
         });
-        await recorder.event(id, event, durationSeconds === null ? undefined : { durationSeconds });
+        void recorder.event(id, event, durationSeconds === null ? undefined : { durationSeconds }).catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
@@ -153,7 +173,7 @@ export function useSessionRecorder({
           endedAt: toIso(endedAt) ?? new Date().toISOString(),
           durationSeconds: null,
         });
-        await recorder.event(id, "call_declined");
+        void recorder.event(id, "call_declined").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
@@ -166,7 +186,7 @@ export function useSessionRecorder({
           endedAt: toIso(endedAt) ?? new Date().toISOString(),
           durationSeconds: null,
         });
-        await recorder.event(id, "call_no_answer");
+        void recorder.event(id, "call_no_answer").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
       return;
     }
@@ -180,10 +200,46 @@ export function useSessionRecorder({
           // dashboard, and `failureReason` is already a closed set.
           failureCode: failureReason ?? (error ? "call_failed" : null),
         });
-        await recorder.event(id, "failed");
+        void recorder.event(id, "failed").catch((cause: unknown) => logDiagnostic("session-event", cause));
       });
     }
-  }, [active, caller, callId, endedAt, error, failureReason, host, id, once, recorder, remoteSourceKind, session.access, startedAt, status, type]);
+  }, [active, caller, callId, endedAt, error, failureReason, host, id, once, recorder, remoteSourceKind, session.access, session.endReason, sourceReady, sourceCompletionRequired, startedAt, status, type]);
+
+  useEffect(() => {
+    if (!active || !sourceCompletionRequired || !["connecting", "ringing", "active"].includes(status) || !recorder?.renew) return;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      if (completing.current) return;
+      void recorder.renew!(id).catch((error: unknown) => {
+        logDiagnostic("reservation-renewal", error);
+        if (!stopped && !completing.current) failure.current?.();
+      });
+    }, 20000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [active, id, recorder, sourceCompletionRequired, status]);
+
+  // Persist natural completion before rendering a successful ending. Waiting on
+  // the lifecycle queue also covers a short source ending during activation.
+  const completeSource = useCallback(async () => {
+    if (!active || !recorder || status !== "active" || !sourceReady) throw new Error("Source is not active");
+    const key = `${id}:ended`;
+    if (applied.current.has(key)) return;
+    completing.current = true;
+    applied.current.add(key);
+    const pending = queue.current.then(async () => {
+      await recorder.transition(id, {
+        status: "ended", endedAt: new Date().toISOString(),
+        durationSeconds: startedAt === null ? null : Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+        failureCode: "SOURCE_VIDEO_ENDED",
+      });
+      if (config.callBackend === "supabase" && host?.mode !== "free" && !session.access) {
+        markCustomerTrialConsumed(caller.email, new Date().toISOString());
+      }
+      void recorder.event(id, "ended").catch((error: unknown) => logDiagnostic("session-event", error));
+    });
+    queue.current = pending.catch(() => { applied.current.delete(key); });
+    await pending;
+  }, [active, caller.email, host?.mode, id, recorder, session.access, sourceReady, startedAt, status]);
 
   /**
    * Control events. Skipped until the caller actually holds devices, so the
@@ -228,5 +284,5 @@ export function useSessionRecorder({
     [active, id, once, recorder],
   );
 
-  return { record };
+  return { record, completeSource };
 }

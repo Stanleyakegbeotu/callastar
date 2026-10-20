@@ -10,6 +10,7 @@ import type {
   CreateCallSessionInput,
 } from "@/services/admin/types";
 import type { CallType } from "@/types/call";
+import type { SourceInterruption } from "@/services/media/interruptionTimeline";
 import type { HostPreview } from "@/types/host";
 import type { CallerDetails } from "@/types/user";
 
@@ -40,6 +41,12 @@ export class FreeTrialInProgressError extends Error {
   constructor() { super("A Free Trial call is already being started for this email."); this.name = "FreeTrialInProgressError"; }
 }
 
+export class CallTicketError extends Error {
+  constructor(public code: string, public mode?: "free" | "premium") {
+    super(code === "SOURCE_MEDIA_UNAVAILABLE" ? "The host source video is unavailable. Please ask the host to update it." : code === "PROFILE_UNAVAILABLE" ? "This profile is unavailable." : ["CALL_ID_RESERVATION_CONFLICT", "CALL_ID_TEMPORARILY_RESERVED"].includes(code) ? "This Call ID is currently in use. Please try again shortly." : "This Call ID has expired. Please ask the host for a new Call ID.");
+    this.name = "CallTicketError";
+  }
+}
 export interface ResolvedHost extends HostPreview {
   shortBio?: string | null;
 }
@@ -53,10 +60,10 @@ export interface ResolvedHost extends HostPreview {
  */
 export type RemoteMedia =
   | { available: false }
-  | { available: true; blob?: Blob; url?: string; hasAudio: boolean };
+  | { available: true; blob?: Blob; url?: string; hasAudio: boolean; interruptions?: SourceInterruption[] };
 
 export interface CallBackend {
-  resolveCallId(code: string): Promise<{ found: true; host: ResolvedHost } | { found: false }>;
+  resolveCallId(code: string): Promise<{ found: true; host: ResolvedHost } | { found: false; code?: string; mode?: "free" | "premium" }>;
   startCallSession(
     code: string,
     callType: CallType,
@@ -71,7 +78,7 @@ export interface CallBackend {
     credentials: CallSessionCredentials,
     status: "ringing" | "active" | "ended" | "cancelled" | "failed",
   ): Promise<void>;
-  getSessionMedia(credentials: CallSessionCredentials): Promise<{ available: boolean; url?: string; hasAudio?: boolean }>;
+  getSessionMedia(credentials: CallSessionCredentials): Promise<{ available: boolean; url?: string; hasAudio?: boolean; interruptions?: SourceInterruption[] }>;
 
   /**
    * Media for a host the caller has already resolved. The call type decides
@@ -88,6 +95,7 @@ export interface CallBackend {
 }
 
 export interface CallSessionRecorder {
+  renew?(sessionId: string): Promise<void>;
   create(input: CreateCallSessionInput): Promise<void>;
   transition(sessionId: string, patch: CallSessionPatch): Promise<void>;
   event(sessionId: string, type: CallEventType, metadata?: CallEventMetadata): Promise<void>;
@@ -103,12 +111,12 @@ async function prepareCloudCallSession(localAttemptId: string, code: string, cal
       const { data, error } = await requireSupabase().functions.invoke("start-call-session", {
         body: { code, callType, caller, clientAttemptId: localAttemptId },
       });
-      if (!error && data?.code === "FREE_TRIAL_EXHAUSTED") throw new FreeTrialExhaustedError();
+      if (!error && ["FREE_TRIAL_EXHAUSTED", "PREMIUM_SUBSCRIPTION_REQUIRED"].includes(data?.code)) throw new FreeTrialExhaustedError();
       if (!error && data?.code === "FREE_TRIAL_IN_PROGRESS") throw new FreeTrialInProgressError();
+      if (!error && data?.code) throw new CallTicketError(data.code, data.mode);
       if (error || !data?.sessionId || !data?.sessionToken) throw new Error("Call session could not be prepared.");
       const access = data.access && typeof data.access.grantId === "string" ? data.access as PreparedCallAccess : null;
       cloudCallAccess.set(localAttemptId, access);
-      sendAdminEvent("new_call", data.sessionId, `${caller.fullName} started a ${callType} call with ${data.host.displayName}.`);
       return { sessionId: data.sessionId as string, sessionToken: data.sessionToken as string };
     })();
     cloudSessionCredentials.set(localAttemptId, pending);
@@ -137,10 +145,12 @@ const supabaseBackend: CallBackend = {
   async resolveCallId(code) {
     const { data, error } = await requireSupabase().functions.invoke("resolve-call-id", { body: { code } });
     if (error) throw new Error("Unable to reach CallaStar.");
-    if (!data?.found) return { found: false };
+    if (!data?.found) return { found: false, code: data?.code, mode: data?.mode };
     return {
       found: true,
       host: {
+        mode: data.host.mode,
+        callDelivery: data.host.callDelivery,
         id: data.host.id,
         displayName: data.host.displayName,
         shortName: shortName(data.host.displayName),
@@ -149,7 +159,7 @@ const supabaseBackend: CallBackend = {
         shortBio: data.host.shortBio,
         followerCount: data.host.followerCount,
         likeCount: data.host.likeCount,
-        available: data.host.status !== "inactive",
+        available: data.host.status === "active",
       },
     };
   },
@@ -178,6 +188,8 @@ const supabaseBackend: CallBackend = {
       ...credentials,
       access,
       host: {
+        mode: data.host.mode,
+        callDelivery: data.host.callDelivery,
         id: data.host.id,
         displayName: data.host.displayName,
         shortName: shortName(data.host.displayName),
@@ -188,35 +200,44 @@ const supabaseBackend: CallBackend = {
     };
   },
   async updateCallSession(credentials, status) {
-    const { error } = await requireSupabase().functions.invoke("update-call-session", {
+    const { data, error } = await requireSupabase().functions.invoke("update-call-session", {
       body: { ...credentials, status },
     });
-    if (error) throw new Error("Unable to update call status.");
+    if (error || data?.error) throw new Error("Unable to update call status.");
     if (status === "active") sendAdminEvent("call_answered", credentials.sessionId, "A host answered the call.");
     if (status === "ended") sendAdminEvent("call_completed", credentials.sessionId, "The call has ended.");
   },
   async getSessionMedia(credentials) {
     const { data, error } = await requireSupabase().functions.invoke("get-session-media", { body: credentials });
     if (error) throw new Error("Unable to load remote media.");
-    return data?.available ? { available: true, url: data.media.url, hasAudio: data.media.hasAudio } : { available: false };
+    return data?.available ? { available: true, url: data.media.url, hasAudio: data.media.hasAudio, interruptions: data.media.interruptions ?? [] } : { available: false };
   },
   async getRemoteMedia(_host, _callType, localSessionId) {
     const credentials = localSessionId ? await getCloudCallSessionCredentials(localSessionId) : null;
     if (!credentials) return { available: false };
     const media = await supabaseBackend.getSessionMedia(credentials);
-    return media.available && media.url ? { available: true, url: media.url, hasAudio: media.hasAudio ?? true } : { available: false };
+    return media.available && media.url ? { available: true, url: media.url, hasAudio: media.hasAudio ?? true, interruptions: media.interruptions ?? [] } : { available: false };
   },
   sessions: {
+    async renew(localSessionId) {
+      const credentials = await getCloudCallSessionCredentials(localSessionId);
+      if (!credentials) throw new Error("Call session credentials are unavailable.");
+      const { data, error } = await requireSupabase().functions.invoke("update-call-session", {
+        body: { ...credentials, action: "renew_reservation" },
+      });
+      if (error || data?.renewed !== true) throw new Error("Call reservation could not be renewed.");
+    },
     async create(input) {
       await prepareCloudCallSession(input.id, input.callIdSnapshot, input.callType, input.caller);
     },
     async transition(localSessionId, patch) {
       const credentials = await getCloudCallSessionCredentials(localSessionId);
       if (!credentials) throw new Error("Call session credentials are unavailable.");
-      const { error } = await requireSupabase().functions.invoke("update-call-session", {
+      const { data, error } = await requireSupabase().functions.invoke("update-call-session", {
         body: { ...credentials, status: patch.status, endedAt: patch.endedAt, durationSeconds: patch.durationSeconds, failureCode: patch.failureCode },
       });
-      if (error) throw new Error("Call status could not be recorded.");
+      if (error || data?.error) throw new Error("Call status could not be recorded.");
+      if (patch.status === "active") sendAdminEvent("new_call", credentials.sessionId, "A caller connected to a call.");
     },
     async event(localSessionId, type, metadata) {
       const credentials = await getCloudCallSessionCredentials(localSessionId);
@@ -241,6 +262,8 @@ const localBackend: CallBackend = {
     return {
       found: true,
       host: {
+        mode: profile.profileMode,
+        callDelivery: profile.remoteVideoAssetId ? "source_video" : "live",
         id: profile.id,
         displayName: profile.displayName,
         shortName: shortName(profile.displayName),
@@ -281,7 +304,7 @@ const localBackend: CallBackend = {
     if (!blob) return { available: false };
 
     const meta = await adminRepository.getAssetMeta(assetId);
-    return { available: true, blob, hasAudio: meta?.hasAudio ?? true };
+    return { available: true, blob, hasAudio: meta?.hasAudio ?? true, interruptions: meta?.interruptions ?? [] };
   },
 
   sessions: {

@@ -3,15 +3,20 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/ui/Icon";
 import { formatDuration, getInitials } from "@/lib/utils";
+import type { SourceInterruption } from "@/services/media/interruptionTimeline";
 
 import { RtcVideo } from "./RtcVideo";
 import { UploadedCallVideo } from "./UploadedCallVideo";
 import { ReconnectingOverlay } from "./CallOverlays";
 
 export interface LiveCallCanvasProps {
+  onSourceEnded?: () => void;
+  onSourcePlaying?: () => void;
+  onSourceError?: () => void;
   uploadedSource?: boolean;
   uploadedUrl?: string | null;
   uploadedError?: boolean;
+  uploadedInterruptions?: SourceInterruption[];
   onRetryUploaded?: () => void;
   /** Who is on the other end, for the top bar and the waiting state. */
   remoteName: string;
@@ -48,9 +53,13 @@ export interface LiveCallCanvasProps {
  * there is one canvas and the two sides simply pass different streams to it.
  */
 export function LiveCallCanvas({
+  onSourceEnded,
+  onSourcePlaying,
+  onSourceError,
   uploadedSource = false,
   uploadedUrl = null,
   uploadedError = false,
+  uploadedInterruptions = [],
   onRetryUploaded = () => {},
   remoteName,
   remoteShortName,
@@ -91,7 +100,7 @@ export function LiveCallCanvas({
   return (
     <main className="live-call">
       <div className="live-call-stage">
-        {uploadedSource ? <UploadedCallVideo url={uploadedUrl} failed={uploadedError} onRetry={onRetryUploaded} className="live-call-main" /> : hasRemoteMedia ? (
+        {uploadedSource ? <UploadedCallVideo onEnded={onSourceEnded} onPlaying={onSourcePlaying} onMediaError={onSourceError} url={uploadedUrl} failed={uploadedError} interruptions={uploadedInterruptions} onRetry={onRetryUploaded} className="live-call-main" /> : hasRemoteMedia ? (
           <RtcVideo
             key="main-remote"
             stream={mainStream}

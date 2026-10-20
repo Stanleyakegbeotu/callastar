@@ -4,6 +4,9 @@
  */
 export interface HostPreview {
   id: string;
+  mode?: "free" | "premium";
+  /** Selected source playback does not require a live operator presence. */
+  callDelivery?: "source_video" | "live";
   /** Full name, e.g. shown on the ringing screen and in the call header. */
   displayName: string;
   /** Short/first name used in tighter spots ("Connecting to Maya…"). */

@@ -27,6 +27,8 @@
  *   VITE_RTC_TURN_USERNAME            TURN credential. Use short-lived
  *   VITE_RTC_TURN_CREDENTIAL          credentials; never commit a real secret.
  */
+import { developmentSignalingUrl } from "./developmentSignaling";
+
 export type AdminDataMode = "local" | "supabase";
 export type CallBackendMode = "local" | "supabase";
 
@@ -225,7 +227,11 @@ function readSignalingTransport(value: string | undefined): SignalingTransport {
 export const SIGNALING = {
   /** Which implementation backs `SignalingProvider`. Mirrors `callBackend`. */
   transport: readSignalingTransport(import.meta.env.VITE_SIGNALING_TRANSPORT),
-  url: import.meta.env.VITE_SIGNALING_URL ?? "",
+  url: developmentSignalingUrl(
+    import.meta.env.VITE_SIGNALING_URL ?? "",
+    typeof window !== "undefined" ? window.location.origin : undefined,
+    import.meta.env.DEV && import.meta.env.VITE_DEV_SIGNALING_PROXY === "true",
+  ),
   /** Attempts before a socket gives up, with backoff between them. */
   maxReconnectAttempts: 6,
   reconnectBaseMs: 500,

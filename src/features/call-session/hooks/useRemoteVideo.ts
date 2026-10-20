@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { logDiagnostic } from "@/lib/utils";
 import { callBackend } from "@/services/callBackend";
+import type { SourceInterruption } from "@/services/media/interruptionTimeline";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
 
@@ -9,9 +10,10 @@ export interface RemoteVideoState {
   status: "idle" | "loading" | "ready" | "unavailable";
   url: string | null;
   hasAudio: boolean;
+  interruptions?: SourceInterruption[];
 }
 
-const IDLE: RemoteVideoState = { status: "idle", url: null, hasAudio: false };
+const IDLE: RemoteVideoState = { status: "idle", url: null, hasAudio: false, interruptions: [] };
 
 /**
  * The remote participant's video, fetched only once a call is actually active.
@@ -48,12 +50,12 @@ export function useRemoteVideo(host: HostPreview | null, enabled: boolean, callT
 
         if (media.blob) {
           objectUrl = URL.createObjectURL(media.blob);
-          setState({ status: "ready", url: objectUrl, hasAudio: media.hasAudio });
+          setState({ status: "ready", url: objectUrl, hasAudio: media.hasAudio, interruptions: media.interruptions ?? [] });
           return;
         }
 
         // A signed URL from a backend: nothing local to revoke.
-        setState({ status: media.url ? "ready" : "unavailable", url: media.url ?? null, hasAudio: media.hasAudio });
+        setState({ status: media.url ? "ready" : "unavailable", url: media.url ?? null, hasAudio: media.hasAudio, interruptions: media.interruptions ?? [] });
       })
       .catch((error: unknown) => {
         logDiagnostic("remote-video", error);

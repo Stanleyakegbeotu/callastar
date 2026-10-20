@@ -59,17 +59,33 @@ export const CALLER = {
 const DB_NAME = "callastar-development";
 const DEV_SESSION_KEY = "callastar.development-admin";
 
-/** Grants the development admin session. */
+/** Grants a mocked Supabase admin session for the local browser test server. */
 export async function seedAdminSession(context: BrowserContext): Promise<void> {
+  const user = {
+    id: "52f36694-5bfe-48fb-b80b-8bff31574b94",
+    email: "admin@example.test",
+    aud: "authenticated", role: "authenticated",
+    app_metadata: {}, user_metadata: {}, created_at: "2026-10-20T10:00:00Z",
+  };
+  await context.route("**/auth/v1/user", route => route.fulfill({ json: user }));
+  await context.route("**/rest/v1/admin_profiles*", route => route.fulfill({
+    json: [{ user_id: user.id, role: "admin", is_active: true }],
+  }));
   await context.addInitScript(
-    ({ key }) => {
+    ({ key, user }) => {
       try {
         sessionStorage.setItem(key, "active");
+        const b64 = (value: unknown) => btoa(JSON.stringify(value)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+        const exp = Math.floor(Date.now() / 1000) + 3600;
+        localStorage.setItem("sb-127-auth-token", JSON.stringify({
+          access_token: `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: user.id, role: "authenticated", exp })}.fixture`,
+          refresh_token: "fixture", expires_at: exp, expires_in: 3600, token_type: "bearer", user,
+        }));
       } catch {
         // A context without storage simply lands on the login screen.
       }
     },
-    { key: DEV_SESSION_KEY },
+    { key: DEV_SESSION_KEY, user },
   );
 }
 

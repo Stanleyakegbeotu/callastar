@@ -103,13 +103,6 @@ export function ActiveAudioCallPage({
           {media.micEnabled ? "Microphone on" : "Microphone muted"}
         </div>
 
-        {remoteAudioReady && (
-          <p className="audio-preview-note">
-            <Icon name="info" className="size-4" />
-            Preview session
-          </p>
-        )}
-
         {audioBlocked && (
           <button type="button" className="audio-unmute" onClick={() => setUnmuteSignal((value) => value + 1)}>
             Tap to hear audio

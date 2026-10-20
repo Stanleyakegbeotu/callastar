@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   hosts: [] as any[], assets: [] as any[], uploads: [] as string[], removed: [] as string[],
   reads: [] as string[], inFlight: 0, maxInFlight: 0, failUpload: false, failCommit: false,
+  failCallIds: false,
+  generatedCalls: 0,
 }));
 vi.mock("@/lib/supabase/client", () => ({ requireSupabase: () => ({
-  functions: { invoke: async (name: string) => ({ data: name === "generate-call-id" ? { id: "code-id", code: "CS-AAAA-BBBB-CCCC" } : { callIds: [] }, error: null }) },
+  functions: { invoke: async (name: string) => {
+    if (name === "generate-call-id") state.generatedCalls++;
+    return { data: name === "generate-call-id" ? { id: "code-id", code: "CS-AAAA-BBBB-CCCC" } : { callIds: [] }, error: name === "admin-call-ids" && state.failCallIds ? new Error("Failed to send a request to the Edge Function") : null };
+  } },
   storage: { from: () => ({
     upload: async (path: string) => {
       state.inFlight++; state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
@@ -37,10 +42,31 @@ vi.mock("@/lib/supabase/client", () => ({ requireSupabase: () => ({
 }) }));
 import { supabaseAdminRepository } from "./supabaseAdminRepository";
 beforeEach(() => {
-  Object.assign(state, { hosts: [], assets: [], uploads: [], removed: [], reads: [], inFlight: 0, maxInFlight: 0, failUpload: false, failCommit: false });
+  Object.assign(state, { hosts: [], assets: [], uploads: [], removed: [], reads: [], inFlight: 0, maxInFlight: 0, failUpload: false, failCommit: false, failCallIds: false, generatedCalls: 0 });
 });
 const png = () => new File([new Uint8Array([137,80,78,71,13,10,26,10])], "image.png", { type: "image/png" });
 describe("remote profile creation and media consistency", () => {
+  it("refuses a Free-mode update before calling a legacy generator when the server migration is missing", async () => {
+    state.hosts.push({ id: "legacy", display_name: "Existing", status: "active" });
+    await expect(supabaseAdminRepository.configureCallTicket("legacy", { mode: "free" })).rejects.toThrow("database migration");
+    expect(state.generatedCalls).toBe(0);
+  });
+  it("keeps profiles visible when the separate Call ID function fails", async () => {
+    state.hosts.push({ id: "one", display_name: "First", status: "active" });
+    state.failCallIds = true;
+    const rows = await supabaseAdminRepository.listProfiles();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].displayName).toBe("First");
+    expect(rows[0].callId).toBe("");
+    expect(rows[0].callIdLoadError).toContain("Call ID unavailable");
+  });
+  it("keeps the profile detail available and clears its Call ID error after recovery", async () => {
+    state.hosts.push({ id: "one", display_name: "First", status: "active" });
+    state.failCallIds = true;
+    expect((await supabaseAdminRepository.getProfile("one"))?.callIdLoadError).toBeTruthy();
+    state.failCallIds = false;
+    expect((await supabaseAdminRepository.getProfile("one"))?.callIdLoadError).toBeUndefined();
+  });
   it("uploads independent files together, commits once and reads the final profile once", async () => {
     const stages: string[] = [];
     const profile = await supabaseAdminRepository.createProfile({ displayName: "Test Host", shortBio: "", status: "active", avatarFile: png(), coverFile: png(), onProgress: (stage) => stages.push(stage) });

@@ -6,67 +6,28 @@ Deno.serve(async (request) => {
   const { code, callType, caller, clientAttemptId } = await request.json().catch(() => ({}));
   if (typeof code !== "string" || code.length > 64 || !["video", "audio"].includes(callType) || !caller ||
       typeof caller.fullName !== "string" || caller.fullName.trim().length < 2 || caller.fullName.length > 120 ||
-      typeof caller.email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(caller.email) || caller.email.length > 254 ||
+      typeof caller.email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(caller.email.trim()) || caller.email.length > 254 ||
       typeof caller.phone !== "string" || caller.phone.trim().length < 7 || caller.phone.length > 32 ||
       typeof clientAttemptId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(clientAttemptId)) return json({ error: "invalid_request" }, 400);
   const client = serviceClient();
-  const { data: callId } = await client.from("call_ids").select("id,code_last4, host:hosts!inner(id, display_name, avatar_path, status), expires_at").eq("code_hash", await hash(normalizeCode(code))).eq("status", "active").maybeSingle();
-  const host = callId?.host as { id: string; display_name: string; avatar_path: string | null; status: string } | null;
-  if (!callId || !host || host.status !== "active" || (callId.expires_at && callId.expires_at <= new Date().toISOString())) return json({ error: "not_found" }, 404);
-  const normalizedEmail = caller.email.trim().toLowerCase();
-  const [{ data: trial, error: trialError }, { data: priorCalls, error: priorCallsError }, { data: paidGrants, error: paidGrantsError }] = await Promise.all([
-    client.from("call_trial_eligibility").select("state").eq("customer_email_normalized", normalizedEmail).maybeSingle(),
-    client.from("call_sessions").select("id").ilike("visitor_email", normalizedEmail).not("connected_at", "is", null).is("access_grant_id", null).limit(1),
-    client.from("call_access_grants").select("id").eq("customer_email_normalized", normalizedEmail).eq("status", "active").is("consumed_by_session_id", null).limit(1),
-  ]);
-  if (trialError || priorCallsError || paidGrantsError) return json({ error: "access_check_failed" }, 500);
-  // Fast authoritative rejection before creating a call_sessions row. The RPC
-  // below repeats this check under its per-email row lock for race safety.
-  if ((trial?.state === "consumed" || (priorCalls ?? []).length > 0) && (paidGrants ?? []).length === 0) {
-    return json({ code: "FREE_TRIAL_EXHAUSTED" }, 200);
-  }
-  // The caller's attempt id makes retries idempotent. Only the token hash is
-  // stored; each successful retry rotates the opaque token returned to caller.
-  let { data: session } = await client.from("call_sessions").select("id,status,access_grant_id")
-    .eq("client_attempt_id", clientAttemptId).maybeSingle();
-  if (session && (session.status !== "connecting" || session.access_grant_id)) {
-    return json({ error: "attempt_already_started" }, 409);
-  }
   const sessionToken = randomToken();
-  const tokenHash = await hash(sessionToken);
-  if (!session) {
-    const { data, error } = await client.from("call_sessions").insert({
-      host_id: host.id, call_id_id: callId.id, call_id_snapshot: `••••-${callId.code_last4}`,
-      profile_name_snapshot: host.display_name, call_type: callType, visitor_name: caller.fullName.trim(),
-      visitor_email: caller.email.trim().toLowerCase(), visitor_phone: caller.phone.trim(),
-      session_token_hash: tokenHash, client_attempt_id: clientAttemptId,
-    }).select("id,status,access_grant_id").single();
-    if (error || !data) {
-      // A concurrent retry can win the unique attempt id insert.
-      if (error?.code === "23505") {
-        const retry = await client.from("call_sessions").select("id,status,access_grant_id")
-          .eq("client_attempt_id", clientAttemptId).maybeSingle();
-        session = retry.data;
-      }
-      if (!session) return json({ error: "session_failed" }, 500);
-    } else session = data;
-  }
-  if (session.status !== "connecting") return json({ error: "attempt_already_started" }, 409);
-  const { error: rotateError } = await client.from("call_sessions").update({ session_token_hash: tokenHash }).eq("id", session.id);
-  if (rotateError) return json({ error: "session_failed" }, 500);
-
-  const { data: access, error: accessError } = await client.rpc("reserve_call_trial", {
-    p_customer_email: caller.email.trim(), p_session_id: session.id,
+  const { data: result, error } = await client.rpc("begin_ticket_session", {
+    p_code_hash: await hash(normalizeCode(code)), p_call_type: callType, p_caller: caller,
+    p_attempt_id: clientAttemptId, p_token_hash: await hash(sessionToken),
   });
-  if (accessError || !access) return json({ error: "access_check_failed" }, 500);
-  if (access.allowed !== true) {
-    await client.rpc("transition_call_session", { p_session_id: session.id, p_status: "failed", p_failure_code: access.code });
-    await client.from("call_events").insert({ session_id: session.id, event_type: "subscription_required", metadata: { reason: access.code } });
-    return json({ code: access.code }, 200);
+  if (error || !result) return json({ error: "session_failed" }, 500);
+  if (result.code) return json(result);
+  const { data: session } = await client.from("call_sessions").select("host:hosts(id,display_name,avatar_path)").eq("id", result.sessionId).single();
+  const host = Array.isArray(session?.host) ? session.host[0] : session?.host;
+  if (!host) return json({ error: "session_failed" }, 500);
+  let access = null;
+  if (result.kind === "paid") {
+    const { data: grant } = await client.from("call_access_grants").select("id,plan_id,plan:subscription_plans(display_name,session_duration_minutes)").eq("id", result.grantId).single();
+    const plan = Array.isArray(grant?.plan) ? grant.plan[0] : grant?.plan;
+    if (!grant || !plan) return json({ error: "access_check_failed" }, 500);
+    access = { grantId: grant.id, planId: grant.plan_id, planName: plan.display_name, sessionDurationMinutes: plan.session_duration_minutes };
   }
-  await client.from("call_events").insert({ session_id: session.id, event_type: "session_created" });
   const avatarUrl = host.avatar_path ? (await client.storage.from("host-avatars").createSignedUrl(host.avatar_path, 3600)).data?.signedUrl ?? null : null;
-  return json({ sessionId: session.id, sessionToken, status: session.status,
-    access: access.kind === "paid" ? { grantId: access.grantId, planId: access.planId, planName: access.planName, sessionDurationMinutes: access.sessionDurationMinutes } : null,
+  return json({ sessionId: result.sessionId, sessionToken, status: "connecting", callDelivery: result.deliveryKind, mode: result.mode, accessKind: result.kind, access,
     host: { id: host.id, displayName: host.display_name, avatarUrl } });
 });

@@ -21,7 +21,7 @@ import type { CallPhase } from "@/types/call";
  * The cleanup below plus the reducer's transition guards make it impossible for
  * a timer that fired after the call ended to move the session anywhere.
  */
-export function useSimulatedCallFlow(
+function useCallEstablishmentStages(
   status: CallPhase,
   dispatch: Dispatch<CallSessionAction>,
   enabled: boolean,
@@ -53,6 +53,20 @@ export function useSimulatedCallFlow(
 
     return undefined;
   }, [status, dispatch, enabled]);
+}
+
+export function useSimulatedCallFlow(status: CallPhase, dispatch: Dispatch<CallSessionAction>, enabled: boolean): void {
+  useCallEstablishmentStages(status, dispatch, enabled);
+}
+
+/**
+ * Source-delivery establishment stages run after the server reserves the ticket
+ * and devices are granted. These delays only pace the existing call UX. The
+ * actual source must decode and play before activation is persisted, and its
+ * own ended event (never these timers) determines successful completion.
+ */
+export function useSourceCallFlow(status: CallPhase, dispatch: Dispatch<CallSessionAction>, enabled: boolean): void {
+  useCallEstablishmentStages(status, dispatch, enabled);
 }
 
 export default useSimulatedCallFlow;

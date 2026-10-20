@@ -56,6 +56,7 @@ Deno.serve(async (request) => {
         .ilike("visitor_email", email)
         .not("connected_at", "is", null)
         .is("access_grant_id", null)
+        .or("mode_at_start.is.null,mode_at_start.eq.premium")
         .order("connected_at", { ascending: true })
         .limit(1),
     ])

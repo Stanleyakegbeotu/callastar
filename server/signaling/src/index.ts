@@ -1,3 +1,4 @@
+import { bindTicketAccess, type TicketProof } from "./ticketAccess.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -27,7 +28,8 @@ import { mintGuestToken } from "./tokens.ts";
 
 assertConfigured();
 
-const hub = new SignalingHub();
+const ticketAttempts = new Map<string, number>();
+const hub = new SignalingHub(id => !config.callAccessUrl || (ticketAttempts.get(id) ?? 0) > Date.now());
 hub.start();
 
 /* --------------------------------------------------------------- rate limits */
@@ -150,6 +152,7 @@ async function handleAuthorize(request: IncomingMessage, response: ServerRespons
   }
 
   let callIdKey: string;
+  let proof: TicketProof | null = null;
   try {
     const raw = await readBody(request);
     const parsed: unknown = JSON.parse(raw);
@@ -163,6 +166,8 @@ async function handleAuthorize(request: IncomingMessage, response: ServerRespons
       sendJson(response, 400, { error: "invalid_request" });
       return;
     }
+    const input = parsed as Record<string,unknown>;
+    if (typeof input.sessionId === "string" && typeof input.sessionToken === "string") proof = { sessionId: input.sessionId, sessionToken: input.sessionToken };
     callIdKey = normalizeCallIdKey(candidate);
     if (callIdKey === "") {
       sendJson(response, 400, { error: "invalid_request" });
@@ -184,7 +189,15 @@ async function handleAuthorize(request: IncomingMessage, response: ServerRespons
     return;
   }
 
-  const { token, claims } = mintGuestToken(callIdKey);
+  let issued = mintGuestToken(callIdKey);
+  if (config.callAccessUrl) {
+    const access = await bindTicketAccess(config.callAccessUrl,config.supabaseAnonKey,callIdKey,proof,issued.claims.callAttemptId);
+    if (!access) { sendJson(response,200,{state:"unavailable"}); return; }
+    for (const [id, until] of ticketAttempts) if (until <= Date.now()) ticketAttempts.delete(id);
+    ticketAttempts.set(access.callAttemptId,access.expiresAt);
+    issued = mintGuestToken(callIdKey,access.callAttemptId);
+  }
+  const {token,claims} = issued;
   sendJson(response, 200, {
     state: "available",
     callAttemptId: claims.callAttemptId,

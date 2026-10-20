@@ -1,3 +1,4 @@
+import CallTicketControls from "./CallTicketControls";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -22,7 +23,7 @@ import { SessionTable } from "../sessions/SessionTable";
 import { CallIdCard } from "./CallIdCard";
 import { ProfileReadiness } from "./ProfileReadiness";
 
-type PendingAction = "regenerate" | "delete" | null;
+type PendingAction = "delete" | null;
 
 /** The CRM record: who the profile is, what plays on a call, and its Call ID. */
 export function ProfileDetailPage() {
@@ -79,13 +80,6 @@ export function ProfileDetailPage() {
       const updated = await adminRepository.updateProfile(profile.id, { status: next });
       setProfile(updated);
       toast.success(next === "active" ? "Profile activated." : "Profile deactivated.");
-    });
-
-  const regenerate = () =>
-    run(async () => {
-      const updated = await adminRepository.regenerateCallId(profile.id);
-      setProfile(updated);
-      toast.success("Call ID regenerated.");
     });
 
   const remove = () =>
@@ -204,17 +198,8 @@ export function ProfileDetailPage() {
           <CallIdCard
             callId={profile.callId}
             highlight={justCreated}
-            footer={
-              <button
-                type="button"
-                className="admin-button admin-button-ghost"
-                onClick={() => setPending("regenerate")}
-                disabled={busy}
-              >
-                Regenerate
-              </button>
-            }
           />
+          <CallTicketControls profile={profile} onChanged={setProfile} />
 
           {/* Live calling sits beside the Call ID, because the two answer the same
               question together: who can be reached, and on what code. */}
@@ -238,18 +223,6 @@ export function ProfileDetailPage() {
           </section>
         </aside>
       </div>
-
-      <ConfirmDialog
-        open={pending === "regenerate"}
-        title="Regenerate Call ID?"
-        confirmLabel="Regenerate"
-        destructive
-        busy={busy}
-        onCancel={() => setPending(null)}
-        onConfirm={regenerate}
-      >
-        <p>The current Call ID will stop working immediately. Anyone holding it will need the new one.</p>
-      </ConfirmDialog>
 
       <ConfirmDialog
         open={pending === "delete"}

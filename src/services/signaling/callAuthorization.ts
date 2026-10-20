@@ -56,7 +56,7 @@ export function signalingHttpOrigin(wsUrl: string = SIGNALING.url): string {
  * a UI that has to say something useful either way — and "we could not reach
  * CallaStar" is a different sentence from "they are not available".
  */
-export async function authorizeCall(callId: string, signal?: AbortSignal): Promise<CallAuthorization> {
+export async function authorizeCall(callId: string, signal?: AbortSignal, proof?: { sessionId: string; sessionToken: string } | null): Promise<CallAuthorization> {
   const origin = signalingHttpOrigin();
   if (!origin) return { state: "unreachable" };
 
@@ -66,7 +66,7 @@ export async function authorizeCall(callId: string, signal?: AbortSignal): Promi
       headers: { "content-type": "application/json" },
       // Normalised here so the service and the browser agree on the key, and a
       // code typed with or without its dashes resolves identically.
-      body: JSON.stringify({ callId: normalizeCallId(callId) }),
+      body: JSON.stringify({ callId: normalizeCallId(callId), ...proof }),
       signal,
     });
 

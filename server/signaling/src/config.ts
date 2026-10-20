@@ -20,6 +20,8 @@ function readList(value: string | undefined): string[] {
 }
 
 export const config = {
+  callAccessUrl: process.env.SIGNALING_CALL_ACCESS_URL ?? "",
+  supabaseAnonKey: process.env.SIGNALING_SUPABASE_ANON_KEY ?? "",
   port: readInt(process.env.SIGNALING_PORT, 8787),
   host: process.env.SIGNALING_HOST ?? "0.0.0.0",
 
@@ -72,6 +74,8 @@ export const config = {
 /** Refuses to run in a configuration that would be unsafe. */
 export function assertConfigured(): void {
   const problems: string[] = [];
+  if (process.env.NODE_ENV === "production" && !config.callAccessUrl) problems.push("SIGNALING_CALL_ACCESS_URL is required in production.");
+  if (config.callAccessUrl && !config.supabaseAnonKey) problems.push("SIGNALING_SUPABASE_ANON_KEY is required with ticket enforcement.");
 
   if (config.tokenSecret.length < 32) {
     problems.push("SIGNALING_TOKEN_SECRET must be set to at least 32 random characters.");

@@ -28,16 +28,17 @@ function drawVideo(context: CanvasRenderingContext2D, video: HTMLVideoElement, x
 }
 
 export async function captureCallVideoComposition(_localStream: MediaStream, stillActive = () => true): Promise<CapturedEvidenceImage> {
-  const surface = document.querySelector<HTMLElement>(".live-call");
-  const main = surface?.querySelector<HTMLVideoElement>("video.live-call-main");
+  const surface = document.querySelector<HTMLElement>(".live-call") ?? document.querySelector<HTMLElement>(".active-call");
+  const mainSelector = surface?.querySelector("video.live-call-main") ? "video.live-call-main" : "video.main-video-overlay";
+  const main = surface?.querySelector<HTMLVideoElement>(mainSelector);
   if (!main) throw new Error("main_call_video_missing");
   const source = main.currentSrc; const stream = main.srcObject;
   await waitForRenderedFrame(main);
   await new Promise((resolve) => setTimeout(resolve, 200));
-  if (!stillActive() || !main.isConnected || !videoHasFrame(main) || main.currentSrc !== source || main.srcObject !== stream || surface?.querySelector("video.live-call-main") !== main)
+  if (!stillActive() || !main.isConnected || !videoHasFrame(main) || main.currentSrc !== source || main.srcObject !== stream || surface?.querySelector(mainSelector) !== main)
     throw new Error("call_video_changed_before_capture");
   return new Promise((resolve, reject) => {
-    const callSurface = document.querySelector<HTMLElement>(".live-call");
+    const callSurface = surface;
     if (!callSurface) return reject(new Error("call_video_surface_missing"));
     const bounds = callSurface.getBoundingClientRect();
     if (!bounds.width || !bounds.height) return reject(new Error("call_video_surface_hidden"));
@@ -50,7 +51,7 @@ export async function captureCallVideoComposition(_localStream: MediaStream, sti
     context.fillStyle = "#111820"; context.fillRect(0, 0, canvas.width, canvas.height);
     let drawn = 0; let drawnMain = false; let videoWidth = 0; let videoHeight = 0; let readyState = 0;
     // The main output is required. PiP is optional and painted on top.
-    const videos = [main, ...callSurface.querySelectorAll<HTMLVideoElement>(".live-call-pip video")];
+    const videos = [main, ...callSurface.querySelectorAll<HTMLVideoElement>(".live-call-pip video"), ...callSurface.querySelectorAll<HTMLVideoElement>("video.pip-video")];
     for (const video of videos) {
       const rect = video.getBoundingClientRect();
       const left = Math.max(bounds.left, rect.left); const top = Math.max(bounds.top, rect.top);

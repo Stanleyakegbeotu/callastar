@@ -38,6 +38,7 @@ export type EntryOutcome =
   | { kind: "returning"; host: HostPreview }
   /** A valid Subscription Access ID: straight to an authorised call. */
   | { kind: "authorized"; host: HostPreview; access: SubscriptionAccessId; plan: SubscriptionPlan }
+  | { kind: "ticket-unavailable"; code: string; mode?: "free" | "premium" }
   | { kind: "not-found" }
   | { kind: "access-invalid"; reason: AccessResolutionFailure };
 
@@ -65,13 +66,13 @@ function unavailable(host: HostPreview): EntryOutcome {
 
 async function resolveCall(value: string): Promise<EntryOutcome> {
   const result = await callBackend.resolveCallId(value);
-  if (!result.found) return { kind: "not-found" };
+  if (!result.found) return result.code && result.code !== "CALL_ID_NOT_FOUND" ? { kind: "ticket-unavailable", code: result.code, mode: result.mode } : { kind: "not-found" };
 
   const host = result.host;
   if (host.available === false) return unavailable(host);
 
   // Asked before permissions, so a returning caller never sees another prompt.
-  if (await hasUsedPreview(host.id)) return { kind: "returning", host };
+  if (!host.mode && await hasUsedPreview(host.id)) return { kind: "returning", host };
 
   return { kind: "call", host };
 }
@@ -98,6 +99,8 @@ async function resolveAccess(value: string): Promise<EntryOutcome> {
 
   const host: HostPreview = {
     id: profile.id,
+    mode: profile.profileMode,
+    callDelivery: profile.remoteVideoAssetId ? "source_video" : "live",
     displayName: profile.displayName,
     shortName: profile.displayName.split(/\s+/)[0] || profile.displayName,
     avatarUrl: profile.avatarDataUrl,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -34,6 +34,7 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -57,9 +58,9 @@ export function ConfirmDialog({
   }, [busy, onCancel]);
 
   return (
-    <dialog className="admin-dialog" ref={ref} aria-labelledby="admin-dialog-title">
+    <dialog className="admin-dialog" ref={ref} aria-labelledby={titleId}>
       <div className="admin-dialog-body">
-        <h2 id="admin-dialog-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <div className="admin-dialog-content">{children}</div>
         <div className="admin-dialog-actions">
           <button type="button" className="admin-button admin-button-ghost" onClick={onCancel} disabled={busy}>

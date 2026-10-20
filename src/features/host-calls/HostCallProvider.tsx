@@ -1,3 +1,5 @@
+import { adminRepository } from "@/services/admin/repository";
+import { normalizeCallId } from "@/lib/callId";
 import {
   createContext,
   useCallback,
@@ -94,6 +96,7 @@ export function useHostCall(): HostCallContextValue {
  */
 export function HostCallProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(hostCallReducer, initialHostCallState);
+  const latestPhase = useRef(state.phase); latestPhase.current = state.phase;
   const [profile, setProfile] = useState<OperatedProfile | null>(null);
   const [socketStatus, setSocketStatus] = useState<SignalingStatus>("idle");
   const [sourceOptions, setSourceOptions] = useState<HostCallContextValue["sourceOptions"]>(null);
@@ -243,7 +246,27 @@ export function HostCallProvider({ children }: { children: ReactNode }) {
       callError("host-connect", error);
       dispatch({ type: "SIGNALING_LOST", error: "Could not connect to CallaStar." });
     }
-  }, [deviceClass]);
+  }, [deviceClass, profile]);
+
+  // Rebind a rotated ticket only between calls. Reconnecting the socket while
+  // media is active would terminate the call that consumed the final use.
+  useEffect(() => {
+    if (!profile || state.phase !== "available" || !state.receiveCallsRequested) return;
+    let cancelled = false, pending = false;
+    const refresh = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      try {
+        const current = await adminRepository.getProfile(profile.id);
+        if (!cancelled && current?.status === "active" && normalizeCallId(current.callId) !== profile.callIdKey) {
+          await startReceiving({ id: current.id, displayName: current.displayName, callIdKey: normalizeCallId(current.callId), callSourceAssetId: current.remoteVideoAssetId });
+        }
+      } catch (error) { callError("host-ticket-refresh", error); }
+      finally { pending = false; }
+    };
+    void refresh(); const timer = window.setInterval(() => void refresh(), 30000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [profile, startReceiving, state.phase, state.receiveCallsRequested]);
 
   const stopReceiving = useCallback(async () => {
     dispatch({ type: "SET_RECEIVE_CALLS", enabled: false });

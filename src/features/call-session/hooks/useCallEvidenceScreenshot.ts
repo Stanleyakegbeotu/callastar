@@ -8,6 +8,17 @@ import type { BeginEvidenceInput, EvidencePlanType } from "@/services/evidence/t
 import type { CallSessionState } from "@/state/callSessionReducer";
 
 function isOngoing(status: string) { return status === "active" || status === "reconnecting"; }
+function waitForVisibleSourceFrame(isActive: () => boolean, timeoutMs = 30_000): Promise<boolean> {
+  if (!document.querySelector(".source-interruption-overlay")) return Promise.resolve(isActive());
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      if (!isActive()) { window.clearInterval(timer); resolve(false); }
+      else if (!document.querySelector(".source-interruption-overlay")) { window.clearInterval(timer); resolve(true); }
+      else if (Date.now() - started >= timeoutMs) { window.clearInterval(timer); resolve(false); }
+    }, 100);
+  });
+}
 function withTerminalMetadata(input: BeginEvidenceInput, current: CallSessionState): BeginEvidenceInput {
   if (isOngoing(current.status)) return { ...input, callStatus: current.status };
   const endedAt = current.endedAt ?? Date.now();
@@ -16,7 +27,7 @@ function withTerminalMetadata(input: BeginEvidenceInput, current: CallSessionSta
     callStatus: current.status,
     endedAt: new Date(endedAt).toISOString(),
     durationSeconds: current.startedAt === null ? null : Math.max(0, Math.floor((endedAt - current.startedAt) / 1000)),
-    terminationReason: current.failureReason ?? current.error,
+    terminationReason: current.endReason ?? current.failureReason ?? current.error,
   };
 }
 
@@ -24,21 +35,23 @@ export function useCallEvidenceScreenshot(options: {
   session: CallSessionState;
   sessionMatches: boolean;
   liveMode: boolean;
+  sourceVideoPlaying?: boolean;
   rtcConnected: boolean;
   localStream: MediaStream | null;
 }) {
-  const { session, sessionMatches, liveMode, rtcConnected, localStream } = options;
+  const { session, sessionMatches, liveMode, rtcConnected, localStream, sourceVideoPlaying = false } = options;
   const latestSession = useRef(session);
   const lastGateDiagnostic = useRef("");
   latestSession.current = session;
-  const latestConnected = useRef(rtcConnected);
-  latestConnected.current = rtcConnected;
+  const latestConnected = useRef(rtcConnected || sourceVideoPlaying);
+  latestConnected.current = rtcConnected || sourceVideoPlaying;
   const { id, status, type, callId, host, caller, startedAt, answeredAt, sessionCreatedAt, endedAt, failureReason, error } = session;
 
   useEffect(() => {
     const eligible = shouldCaptureCallEvidence({
       sessionMatches,
       liveMode,
+      sourceVideoPlaying,
       callType: type,
       callStatus: status,
       rtcPhase: rtcConnected ? "connected" : "disconnected",
@@ -48,8 +61,8 @@ export function useCallEvidenceScreenshot(options: {
     });
     if (sessionMatches && type === "video" && ["active", "reconnecting"].includes(status) && !eligible) {
       const reasons = [
-        !liveMode && "not_live_webrtc_call",
-        !rtcConnected && "rtc_not_connected",
+        !liveMode && !sourceVideoPlaying && "call_source_not_ready",
+        !rtcConnected && !sourceVideoPlaying && "rtc_not_connected",
         !localStream?.getVideoTracks().length && "local_video_track_missing",
         !host && "host_missing",
         startedAt === null && "active_timestamp_missing",
@@ -91,6 +104,9 @@ export function useCallEvidenceScreenshot(options: {
       captureStarted = true;
       void (async () => {
         try {
+          if (!await waitForVisibleSourceFrame(() => isOngoing(latestSession.current.status))) {
+            throw new Error("source_interruption_did_not_clear_before_evidence_timeout");
+          }
           let captured: Awaited<ReturnType<typeof captureCallVideoComposition>> | null = null;
           let lastError: unknown;
           for (let attempt = 0; attempt < 3 && !captured; attempt++) {
@@ -156,7 +172,7 @@ export function useCallEvidenceScreenshot(options: {
               endedAt: new Date(endMs).toISOString(),
               durationSeconds: endedDuringSave.startedAt === null ? null : Math.max(0, Math.floor((endMs - endedDuringSave.startedAt) / 1000)),
               callStatus: endedDuringSave.status,
-              terminationReason: endedDuringSave.failureReason ?? endedDuringSave.error,
+              terminationReason: endedDuringSave.endReason ?? endedDuringSave.failureReason ?? endedDuringSave.error,
             });
           }
         } catch (cause) {
@@ -178,7 +194,7 @@ export function useCallEvidenceScreenshot(options: {
         .then((record) => logDiagnostic("CALL_EVIDENCE_SAVED", { recordId: record.id, status: record.status }))
         .catch((cause) => logDiagnostic("CALL_EVIDENCE_LOCAL_SAVE_FAILED", { callSessionId: id, error: cause }));
     };
-  }, [answeredAt, callId, caller.email, caller.fullName, host, id, liveMode, localStream, rtcConnected, session.access, sessionCreatedAt, sessionMatches, startedAt, status, type]);
+  }, [answeredAt, callId, caller.email, caller.fullName, host, id, liveMode, localStream, rtcConnected, session.access, sessionCreatedAt, sessionMatches, sourceVideoPlaying, startedAt, status, type]);
 
   useEffect(() => {
     if (!sessionMatches || !id || !["ended", "failed", "declined", "no_answer"].includes(status)) return;
@@ -188,7 +204,7 @@ export function useCallEvidenceScreenshot(options: {
       endedAt: new Date(endMs).toISOString(),
       durationSeconds,
       callStatus: status,
-      terminationReason: failureReason ?? error ?? null,
+      terminationReason: session.endReason ?? failureReason ?? error ?? null,
     }).catch((cause) => logDiagnostic("CALL_EVIDENCE_LOCAL_FINALIZE_FAILED", { callSessionId: id, error: cause }));
-  }, [endedAt, error, failureReason, id, sessionMatches, startedAt, status]);
+  }, [endedAt, error, failureReason, id, sessionMatches, session.endReason, startedAt, status]);
 }

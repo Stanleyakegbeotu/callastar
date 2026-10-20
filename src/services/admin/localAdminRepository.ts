@@ -1,6 +1,7 @@
 import { generateCallId, normalizeCallId } from "@/lib/callId";
 import { initialsAvatarDataUrl } from "@/lib/avatar";
 import { PROFILE_LIMITS } from "@/lib/config";
+import { normalizeInterruptions } from "@/services/media/interruptionTimeline";
 
 import {
   AdminStorageError,
@@ -361,6 +362,18 @@ export const localAdminRepository: AdminRepository = {
     });
   },
 
+  // Development storage only. Production ticket authority is the Supabase RPC.
+  async configureCallTicket(id, input) {
+    if (input.mode !== undefined && !["free", "premium"].includes(input.mode)) throw new Error("Invalid mode.");
+    if (input.maxUses !== undefined && ![1,2,3,5].includes(input.maxUses)) throw new Error("Invalid allowed uses.");
+    return runTransaction([STORE_PROFILES], "readwrite", async (scope) => {
+      const profile = await requireProfile(scope, id);
+      const rotate = (input.mode !== undefined && input.mode !== (profile.profileMode ?? "premium")) || (profile.ticket?.useCount ?? 0) >= (input.maxUses ?? profile.callIdMaxUses ?? 1);
+      const next = { ...profile, profileMode: input.mode ?? profile.profileMode ?? "premium" as const, callIdMaxUses: input.maxUses ?? profile.callIdMaxUses ?? 1 as const, updatedAt: nowIso() };
+      if (rotate) Object.assign(next, await allocateCallId(scope), { ticket: undefined });
+      await scope.put(STORE_PROFILES, next); return next;
+    });
+  },
   async regenerateCallId(id) {
     return runTransaction([STORE_PROFILES], "readwrite", async (scope) => {
       const profile = await requireProfile(scope, id);
@@ -449,6 +462,14 @@ export const localAdminRepository: AdminRepository = {
     });
   },
 
+  async saveSourceInterruptions(assetId, ranges) {
+    await runTransaction([STORE_ASSETS], "readwrite", async (scope) => {
+      const meta = await scope.get<StoredAssetMeta>(STORE_ASSETS, assetId);
+      if (!meta || meta.kind !== "remote_video" || meta.durationSeconds === null) throw new Error("That source video is no longer available.");
+      await scope.put(STORE_ASSETS, { ...meta, interruptions: normalizeInterruptions(ranges, meta.durationSeconds * 1000), updatedAt: nowIso() });
+    });
+  },
+
   async setRemoteAudio(id, file) {
     const prepared = await prepareAsset(id, "remote_audio", file);
 
@@ -532,6 +553,7 @@ export const localAdminRepository: AdminRepository = {
 
     const publicProfile: PublicHostProfile = {
       ...profileAudience(found.profile),
+      profileMode: found.profile.profileMode,
       id: found.profile.id,
       displayName: found.profile.displayName,
       shortBio: found.profile.shortBio,
@@ -567,6 +589,7 @@ export const localAdminRepository: AdminRepository = {
 
     return {
       ...profileAudience(found.profile),
+      profileMode: found.profile.profileMode,
       id: found.profile.id,
       displayName: found.profile.displayName,
       shortBio: found.profile.shortBio,

@@ -134,14 +134,15 @@ export interface CallSession {
   status: CallPhase;
   caller: CallerDetails;
   /**
-   * The code the caller dialled. Identifies a profile; it is NOT a credential
-   * and never authenticates anything.
+   * The controlled-use ticket the caller dialled. The server validates and
+   * reserves it before a call; host/operator authentication is separate.
    */
   callId: string;
   host: HostPreview | null;
   /** Epoch ms the call became active — the call timer reads from this. */
   startedAt: number | null;
   endedAt: number | null;
+  endReason?: "SOURCE_VIDEO_ENDED" | "USER_ENDED" | "HOST_ENDED";
   /** User-facing reason the session failed, never a raw exception. */
   error: string | null;
   /** The classified reason, which the UI switches on. */

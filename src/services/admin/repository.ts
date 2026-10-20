@@ -2,6 +2,7 @@ import { config, type AdminDataMode } from "@/lib/config";
 import type { EngagementChange, EngagementSnapshot } from "./profileEngagement";
 
 import { localAdminRepository } from "./localAdminRepository";
+import type { SourceInterruption } from "@/services/media/interruptionTimeline";
 import { supabaseAdminRepository } from "./supabaseAdminRepository";
 import type {
   AppendCallEventInput,
@@ -39,6 +40,7 @@ export interface AdminRepository {
 
   /** Replaces the current code; the previous one stops resolving immediately. */
   regenerateCallId(id: string): Promise<HostProfile>;
+  configureCallTicket(id: string, input: { mode?: "free" | "premium"; maxUses?: 1 | 2 | 3 | 5 }): Promise<HostProfile>;
 
   setAvatar(id: string, file: File): Promise<HostProfile>;
   removeAvatar(id: string): Promise<HostProfile>;
@@ -46,6 +48,7 @@ export interface AdminRepository {
   removeCover(id: string): Promise<HostProfile>;
   setRemoteVideo(id: string, file: File): Promise<HostProfile>;
   removeRemoteVideo(id: string): Promise<HostProfile>;
+  saveSourceInterruptions(assetId: string, ranges: SourceInterruption[]): Promise<void>;
   /** The voice a profile is heard with on an audio call. Zero or one. */
   setRemoteAudio(id: string, file: File): Promise<HostProfile>;
   removeRemoteAudio(id: string): Promise<HostProfile>;

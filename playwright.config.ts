@@ -117,8 +117,13 @@ export default defineConfig({
         PORT: String(WEB_PORT),
         VITE_ADMIN_DATA_MODE: "local",
         VITE_ADMIN_AUTH_MODE: "development",
+        // Auth now always uses Supabase, even with local profile/media data.
+        // The browser fixtures mock this local endpoint; never contact production.
+        VITE_SUPABASE_URL: `http://127.0.0.1:${WEB_PORT}`,
+        VITE_SUPABASE_ANON_KEY: "local-browser-auth-fixture",
         VITE_CALL_BACKEND: "local",
         VITE_SIGNALING_URL: `ws://127.0.0.1:${SIGNALING_PORT}`,
+        VITE_DEV_SIGNALING_PROXY: "true",
         VITE_SIGNALING_HOST_TOKEN: HOST_SECRET,
         // The subscription checkpoint would otherwise end the call partway
         // through. Long enough that these tests finish before it fires.

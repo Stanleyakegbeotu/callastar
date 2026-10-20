@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
 import { useRtcSession } from "@/features/calls/hooks/useRtcSession";
 import { authorizeCall } from "@/services/signaling/callAuthorization";
 import { sendAdminEvent } from "@/services/notifications/adminEvents";
-import { callBackend, FreeTrialExhaustedError } from "@/services/callBackend";
+import { callBackend, getCloudCallSessionCredentials, CallTicketError, FreeTrialExhaustedError } from "@/services/callBackend";
 import {
   signalingProvider,
   type CallEndReason,
@@ -53,6 +53,7 @@ interface Options {
   enabled: boolean;
   /** Told when a call-ending reason arrives, so history records the right thing. */
   onEndReason?: (reason: CallEndReason) => void;
+  onTicketUnavailable?: (error: CallTicketError) => void;
 }
 
 /** Maps the service's end reasons onto the app's classified failures. */
@@ -81,6 +82,7 @@ export function useLiveGuestCall({
   localStream,
   enabled,
   onEndReason,
+  onTicketUnavailable,
 }: Options): LiveGuestCall {
   const { id: sessionId, callAttemptId, status, callId, caller, type: callType, host } = session;
 
@@ -173,7 +175,7 @@ export function useLiveGuestCall({
           } });
         }
 
-        const result = await authorizeCall(callId, controller.signal);
+        const result = await authorizeCall(callId, controller.signal, await getCloudCallSessionCredentials(sessionId));
         if (controller.signal.aborted) return;
         callDiagnostic("authorize", { status: result.state });
 
@@ -201,6 +203,7 @@ export function useLiveGuestCall({
         dispatch({ type: "FAIL_CALL", reason: "host_offline", error: `${name} isn't available to receive calls right now.` });
       } catch (cause) {
         if (controller.signal.aborted) return;
+        if (cause instanceof CallTicketError) { onTicketUnavailable?.(cause); dispatch({ type: "FAIL_CALL", reason: "source_unavailable", error: cause.message }); return; }
         if (cause instanceof FreeTrialExhaustedError) {
           dispatch({ type: "FAIL_CALL", reason: "free_trial_exhausted", error: cause.message });
           return;
@@ -240,7 +243,8 @@ export function useLiveGuestCall({
             // socket that another party receives.
             caller: { displayName: caller.fullName },
           });
-          sendAdminEvent("new_call", callAttemptId, `${caller.fullName} started a ${callType} call with ${host?.displayName ?? "a host"}.`);
+          const credentials = await getCloudCallSessionCredentials(sessionId);
+          sendAdminEvent("new_call", credentials?.sessionId ?? callAttemptId, `${caller.fullName} started a ${callType} call with ${host?.displayName ?? "a host"}.`);
           dispatch({ type: "START_RINGING" });
           callDiagnostic("invite-sent", { callType });
         } catch (error) {
@@ -262,6 +266,8 @@ export function useLiveGuestCall({
     enabled,
     once,
     session.permission,
+    sessionId,
+    host?.displayName,
     status,
   ]);
 

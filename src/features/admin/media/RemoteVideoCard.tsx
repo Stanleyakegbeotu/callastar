@@ -11,6 +11,7 @@ import { MediaBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { useAssetMeta, useAssetPlayback, useFilePreview } from "../hooks/useAdminData";
 import { VideoUpload } from "./VideoUpload";
+import { SourceTimelineEditor } from "./SourceTimelineEditor";
 
 interface RemoteVideoCardProps {
   profile: HostProfile;
@@ -34,12 +35,13 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
   const toast = useToast();
   const playback = useAssetPlayback(profile.remoteVideoAssetId);
   const videoUrl = playback.url;
-  const { data: meta } = useAssetMeta(profile.remoteVideoAssetId);
+  const { data: meta, reload: reloadMeta } = useAssetMeta(profile.remoteVideoAssetId);
 
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const pendingPreview = useFilePreview(pendingFile);
 
   const closeReplace = () => {
@@ -148,6 +150,7 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
           )}
 
           <div className="admin-card-actions">
+            {meta?.durationSeconds && videoUrl && <button type="button" className="admin-button admin-button-secondary" onClick={() => setTimelineOpen(true)}>Configure Call Timeline</button>}
             <button type="button" className="admin-button admin-button-secondary" onClick={() => setReplaceOpen(true)}>
               Replace video
             </button>
@@ -164,6 +167,15 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
           </button>
         </div>
       )}
+
+      {timelineOpen && meta?.durationSeconds && videoUrl && <SourceTimelineEditor
+        assetId={meta.id}
+        url={videoUrl}
+        durationSeconds={meta.durationSeconds}
+        initialRanges={meta.interruptions ?? []}
+        onSaved={reloadMeta}
+        onClose={() => setTimelineOpen(false)}
+      />}
 
       <ConfirmDialog
         open={replaceOpen}
@@ -182,7 +194,7 @@ export function RemoteVideoCard({ profile, onChanged }: RemoteVideoCardProps) {
         <VideoUpload file={pendingFile} previewUrl={pendingPreview} onSelect={setPendingFile} disabled={busy} />
         {profile.remoteVideoAssetId && (
           <p className="admin-warning">
-            Replacing this video changes what users see when calls to this profile connect.
+            The source video has changed. Existing timeline interruption markers need to be reviewed. The new video starts with an empty timeline.
           </p>
         )}
       </ConfirmDialog>

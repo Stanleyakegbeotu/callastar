@@ -1,3 +1,4 @@
+import CallTicketControls from "./CallTicketControls";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -65,8 +66,8 @@ export function ProfileAvailabilityCard({ profile, onChanged }: ProfileAvailabil
           <strong className="availability-name">{profile.displayName}</strong>
 
           <span className="availability-callid">
-            Call ID: <code>{profile.callId}</code>
-            <button type="button" onClick={() => void copyCallId()} aria-label={`Copy Call ID for ${profile.displayName}`}>
+            Call ID: <code>{profile.callId || "Unavailable"}</code>
+            <button type="button" disabled={!profile.callIdKey} onClick={() => void copyCallId()} aria-label={`Copy Call ID for ${profile.displayName}`}>
               <Icon name="copy" className="size-4" />
             </button>
           </span>
@@ -105,6 +106,7 @@ export function ProfileAvailabilityCard({ profile, onChanged }: ProfileAvailabil
         </button>
       </div>
 
+      <CallTicketControls profile={profile} onChanged={onChanged} />
       <div className="availability-actions">
         <Link className="availability-action" to={`/admin/profiles/${profile.id}`}>
           <Icon name="eye" className="size-4" />

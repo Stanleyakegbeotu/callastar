@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { createServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
@@ -116,8 +117,8 @@ interface TestClient {
   close: () => void;
 }
 
-async function connect(label: string): Promise<TestClient> {
-  const socket = new WebSocket(WS_URL);
+async function connect(label: string, url = WS_URL): Promise<TestClient> {
+  const socket = new WebSocket(url);
   const received: ServerMessage[] = [];
   const waiters: { type: string; resolve: (message: ServerMessage) => void }[] = [];
 
@@ -212,6 +213,45 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await stopService(service);
+});
+
+it("requires a cloud ticket reservation before signaling and rejects a retired attempt replay", async () => {
+  let boundAttempt: string | null = null;
+  const verified: any[] = [];
+  const backend = createServer(async (request,response) => {
+    const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString()); verified.push(body);
+    response.setHeader("content-type","application/json");
+    if (body.sessionToken !== "x".repeat(64)) { response.writeHead(409); response.end("{}"); return; }
+    boundAttempt ??= body.callAttemptId;
+    response.end(JSON.stringify({authorized:true,callAttemptId:boundAttempt,reservedUntil:new Date(Date.now()+60000).toISOString()}));
+  });
+  await new Promise<void>(resolve=>backend.listen(8796,"127.0.0.1",resolve));
+  let cloudService: ChildProcess | undefined; let host: TestClient | undefined; let guest: TestClient | undefined;
+  try {
+    cloudService = await startService(8795,{SIGNALING_CALL_ACCESS_URL:"http://127.0.0.1:8796",SIGNALING_SUPABASE_ANON_KEY:"test-anon",SIGNALING_AUTHORIZE_PER_MINUTE:"100"});
+    host = await connect("cloud-host","ws://127.0.0.1:8795");
+    host.send({type:"hello",protocolVersion:SIGNALING_PROTOCOL_VERSION,role:"host",token:HOST_SECRET,profileId:"prof_1",callIdKey:CALL_KEY});
+    await host.expect("hello.ok"); host.send({type:"presence.update",profileId:"prof_1",presence:"available"}); await host.expect("presence.update");
+    const authorizeCloud = async (proof = {}) => (await fetch("http://127.0.0.1:8795/calls/authorize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({callId:CALL_ID,...proof})})).json() as Promise<AuthorizeResponse>;
+    expect((await authorizeCloud()).state).toBe("unavailable"); expect(verified).toHaveLength(0);
+    expect((await authorizeCloud({sessionId:"test-session",sessionToken:"wrong".repeat(12)})).state).toBe("unavailable");
+    const proof = {sessionId:"test-session",sessionToken:"x".repeat(64)};
+    const issued = await authorizeCloud(proof); expect(issued.state).toBe("available");
+    expect(verified.at(-1)).toMatchObject({...proof,code:CALL_KEY,action:"bind_signaling"});
+    guest = await connect("cloud-guest","ws://127.0.0.1:8795");
+    guest.send({type:"hello",protocolVersion:SIGNALING_PROTOCOL_VERSION,role:"guest",token:issued.token!}); await guest.expect("hello.ok");
+    guest.send({type:"call.invite",callAttemptId:issued.callAttemptId!,callIdKey:CALL_KEY,callType:"video",caller:{displayName:"Test"}});
+    await host.expect("call.incoming"); host.send({type:"call.decline",callAttemptId:issued.callAttemptId!}); await guest.expect("call.decline"); guest.close();
+    const retried = await authorizeCloud(proof); expect(retried.callAttemptId).toBe(issued.callAttemptId);
+    guest = await connect("replayed-guest","ws://127.0.0.1:8795");
+    guest.send({type:"hello",protocolVersion:SIGNALING_PROTOCOL_VERSION,role:"guest",token:retried.token!}); await guest.expect("hello.ok");
+    guest.send({type:"call.invite",callAttemptId:retried.callAttemptId!,callIdKey:CALL_KEY,callType:"video",caller:{displayName:"Test"}});
+    expect((await guest.expect("error")).code).toBe("unauthorized");
+    expect(host.received.filter(message=>message.type === "call.incoming")).toHaveLength(1);
+  } finally {
+    host?.close(); guest?.close(); await stopService(cloudService); await new Promise<void>(resolve=>backend.close(()=>resolve()));
+  }
 });
 
 describe("signalling service", () => {

@@ -1,3 +1,9 @@
+import SourceSessionEndedPage from "./SourceSessionEndedPage";
+import { callBackend, CallTicketError, FreeTrialExhaustedError } from "@/services/callBackend";
+import CallTicketUnavailable from "@/features/join-call/CallTicketUnavailable";
+import { useSourceCompletion } from "./hooks/useSourceCompletion";
+import { Spinner } from "@/components/ui/Spinner";
+import { Button } from "@/components/ui/Button";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -29,7 +35,7 @@ import { ActiveAudioCallPage } from "./ActiveAudioCallPage";
 import { ActiveVideoCallPage } from "./ActiveVideoCallPage";
 import { CallEndedPage } from "./CallEndedPage";
 import { ConnectingPage } from "./ConnectingPage";
-import { useSimulatedCallFlow } from "./hooks/useCallFlow";
+import { useSimulatedCallFlow, useSourceCallFlow } from "./hooks/useCallFlow";
 import { useCameraPermission } from "./hooks/useCameraPermission";
 import { useLocalMedia } from "./hooks/useLocalMedia";
 import { useCallAccessGate } from "./hooks/useCallAccessGate";
@@ -69,18 +75,21 @@ export function CallSessionRoute() {
   const retryRequested = (location.state as { retry?: boolean } | null)?.retry === true;
   const { session, dispatch } = useCallSession();
   /**
-   * Which of the two modes this call is running in.
-   *
-   * Deliberately one flag, read in every branch below, so the live path and the
-   * legacy simulated path are never accidentally mixed. Demo mode is a simulation
-   * by definition and stays on the old path.
+   * Delivery is explicit: selected source video needs ticket authorization,
+   * while live camera/audio needs operator presence and signaling. Monetization
+   * does not choose availability or delivery. Network errors never change paths.
    */
-  const liveMode = isLiveCallingConfigured;
+  const liveMode = isLiveCallingConfigured && !(session.type === "video" && session.host?.callDelivery === "source_video");
   const media = useLocalMedia(session.type);
   // These three are stable across renders; the effects below depend on them
   // rather than on the controller object.
   const { request: requestMedia, stop: stopMedia, status: mediaStatus } = media;
   const host = session.host;
+  const [ticketIssue, setTicketIssue] = useState<CallTicketError | null>(null);
+  const [sourceStartedAt, setSourceStartedAt] = useState<number | null>(null);
+  const sourcePlaying = sourceStartedAt !== null;
+  const usesSourceVideo = session.type === "video" && (!liveMode || session.remoteSource.kind === "uploaded-source");
+  const callStartedAt = usesSourceVideo ? sourceStartedAt : session.startedAt;
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportChannel, setSupportChannel] = useState<SupportChannel>("in_app");
 
@@ -90,7 +99,7 @@ export function CallSessionRoute() {
   const hasUploadedFreeVideoPreview =
     !liveMode &&
     session.type === "video" &&
-    session.access === null &&
+    host?.mode === undefined && session.access === null &&
     Boolean(host?.remoteVideoRef) &&
     remote.status === "ready" &&
     remote.url !== null;
@@ -103,15 +112,16 @@ export function CallSessionRoute() {
   useRingbackTone(session.status === "connecting" || session.status === "ringing");
 
   /**
-   * With no signalling service configured there is no host to ring, so the
-   * legacy simulated pacing stands in. A live call is paced by signalling events
-   * instead, and this does nothing there.
+   * Authorized source playback uses establishment stages before loading media.
+   * Live calls are paced by signaling. Legacy local playback keeps its pacing.
    */
-  useSimulatedCallFlow(session.status, dispatch, !liveMode);
+  const sourceDelivery = session.type === "video" && host?.callDelivery === "source_video";
+  useSourceCallFlow(session.status, dispatch, sourceDelivery);
+  useSimulatedCallFlow(session.status, dispatch, !liveMode && !sourceDelivery);
 
   const endedDuration =
-    session.startedAt !== null && session.endedAt !== null
-      ? Math.floor((session.endedAt - session.startedAt) / 1000)
+    callStartedAt !== null && session.endedAt !== null
+      ? Math.floor((session.endedAt - callStartedAt) / 1000)
       : null;
   const sessionMatches = session.id !== "" && session.id === sessionId;
 
@@ -124,12 +134,15 @@ export function CallSessionRoute() {
   }, [navigate, session.failureReason, session.status, sessionMatches]);
 
   // Everything that happens to this call is persisted here, exactly once.
-  const { record } = useSessionRecorder({
-    session,
+  const { record, completeSource } = useSessionRecorder({
+    session: usesSourceVideo ? { ...session, startedAt: callStartedAt } : session,
     sessionMatches,
     micEnabled: media.micEnabled,
     cameraEnabled: media.cameraEnabled,
     mediaReady: mediaStatus === "ready",
+    sourceReady: session.type !== "video" || (liveMode && session.remoteSource.kind !== "uploaded-source") || sourcePlaying,
+    sourceCompletionRequired: usesSourceVideo,
+    onAuthorizationFailure: useCallback(() => { stopMedia(); dispatch({ type: "FAIL_CALL", reason: "source_unavailable", error: "Call authorization could not be confirmed. Please try again." }); }, [dispatch, stopMedia]),
   });
 
   const { number: whatsappNumber } = useWhatsappSupportNumber();
@@ -196,12 +209,12 @@ export function CallSessionRoute() {
     profileName: host?.displayName ?? "",
     customerEmail: session.caller.email,
     armed:
-      session.status === "active" &&
+      host?.mode === undefined && session.status === "active" &&
       remote.status !== "loading" &&
       host !== null &&
       !hasUploadedFreeVideoPreview,
     // A call authorised by a Subscription Access ID never runs the unpaid gate.
-    authorized: session.access !== null,
+    authorized: host?.mode === "free" || session.access !== null,
     whatsappNumber,
     onAccessRequired: endForSubscription,
     onCheckStarted,
@@ -222,6 +235,7 @@ export function CallSessionRoute() {
     dispatch,
     localStream: media.stream,
     enabled: liveMode,
+    onTicketUnavailable: useCallback((error: CallTicketError) => setTicketIssue(error), []),
     onEndReason: useCallback((reason: CallEndReason) => {
       // Remembered so the ended screen can say who hung up.
       if (reason === "hangup" || reason === "declined") setEndedByHost(true);
@@ -235,15 +249,16 @@ export function CallSessionRoute() {
    * neither does the clock.
    */
   const liveSeconds = useCallTimer(
-    session.startedAt,
-    (session.status === "active" || session.status === "reconnecting") && session.startedAt !== null,
+    callStartedAt,
+    (session.status === "active" || session.status === "reconnecting") && callStartedAt !== null,
   );
 
   useCallEvidenceScreenshot({
-    session,
+    session: usesSourceVideo ? { ...session, startedAt: callStartedAt } : session,
+    sourceVideoPlaying: !liveMode && usesSourceVideo && sourcePlaying,
     sessionMatches,
     liveMode,
-    rtcConnected: live.phase === "connected",
+    rtcConnected: live.phase === "connected" && (!usesSourceVideo || sourcePlaying),
     localStream: media.stream,
   });
 
@@ -255,7 +270,7 @@ export function CallSessionRoute() {
    * camera first would spend a permission decision on a call that may not be
    * possible — so the device prompt comes after this, never before.
    *
-   * The simulated path has no host to check, so it goes straight to devices.
+   * Source delivery checks its ticket before devices, independently of signaling.
    */
   useEffect(() => {
     if (!sessionMatches || session.status !== "preparing") return;
@@ -265,8 +280,21 @@ export function CallSessionRoute() {
       return;
     }
 
-    dispatch({ type: "REQUEST_PERMISSIONS" });
-  }, [dispatch, session.status, sessionMatches]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const access = await callBackend.prepareCallSession?.(session.callId, session.type, session.caller, session.id);
+        if (cancelled) return;
+        if (access) dispatch({ type: "SET_ACCESS", access: { accessIdRecordId: access.grantId, planId: access.planId, planName: access.planName, sessionDurationMinutes: access.sessionDurationMinutes, validatedAt: Date.now() } });
+        dispatch({ type: "REQUEST_PERMISSIONS" });
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof CallTicketError) setTicketIssue(error);
+        dispatch({ type: "FAIL_CALL", reason: error instanceof FreeTrialExhaustedError ? "free_trial_exhausted" : "source_unavailable", error: error instanceof Error ? error.message : "Unable to prepare this call." });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dispatch, liveMode, session.callId, session.caller, session.id, session.status, session.type, sessionMatches]);
 
   /**
    * One device request per attempt. Every dependency here is stable or a
@@ -342,12 +370,36 @@ export function CallSessionRoute() {
     dispatch({ type: "END_CALL" });
   }, [dispatch, stopMedia]);
 
+  const sourceCompletion = useSourceCompletion(session.id, () => {
+    stopMedia();
+    dispatch({ type: "END_CALL", reason: "SOURCE_VIDEO_ENDED" });
+    if (liveMode) live.hangup();
+    if (host?.mode !== "free" && !session.access) gate.finishPreview();
+  }, completeSource, () => {
+    stopMedia();
+    dispatch({ type: "FAIL_CALL", reason: "source_unavailable", error: "Call completion could not be confirmed. Please try again." });
+  });
+  const onSourcePlaying = useCallback(() => setSourceStartedAt(current => current ?? Date.now()), []);
+  const onSourceError = useCallback(() => {
+    stopMedia();
+    dispatch({ type: "FAIL_CALL", reason: "source_unavailable", error: "The host video could not be played. Please try again or ask the host to update the source." });
+    if (liveMode) live.hangup();
+  }, [dispatch, live.hangup, liveMode, stopMedia]);
+  useEffect(() => { setSourceStartedAt(null); setTicketIssue(null); }, [session.id]);
+  useEffect(() => {
+    if (!liveMode && session.status === "active" && session.type === "video" && remote.status === "unavailable") onSourceError();
+  }, [liveMode, onSourceError, remote.status, session.status, session.type]);
+  useEffect(() => {
+    if (!usesSourceVideo || sourcePlaying || session.status !== "active") return;
+    const timer = window.setTimeout(onSourceError, 30000);
+    return () => window.clearTimeout(timer);
+  }, [onSourceError, session.status, sourcePlaying, usesSourceVideo]);
   const onRemoteEnded = useCallback(() => {
     record("remote-media-ended", "remote_media_ended", {
       endedBeforeSubscriptionCheck: gate.status !== "checking",
     });
-    if (hasUploadedFreeVideoPreview) gate.finishPreview();
-  }, [gate.finishPreview, gate.status, hasUploadedFreeVideoPreview, record]);
+    sourceCompletion.onEnded();
+  }, [sourceCompletion.onEnded, gate.status, record]);
 
   /**
    * A paid session gets exactly the length its plan sells. When the time is up
@@ -357,7 +409,7 @@ export function CallSessionRoute() {
   const [limitReached, setLimitReached] = useState(false);
   const limit = useSessionLimit({
     startedAt: session.startedAt,
-    minutes: session.access?.sessionDurationMinutes ?? null,
+    minutes: session.type === "video" && (session.remoteSource.kind === "uploaded-source" || !liveMode) ? null : session.access?.sessionDurationMinutes ?? null,
     active: session.status === "active",
     onExpire: useCallback(() => {
       record("session-limit-reached", "session_limit_reached");
@@ -396,6 +448,10 @@ export function CallSessionRoute() {
     if (retryRequested && session.host) return null;
     return <Navigate to="/" replace />;
   }
+
+  if (ticketIssue) return <CallTicketUnavailable code={ticketIssue.code} mode={ticketIssue.mode} onAnother={() => navigate(`/join/${session.type}`)} onSupport={() => navigate("/support")} onHome={() => navigate("/")} />;
+  if (session.status === "ended" && session.endReason === "SOURCE_VIDEO_ENDED") return <SourceSessionEndedPage free={session.access === null} onHome={() => navigate("/")} onAnother={() => navigate(`/join/${session.type}`)} onSupport={() => navigate("/support")} />;
+  if (session.status === "failed" && session.failureReason === "source_unavailable") return <div className="page-shell"><main className="host-state call-ticket-outcome"><h1 className="cs-display">Host video unavailable</h1><p className="cs-lede">{session.error}</p><Button onClick={() => navigate(`/join/${session.type}`)}>Enter Call ID</Button><Button variant="secondary" onClick={() => navigate("/support")}>Customer Care</Button></main></div>;
 
   const supportOverlay = supportOpen ? (
     <SupportOverlay
@@ -470,6 +526,7 @@ export function CallSessionRoute() {
           session.status !== "connecting" ? (
             <>
               <SubscriptionCheckpoint gate={gate} />
+              {sourceCompletion.ending && <div className="call-source-ending" role="status"><Spinner label="Finalizing call" /><p>Finalizing call...</p></div>}
               {limit.warning && session.access && (
                 <p className="session-limit-notice" role="status">
                   <Icon name="clock" className="size-4" />
@@ -508,8 +565,12 @@ export function CallSessionRoute() {
             remoteStream={live.remoteStream}
             hasRemoteMedia={live.hasRemoteMedia}
             uploadedSource={session.remoteSource.kind === "uploaded-source"}
+            onSourceEnded={onRemoteEnded}
+            onSourcePlaying={onSourcePlaying}
+            onSourceError={onSourceError}
             uploadedUrl={uploadedMedia.url}
             uploadedError={uploadedMedia.error}
+            uploadedInterruptions={uploadedMedia.interruptions}
             onRetryUploaded={uploadedMedia.retry}
             seconds={liveSeconds}
             micEnabled={media.micEnabled}
@@ -587,6 +648,7 @@ export function CallSessionRoute() {
           return (
             <>
               <SubscriptionAccessScreen
+                completionNotice={session.endReason === "SOURCE_VIDEO_ENDED" ? "Your complimentary call has ended. Choose a plan to continue calling." : undefined}
                 gate={gate}
                 host={host}
                 onChooseChannel={chooseChannel}
@@ -613,7 +675,7 @@ export function CallSessionRoute() {
     }
   }
 
-  /* ------------------------------- the legacy simulated / demo path, intact */
+  /* -------- uploaded-source delivery and legacy development playback -------- */
 
   switch (session.status) {
     case "preparing":
@@ -639,16 +701,16 @@ export function CallSessionRoute() {
       );
 
     case "connecting":
-      return <LiveRingingScreen host={host} stage="connecting" onCancel={live.cancel} />;
+      return <LiveRingingScreen host={host} stage="connecting" onCancel={endCall} />;
 
     case "inviting":
-      return <LiveRingingScreen host={host} stage="requesting" onCancel={live.cancel} />;
+      return <LiveRingingScreen host={host} stage="requesting" onCancel={endCall} />;
 
     case "ringing":
-      return <LiveRingingScreen host={host} stage="ringing" onCancel={live.cancel} />;
+      return <LiveRingingScreen host={host} stage="ringing" onCancel={endCall} />;
 
     case "accepted":
-      return <LiveRingingScreen host={host} stage="accepted" onCancel={live.cancel} />;
+      return <LiveRingingScreen host={host} stage="accepted" onCancel={endCall} />;
 
     case "active":
       // Audio calls have their own screen: no camera is requested for them, so
@@ -660,6 +722,7 @@ export function CallSessionRoute() {
           session.status === "active" ? (
             <>
               <SubscriptionCheckpoint gate={gate} />
+              {sourceCompletion.ending && <div className="call-source-ending" role="status"><Spinner label="Finalizing call" /><p>Finalizing call...</p></div>}
               {/* A notice, not an interruption: the call carries on around it. */}
               {limit.warning && session.access && (
                 <p className="session-limit-notice" role="status">
@@ -676,7 +739,7 @@ export function CallSessionRoute() {
             media={media}
             remote={remote}
             callStatus={session.status}
-            startedAt={session.startedAt}
+            startedAt={callStartedAt}
             onEnd={endCall}
             accessOverlay={overlay}
             subscriptionChecking={gate.status === "checking"}
@@ -689,9 +752,10 @@ export function CallSessionRoute() {
             remote={remote}
             callType={session.type}
             callStatus={session.status}
-            startedAt={session.startedAt}
+            startedAt={callStartedAt}
             onEnd={endCall}
-            timedSourcePreview={hasUploadedFreeVideoPreview}
+            onSourcePlaying={onSourcePlaying}
+            onSourceError={onSourceError}
             uploadedMedia={liveMode && session.remoteSource.kind === "uploaded-source" ? uploadedMedia : undefined}
             accessOverlay={overlay}
             subscriptionChecking={gate.status === "checking"}
@@ -722,6 +786,7 @@ export function CallSessionRoute() {
         return (
           <>
             <SubscriptionAccessScreen
+                completionNotice={session.endReason === "SOURCE_VIDEO_ENDED" ? "Your complimentary call has ended. Choose a plan to continue calling." : undefined}
               gate={gate}
               host={host}
               onChooseChannel={chooseChannel}

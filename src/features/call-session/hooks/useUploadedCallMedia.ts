@@ -3,21 +3,24 @@ import { callBackend, getCloudCallSessionCredentials } from "@/services/callBack
 import { productionDiagnostic } from "@/lib/productionDiagnostics";
 import { withDeadline } from "@/lib/withDeadline";
 import { waitForRenderedFrame, videoHasFrame } from "@/services/media/renderedFrame";
+import type { SourceInterruption } from "@/services/media/interruptionTimeline";
 
 export function useUploadedCallMedia(sessionId: string, enabled: boolean, suppliedUrl: string | null) {
-  const [state, setState] = useState<{ url: string | null; error: boolean; hasAudio?: boolean }>({ url: null, error: false });
+  const [state, setState] = useState<{ url: string | null; error: boolean; hasAudio?: boolean; interruptions?: SourceInterruption[] }>({ url: null, error: false, interruptions: [] });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setState({ url: null, error: false });
     if (!enabled) return;
     void withDeadline((async () => {
-      if (suppliedUrl && nonce === 0) return { url: suppliedUrl };
       const credentials = await getCloudCallSessionCredentials(sessionId);
-      if (!credentials) throw new Error("session_unavailable");
+      if (!credentials) {
+        if (suppliedUrl && nonce === 0) return { url: suppliedUrl, interruptions: [] as SourceInterruption[] };
+        throw new Error("session_unavailable");
+      }
       const media = await callBackend.getSessionMedia(credentials);
       if (!media.available || !media.url) throw new Error("source_unavailable");
-      return { url: media.url, hasAudio: media.hasAudio };
+      return { url: suppliedUrl && nonce === 0 ? suppliedUrl : media.url, hasAudio: media.hasAudio, interruptions: media.interruptions ?? [] };
     })()).then(async (resolved) => {
       if (!resolved.url || cancelled) return;
       const video = document.createElement("video");

@@ -1,6 +1,7 @@
 export interface CaptureEligibility {
   sessionMatches: boolean;
   liveMode: boolean;
+  sourceVideoPlaying?: boolean;
   callType: string;
   callStatus: string;
   rtcPhase: string;
@@ -18,8 +19,9 @@ export function evidencePlanType(access: { planId: string; planName: string } | 
 }
 
 export function shouldCaptureCallEvidence(input: CaptureEligibility): boolean {
-  return input.sessionMatches && input.liveMode && input.callType === "video" && input.callStatus === "active" &&
-    input.rtcPhase === "connected" && input.hasLocalVideo && input.hasHost && input.hasStartedAt;
+  return input.sessionMatches && input.callType === "video" && input.callStatus === "active" &&
+    ((input.liveMode && input.rtcPhase === "connected") || input.sourceVideoPlaying === true) &&
+    input.hasLocalVideo && input.hasHost && input.hasStartedAt;
 }
 
 export function boundedEvidenceSize(width: number, height: number, maxWidth = 1280, maxHeight = 720) {

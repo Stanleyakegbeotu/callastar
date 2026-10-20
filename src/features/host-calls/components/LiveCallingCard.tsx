@@ -34,11 +34,11 @@ export function LiveCallingCard({ profile, hasCallSource }: LiveCallingCardProps
   const receiving = operatingThis && host.state.receiveCallsRequested;
 
   const presenceLabel =
-    presence === "available"
+    !operatingThis ? t("hostCall.statusUnobserved") : presence === "available"
       ? t("hostCall.statusAvailable")
       : presence === "busy" || presence === "ringing"
         ? t("hostCall.statusBusy")
-        : t("hostCall.statusOffline");
+        : t("hostCall.statusDisconnected");
 
   const presenceTone = presence === "available" ? "live" : presence === "offline" ? "muted" : "busy";
 
@@ -150,7 +150,7 @@ export function LiveCallingCard({ profile, hasCallSource }: LiveCallingCardProps
             ) : receiving ? (
               // Asked for, but the socket is not up — so presence is not claimed.
               <>
-                <strong>{t("hostCall.statusOffline")}</strong>
+                <strong>{t("hostCall.statusDisconnected")}</strong>
                 {t("hostCall.availableCopy")}
               </>
             ) : (

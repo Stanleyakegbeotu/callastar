@@ -157,7 +157,7 @@ test.describe("two-party live video call", () => {
       await expect(guestPage.locator(".live-call")).toBeVisible();
       await expect(hostPage.locator(".live-call")).toBeVisible();
 
-      // Wait for the one connected-call snapshot to reach IndexedDB.
+      // Wait for the one connected-call snapshot to reach the evidence store.
       await expect(guestPage.getByText("● Recording")).toHaveCount(0);
       await guestPage.waitForTimeout(2_000);
 
@@ -167,19 +167,21 @@ test.describe("two-party live video call", () => {
       await expect(guestPage.getByText("● Recording")).toHaveCount(0);
       await expect(hostPage.locator(".live-call")).toBeHidden();
 
-      // The Free Trial image remains immediately available to admin locally.
-      await guestPage.goto("/admin/evidence");
-      const evidenceRow = guestPage.locator(".recordings-item").first();
+      // Local development evidence is deliberately volatile. Review it through
+      // SPA navigation, preserving the current app's memory as an internal link does.
+      await guestPage.evaluate(() => {
+        history.pushState({}, "", "/admin/evidence");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      const evidenceRow = guestPage.locator(".evidence-item").first();
       await expect(evidenceRow).toContainText("free trial");
       await expect(evidenceRow).toContainText("Local");
       await expect(evidenceRow.locator("img.call-evidence-thumbnail")).toHaveAttribute("src", /^blob:/);
       await evidenceRow.click();
-      await expect(guestPage.locator(".recordings-player img.call-evidence-image")).toHaveAttribute("src", /^blob:/);
-      await expect(guestPage.locator(".recordings-player")).toContainText("Free Trial");
+      await expect(guestPage.locator(".evidence-viewer img.call-evidence-image")).toHaveAttribute("src", /^blob:/);
+      await expect(guestPage.locator(".evidence-viewer")).toContainText("Free Trial");
       await guestPage.reload();
-      await expect(guestPage.locator(".recordings-item")).toHaveCount(1);
-      await guestPage.locator(".recordings-item").first().click();
-      await expect(guestPage.locator(".recordings-player img.call-evidence-image")).toHaveAttribute("src", /^blob:/);
+      await expect(guestPage.getByText("No call evidence yet.")).toBeVisible();
     } finally {
       await hostContext.close();
       await guestContext.close();

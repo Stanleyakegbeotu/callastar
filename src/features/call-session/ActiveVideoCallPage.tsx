@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CallControls } from "@/components/call/CallControls";
 import { CallStatus } from "@/components/call/CallStatus";
 import { ParticipantTile } from "@/components/call/ParticipantTile";
-import { RemoteConnectionState } from "@/components/call/RemoteConnectionState";
 import { RemoteVideoSurface } from "@/components/call/RemoteVideoSurface";
 import { VideoSurface } from "@/components/call/VideoSurface";
 import { Icon } from "@/components/ui/Icon";
@@ -11,6 +10,7 @@ import { config } from "@/lib/config";
 import type { CallType } from "@/types/call";
 import type { HostPreview } from "@/types/host";
 import type { LocalMediaController } from "@/types/media";
+import { isInsideInterruption, type SourceInterruption } from "@/services/media/interruptionTimeline";
 
 import { useCallTimer } from "./hooks/useCallTimer";
 import { useDraggablePip } from "./hooks/useDraggablePip";
@@ -34,16 +34,16 @@ interface ActiveVideoCallPageProps {
   subscriptionChecking?: boolean;
   /** Told when the remote clip reaches its natural end. */
   onRemoteEnded?: () => void;
-  /** Free previews of an uploaded host source pause at regular intervals. */
-  timedSourcePreview?: boolean;
+  onSourcePlaying?: () => void;
+  onSourceError?: () => void;
   /** Private uploaded source playback for production calls. */
-  uploadedMedia?: { url: string | null; error: boolean; hasAudio?: boolean; retry: () => void };
+  uploadedMedia?: { url: string | null; error: boolean; hasAudio?: boolean; interruptions?: SourceInterruption[]; retry: () => void };
 }
 
 /**
  * The live call.
  *
- * The main surface is the caller's own camera, straight from the MediaStream.
+ * The main surface is the selected host source. The caller's camera stays in PiP.
  * The remote participant is the video uploaded for this profile in the admin
  * dashboard; before the call is active — and until the video can actually
  * play — the profile avatar holds the frame and the video fades in over it.
@@ -59,7 +59,8 @@ export function ActiveVideoCallPage({
   accessOverlay,
   subscriptionChecking = false,
   onRemoteEnded,
-  timedSourcePreview = false,
+  onSourcePlaying,
+  onSourceError,
   uploadedMedia,
 }: ActiveVideoCallPageProps) {
   // The self-view tile: which corner it is parked in, and its drag gestures.
@@ -70,6 +71,7 @@ export function ActiveVideoCallPage({
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [unmuteSignal, setUnmuteSignal] = useState(0);
   const [remotePlayable, setRemotePlayable] = useState(false);
+  const [interruptionActive, setInterruptionActive] = useState(false);
   /**
    * The remote clip has run out.
    *
@@ -79,13 +81,7 @@ export function ActiveVideoCallPage({
    */
   const [remoteEnded, setRemoteEnded] = useState(false);
   const remoteEndedRef = useRef(false);
-  const [sourceReconnecting, setSourceReconnecting] = useState(false);
-  const sourceReconnectingRef = useRef(false);
-  const sourceReconnectTimer = useRef<number | null>(null);
-  const nextReconnectAt = useRef(5);
-  const timedSourcePreviewRef = useRef(timedSourcePreview);
   const onRemoteEndedRef = useRef(onRemoteEnded);
-  timedSourcePreviewRef.current = timedSourcePreview;
   onRemoteEndedRef.current = onRemoteEnded;
   // Survives the remount that swapping causes, so the clip does not restart.
   const remotePosition = useRef(0);
@@ -95,68 +91,24 @@ export function ActiveVideoCallPage({
   const showLocalVideo = media.cameraEnabled && media.stream !== null;
   const effectiveRemoteUrl = uploadedMedia ? uploadedMedia.url : remote.url;
   const remoteReady = callStatus === "active" && (uploadedMedia ? effectiveRemoteUrl !== null : remote.status === "ready" && effectiveRemoteUrl !== null);
-  const showReconnecting =
-    (remoteEnded || sourceReconnecting) && callStatus === "active" && !subscriptionChecking;
 
   const handleAudioBlocked = useCallback((blocked: boolean) => setAudioBlocked(blocked), []);
   const handleRemoteReady = useCallback(() => setRemotePlayable(true), []);
-  const startSourceReconnect = useCallback((durationMs: number, final: boolean) => {
-    if (sourceReconnectTimer.current !== null) window.clearTimeout(sourceReconnectTimer.current);
-    sourceReconnectingRef.current = true;
-    setSourceReconnecting(true);
-    if (final) {
-      remoteEndedRef.current = true;
-      setRemoteEnded(true);
-    }
-    sourceReconnectTimer.current = window.setTimeout(() => {
-      sourceReconnectTimer.current = null;
-      sourceReconnectingRef.current = false;
-      setSourceReconnecting(false);
-      if (final) onRemoteEndedRef.current?.();
-    }, durationMs);
-  }, []);
-
-  const handleSourceProgress = useCallback(
-    (currentTime: number, duration: number) => {
-      if (!timedSourcePreviewRef.current || sourceReconnectingRef.current || remoteEndedRef.current) return;
-      // Let the natural end handler start the final, four-second interlude
-      // instead of showing a regular pause at the very end of the source.
-      if (Number.isFinite(duration) && duration - currentTime <= 0.2) return;
-      if (currentTime < nextReconnectAt.current) return;
-      nextReconnectAt.current += 5;
-      startSourceReconnect(5_000, false);
-    },
-    [startSourceReconnect],
-  );
-
+  const interruptionRanges = uploadedMedia?.interruptions ?? remote.interruptions ?? [];
+  const handlePlaybackProgress = useCallback((currentTime: number) => {
+    setInterruptionActive(isInsideInterruption(currentTime * 1000, interruptionRanges));
+  }, [interruptionRanges]);
   const handleRemoteEnded = useCallback(() => {
     // StrictMode and surface swaps can repeat `ended`; record only the edge.
     if (remoteEndedRef.current) return;
-    if (timedSourcePreviewRef.current) {
-      startSourceReconnect(4_000, true);
-      return;
-    }
     remoteEndedRef.current = true;
     setRemoteEnded(true);
     onRemoteEndedRef.current?.();
-  }, [startSourceReconnect]);
+  }, []);
 
   useEffect(() => {
     remoteEndedRef.current = false;
     setRemoteEnded(false);
-    sourceReconnectingRef.current = false;
-    setSourceReconnecting(false);
-    nextReconnectAt.current = 5;
-    if (sourceReconnectTimer.current !== null) {
-      window.clearTimeout(sourceReconnectTimer.current);
-      sourceReconnectTimer.current = null;
-    }
-    return () => {
-      if (sourceReconnectTimer.current !== null) {
-        window.clearTimeout(sourceReconnectTimer.current);
-        sourceReconnectTimer.current = null;
-      }
-    };
   }, [effectiveRemoteUrl]);
 
   const localVideo = (className: string) => <VideoSurface className={className} stream={media.stream} mirrored={config.mirrorLocalVideo} />;
@@ -167,14 +119,17 @@ export function ActiveVideoCallPage({
         url={effectiveRemoteUrl}
         className={`${className} remote-fade-in`}
         wantsAudio={speakerOn && (uploadedMedia?.hasAudio ?? remote.hasAudio)}
-        paused={sourceReconnecting || remoteEnded}
+        paused={remoteEnded}
         unmuteSignal={unmuteSignal}
         positionRef={remotePosition}
         onAudioBlocked={handleAudioBlocked}
         onReady={handleRemoteReady}
         ended={remoteEnded}
         onEnded={handleRemoteEnded}
-        onPlaybackProgress={handleSourceProgress}
+        onPlaying={onSourcePlaying}
+        onError={onSourceError}
+        onPlaybackProgress={handlePlaybackProgress}
+        interruptions={interruptionRanges}
       />
     ) : null;
 
@@ -197,7 +152,6 @@ export function ActiveVideoCallPage({
           {hostImage("main-video main-video-backdrop")}
           {remoteVideo("main-video main-video-overlay")}
           {uploadedSourceStatus}
-          {showReconnecting && <RemoteConnectionState variant="main" />}
       </>
     );
   };
@@ -207,15 +161,14 @@ export function ActiveVideoCallPage({
       <div className="call-main-slot">
         {mainSurface()}
         <div className="video-vignette" />
+        {interruptionActive && callStatus === "active" && (
+          <div className="source-interruption-overlay" role="status" aria-live="polite">
+            <span className="source-interruption-spinner" aria-hidden="true" />
+            <span>Resuming call…</span>
+          </div>
+        )}
       </div>
       <CallStatus displayName={host.displayName} seconds={seconds} status={callStatus} />
-
-      {callStatus === "active" && remoteReady && (
-        <p className="preview-chip">
-          <Icon name="info" className="size-4" />
-          Preview session
-        </p>
-      )}
 
       {audioBlocked && remotePlayable && (
         <button type="button" className="remote-audio-chip" onClick={() => setUnmuteSignal((value) => value + 1)}>

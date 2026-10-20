@@ -66,7 +66,7 @@ export type CallSessionAction =
   | { type: "CONNECTION_RESTORED" }
   /** Teardown has begun; nothing may drag the call back from here. */
   | { type: "START_ENDING" }
-  | { type: "END_CALL" }
+  | { type: "END_CALL"; reason?: "SOURCE_VIDEO_ENDED" | "USER_ENDED" | "HOST_ENDED" }
   | { type: "CALL_DECLINED" }
   | { type: "CALL_NO_ANSWER" }
   | { type: "FAIL_CALL"; reason: CallFailureReason; error: string }
@@ -201,6 +201,7 @@ export function callSessionReducer(state: CallSessionState, action: CallSessionA
         status: "preparing",
         startedAt: null,
         endedAt: null,
+        endReason: undefined,
         error: null,
         failureReason: null,
         remoteSource: EMPTY_REMOTE_SOURCE,
@@ -286,7 +287,7 @@ export function callSessionReducer(state: CallSessionState, action: CallSessionA
       return { ...state, status: "ending" };
 
     case "END_CALL":
-      return { ...state, status: "ended", endedAt: Date.now() };
+      return { ...state, status: "ended", endedAt: Date.now(), endReason: action.reason ?? "USER_ENDED" };
 
     case "CALL_DECLINED":
       return {

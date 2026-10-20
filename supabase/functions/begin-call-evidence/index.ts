@@ -20,7 +20,9 @@ Deno.serve(async (request) => {
     return json({ error: "call_session_unavailable" }, 404);
   }
   const { data: callIdRow } = await client.from("call_ids").select("id,host_id,host:hosts!inner(display_name,status)")
-    .eq("code_hash", await hash(normalizeCode(body.callId))).eq("status", "active").maybeSingle();
+    // Session proof above authorizes evidence for this original ticket even
+    // after completion rotates it. This does not authorize a new call.
+    .eq("code_hash", await hash(normalizeCode(body.callId))).maybeSingle();
   const host = callIdRow?.host as { display_name: string; status: string } | undefined;
   if (!callIdRow || callIdRow.id !== session.call_id_id || callIdRow.host_id !== session.host_id || host?.status !== "active") return json({ error: "call_not_found" }, 404);
   const { data: existing } = await client.from("call_evidence").select("id,evidence_status,image_path").eq("call_session_id", body.callSessionId).maybeSingle();

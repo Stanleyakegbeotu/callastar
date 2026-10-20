@@ -15,6 +15,16 @@ const HOST = {
   avatarUrl: "",
 };
 
+it("keeps natural source completion distinct from an actual network failure", () => {
+  const ended = callSessionReducer(connected(), { type: "END_CALL", reason: "SOURCE_VIDEO_ENDED" });
+  expect(ended.endReason).toBe("SOURCE_VIDEO_ENDED");
+  expect(ended.failureReason).toBeNull();
+  expect(callSessionReducer(ended, { type: "FAIL_CALL", reason: "rtc_connection_lost", error: "Connection interrupted" })).toBe(ended);
+  const failed = callSessionReducer(connected(), { type: "FAIL_CALL", reason: "rtc_connection_lost", error: "Connection interrupted" });
+  expect(failed.status).toBe("failed");
+  expect(failed.failureReason).toBe("rtc_connection_lost");
+});
+
 /** A guest that has reached the point of ringing a real host. */
 function ringing(): CallSessionState {
   return run([
@@ -180,6 +190,13 @@ describe("call session reducer", () => {
     expect(fresh.status).toBe("preparing");
     expect(fresh.startedAt).toBeNull();
     expect(fresh.remoteSource.kind).toBeNull();
+  });
+
+  it("clears the previous source completion reason for a new attempt", () => {
+    const ended = callSessionReducer(connected(), { type: "END_CALL", reason: "SOURCE_VIDEO_ENDED" });
+    const fresh = callSessionReducer(ended, { type: "START_SESSION", id: "cs_next" });
+    expect(fresh.endReason).toBeUndefined();
+    expect(fresh.endedAt).toBeNull();
   });
 
   it("tracks the host's chosen source separately from the call phase", () => {

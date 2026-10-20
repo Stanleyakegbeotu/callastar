@@ -125,6 +125,8 @@ export const pt: TranslationSchema = {
     realtimeStatus: "Chamadas em direto",
     statusAvailable: "Disponível",
     statusOffline: "Offline",
+    statusDisconnected: "Chamadas ao vivo desconectadas",
+    statusUnobserved: "Não conectado neste dispositivo",
     statusBusy: "Ocupado",
     videoSource: "Fonte de vídeo",
     videoCalling: "Chamadas de vídeo",
@@ -272,6 +274,10 @@ export const pt: TranslationSchema = {
     notRecognisedCopy: "Verifique o ID e tente novamente, ou utilize o Call ID que lhe foi partilhado.",
     planUnavailableCopy: "Esse plano já não está disponível. Contacte o apoio CallaStar.",
     tryAgain: "Tentar novamente",
+  },
+  trialCompletion: {
+    title: "Seu período de teste gratuito terminou.",
+    copy: "Para continuar conversando, entre em contato com seu anfitrião e peça um link de assinatura. Assine pelo link para continuar a conversa.",
   },
   sessionLimit: {
     remaining: "Falta 1 minuto na sua sessão {{plan}}.",
