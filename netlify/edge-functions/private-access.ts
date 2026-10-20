@@ -13,7 +13,7 @@ import {
 
 const ROBOTS_HEADER = "noindex, nofollow, noarchive, nosnippet, noimageindex"
 const ALLOWED_ORIGINS = new Set([
-  "https://callastar.netlify.app",
+  "https://callastarpro.netlify.app",
   "http://localhost:5173",
   "http://localhost:8443",
 ])

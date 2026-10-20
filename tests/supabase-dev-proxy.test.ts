@@ -9,7 +9,7 @@ const upstream = createHttpServer((request, response) => {
   let body = "";
   request.on("data", chunk => { body += chunk; });
   request.on("end", () => {
-    response.setHeader("access-control-allow-origin", "https://callastar.netlify.app");
+    response.setHeader("access-control-allow-origin", "https://callastarpro.netlify.app");
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ path: request.url, authorization: request.headers.authorization, origin: request.headers.origin ?? null, body }));
   });
@@ -44,7 +44,7 @@ it("uses the actual Vite proxy despite production-only upstream CORS, retaining 
   expect(await response.json()).toEqual({
     path: "/functions/v1/admin-call-ids", authorization: "Bearer test-admin-session", origin: null, body: '{"hostIds":[]}',
   });
-  expect(response.headers.get("access-control-allow-origin")).toBe("https://callastar.netlify.app");
+  expect(response.headers.get("access-control-allow-origin")).toBe("https://callastarpro.netlify.app");
   const authorization = await fetch(`http://127.0.0.1:${port}/__callastar_signaling/calls/authorize`, {
     method: "POST", headers: { "content-type": "application/json" }, body: '{"sessionToken":"scoped-proof"}',
   });

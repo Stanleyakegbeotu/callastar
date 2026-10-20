@@ -56,7 +56,7 @@ edge runtime instance. Instances do not share this in-memory counter, so it is
 not a globally authoritative rate limit. Use a persistent rate-limit service or
 provider firewall rule if a distributed hard limit is required.
 
-Verification accepts only the production origin `https://callastar.netlify.app`
+Verification accepts only the production origin `https://callastarpro.netlify.app`
 and the explicit local origins `http://localhost:5173` and
 `http://localhost:8443`. Wildcard CORS is not used.
 

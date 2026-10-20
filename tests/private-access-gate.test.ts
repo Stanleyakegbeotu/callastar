@@ -17,7 +17,7 @@ import {
 import { createPrivateAccessHandler } from "../netlify/edge-functions/private-access"
 
 const SIGNING_SECRET = "private-access-test-signing-secret-0123456789"
-const SITE_ORIGIN = "https://callastar.netlify.app"
+const SITE_ORIGIN = "https://callastarpro.netlify.app"
 
 function makeContext(ip = "192.0.2.10") {
   const next = vi.fn(
